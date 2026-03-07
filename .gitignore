@@ -28,5 +28,21 @@ venv/
 # Docker
 docker-compose.override.yml
 
+# Docker data volumes
+data/postgres/
+data/rabbitmq/
+data/collections/
+
+# Symfony
+app/var/
+app/vendor/
+app/.env.local
+app/.env.local.php
+app/.env.*.local
+
+# NextJS
+frontend/node_modules/
+frontend/.next/
+
 # Logs
 *.log

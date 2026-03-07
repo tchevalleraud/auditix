@@ -1,0 +1,64 @@
+framework:
+    messenger:
+        failure_transport: failed
+
+        transports:
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            scheduler:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: scheduler
+                    queues:
+                        scheduler: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            monitoring:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: monitoring
+                    queues:
+                        monitoring: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            collector:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: collector
+                    queues:
+                        collector: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            generator:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: generator
+                    queues:
+                        generator: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            failed: 'doctrine://default?queue_name=failed'
+
+        default_bus: messenger.bus.default
+
+        buses:
+            messenger.bus.default: []
+
+        routing:
+            Symfony\Component\Mailer\Messenger\SendEmailMessage: async
+            Symfony\Component\Notifier\Message\ChatMessage: async
+            Symfony\Component\Notifier\Message\SmsMessage: async
+
+            App\Message\PingNodeMessage: monitoring
+            App\Message\CollectNodeMessage: collector

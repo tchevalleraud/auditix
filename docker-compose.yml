@@ -1,0 +1,152 @@
+x-worker: &worker
+  build:
+    context: ./docker/php
+  entrypoint: ["worker-entrypoint.sh"]
+  volumes:
+    - ./app:/var/www
+    - ./data/collections:/var/www/var/collections
+  environment: &worker-env
+    APP_ENV: ${APP_ENV:-dev}
+    DATABASE_URL: postgresql://${POSTGRES_USER:-auditix}:${POSTGRES_PASSWORD:-auditix}@postgres:5432/${POSTGRES_DB:-auditix}?serverVersion=16&charset=utf8
+    MESSENGER_TRANSPORT_DSN: amqp://${RABBITMQ_USER:-auditix}:${RABBITMQ_PASSWORD:-auditix}@rabbitmq:5672/%2f/messages
+    MERCURE_URL: http://mercure/.well-known/mercure
+    MERCURE_PUBLIC_URL: /.well-known/mercure
+    MERCURE_JWT_SECRET: ${MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+  depends_on:
+    php:
+      condition: service_started
+  restart: unless-stopped
+
+services:
+  nginx:
+    image: nginx:1.26-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./app:/var/www
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - nginx-logs:/var/log/nginx
+    depends_on:
+      php:
+        condition: service_started
+      node:
+        condition: service_started
+    restart: unless-stopped
+
+  node:
+    build:
+      context: ./docker/node
+    volumes:
+      - ./frontend:/app
+    restart: unless-stopped
+
+  php:
+    build:
+      context: ./docker/php
+    volumes:
+      - ./app:/var/www
+      - ./data/collections:/var/www/var/collections
+      - nginx-logs:/var/log/nginx:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      <<: *worker-env
+      DOCKER_COMPOSE_PROJECT: auditix
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker-scheduler:
+    <<: *worker
+    command: php bin/console app:monitoring:scheduler
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-scheduler
+    deploy:
+      replicas: ${WORKER_SCHEDULER_REPLICAS:-1}
+
+  worker-monitoring:
+    <<: *worker
+    command: php bin/console messenger:consume monitoring --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-monitoring
+    deploy:
+      replicas: ${WORKER_MONITORING_REPLICAS:-1}
+
+  worker-collector:
+    <<: *worker
+    command: php bin/console messenger:consume collector --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-collector
+    deploy:
+      replicas: ${WORKER_COLLECTOR_REPLICAS:-2}
+
+  worker-generator:
+    <<: *worker
+    command: php bin/console messenger:consume generator --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-generator
+    deploy:
+      replicas: ${WORKER_GENERATOR_REPLICAS:-1}
+
+  worker-cleanup:
+    <<: *worker
+    command: php bin/console app:tasks:cleanup --loop
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-cleanup
+    deploy:
+      replicas: 1
+
+  mercure:
+    image: dunglas/mercure:latest
+    environment:
+      SERVER_NAME: ":80"
+      MERCURE_PUBLISHER_JWT_KEY: ${MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+      MERCURE_SUBSCRIBER_JWT_KEY: ${MERCURE_JWT_SECRET:-!ChangeThisMercureHubJWTSecretKey!}
+      MERCURE_EXTRA_DIRECTIVES: |
+        cors_origins *
+        anonymous
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-auditix}
+      POSTGRES_USER: ${POSTGRES_USER:-auditix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auditix}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-auditix}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-auditix}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-auditix}
+    volumes:
+      - ./data/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  nginx-logs:
