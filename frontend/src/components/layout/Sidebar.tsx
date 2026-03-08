@@ -19,6 +19,11 @@ import {
   FileSearch,
   Database,
   Tags,
+  Settings,
+  ClipboardCheck,
+  BookOpen,
+  FileBarChart,
+  Palette,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -58,6 +63,20 @@ const contextNav: NavCategory[] = [
       { key: "sidebar.collections", href: "/collections", icon: Database },
       { key: "sidebar.collectionCommands", href: "/collection-commands", icon: Terminal },
       { key: "sidebar.collectionRules", href: "/collection-rules", icon: FileSearch },
+    ],
+  },
+  {
+    label: "sidebar.catCompliance",
+    items: [
+      { key: "sidebar.compliancePolicies", href: "/compliance/policies", icon: BookOpen },
+      { key: "sidebar.complianceRules", href: "/compliance/rules", icon: ClipboardCheck },
+    ],
+  },
+  {
+    label: "sidebar.catReports",
+    items: [
+      { key: "sidebar.reports", href: "/reports/list", icon: FileBarChart },
+      { key: "sidebar.reportThemes", href: "/reports/themes", icon: Palette },
     ],
   },
 ];
@@ -153,8 +172,23 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-slate-200 dark:border-slate-800 px-4 py-4">
-        <p className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("common.version")}</p>
+      <div className="px-3 py-3">
+        {!adminMode && (
+          <Link
+            href="/settings"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              pathname.startsWith("/settings")
+                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            }`}
+          >
+            <Settings className="h-5 w-5 shrink-0" />
+            {t("sidebar.settings")}
+          </Link>
+        )}
+        <div className="border-t border-slate-200 dark:border-slate-800 mt-3 pt-3">
+          <p className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("common.version")}</p>
+        </div>
       </div>
     </aside>
   );

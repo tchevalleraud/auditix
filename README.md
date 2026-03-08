@@ -1,6 +1,6 @@
 # Auditix
 
-Auditix is a network audit and compliance platform. It manages a fleet of network devices, automatically collects their configurations via SSH, and analyzes their compliance against defined rules.
+Auditix is a network audit and compliance platform. It manages a fleet of network devices, automatically collects their configurations via SSH, and evaluates their compliance against security policies with real-time scoring.
 
 ## Architecture
 
@@ -48,12 +48,24 @@ The project is composed of three main layers, orchestrated by Docker Compose:
 - **Multiple tags** per collection with per-context uniqueness
 - **Asynchronous execution** via dedicated RabbitMQ workers (scalable)
 
+### Compliance
+- **Compliance policies**: group rules and target nodes for evaluation
+- **Compliance rules**: configurable checks with multiple data sources (inventory, collection, SSH)
+- **Regex-based evaluation**: match, count, or capture modes with named groups and value mapping
+- **Condition engine**: operators (equals, contains, matches, greater_than, etc.) with AND/OR logic blocks
+- **Severity levels**: info, low, medium, high, critical — each with a weighted score
+- **A-F grading**: automatic score calculation based on rule severity (A >= 90%, B >= 75%, C >= 60%, D >= 45%, E >= 30%, F < 30%)
+- **Folder-based rule organization**: tree structure within policies, plus extra standalone rules
+- **Asynchronous evaluation** via dedicated compliance workers (scalable)
+- **Per-node compliance tab**: view all policy results and launch evaluations from node detail
+- **Real-time progress** via Mercure SSE during evaluation
+
 ### Monitoring
 - **ICMP ping** with real-time status updates
 - **Visual indicators** in the nodes table (collection status, reachability)
 
 ### Real-time
-- **Mercure SSE** for instant updates (collection progress, ping results, admin tasks)
+- **Mercure SSE** for instant updates (collection progress, ping results, compliance evaluation, admin tasks)
 
 ### Administration
 - **User and context management**
@@ -147,11 +159,12 @@ auditix/
 │   ├── src/
 │   │   ├── Command/              # Console commands (scheduler, cleanup)
 │   │   ├── Controller/Api/       # REST API controllers
-│   │   ├── Entity/               # Doctrine entities (Node, Collection, etc.)
-│   │   ├── Message/              # Async messages
+│   │   ├── Entity/               # Doctrine entities (Node, Collection, Compliance*, etc.)
+│   │   ├── Message/              # Async messages (Collect, Ping, EvaluateCompliance)
 │   │   ├── MessageHandler/       # Worker handlers
 │   │   ├── Repository/           # Doctrine repositories
-│   │   └── Security/             # Authentication
+│   │   ├── Security/             # Authentication
+│   │   └── Service/              # Business services (ComplianceEvaluator)
 │   └── composer.json
 ├── frontend/                     # Next.js frontend
 │   ├── src/
@@ -165,6 +178,9 @@ auditix/
 │   │   │   │   ├── collections/  # Collection history
 │   │   │   │   ├── collection-commands/ # Collection commands
 │   │   │   │   ├── collection-rules/    # Collection rules
+│   │   │   │   ├── compliance/   # Compliance policies & rules
+│   │   │   │   ├── reports/      # Reports
+│   │   │   │   ├── settings/     # Settings
 │   │   │   │   └── admin/        # Administration
 │   │   │   └── login/            # Login page
 │   │   ├── components/           # React components
@@ -191,12 +207,14 @@ The application uses several asynchronous workers via RabbitMQ:
 | `worker-monitoring` | `monitoring` | 1 | ICMP ping execution |
 | `worker-collector` | `collector` | 2 | SSH configuration collection |
 | `worker-generator` | `generator` | 1 | Generation (reserved) |
+| `worker-compliance` | `compliance` | 2 | Compliance rule evaluation |
 | `worker-cleanup` | — | 1 | Task cleanup |
 
-Collector worker replicas can be increased in `.env` to parallelize collections:
+Worker replicas can be increased in `.env` to parallelize workloads:
 
 ```env
 WORKER_COLLECTOR_REPLICAS=4
+WORKER_COMPLIANCE_REPLICAS=4
 ```
 
 ## Collection workflow
@@ -211,6 +229,23 @@ WORKER_COLLECTOR_REPLICAS=4
    d. Store results as files (1 folder/rule, 1 file/command)
    e. Real-time progress updates via Mercure
 4. User views results in the interface
+```
+
+## Compliance workflow
+
+```
+1. Admin creates compliance rules with data sources, regex patterns, and conditions
+2. Admin creates a compliance policy, assigns rules (via folders or extra rules), and targets nodes
+3. User triggers evaluation (from policy page or node detail page)
+4. Backend dispatches one message per node to the compliance queue
+5. Compliance workers evaluate each rule against the node:
+   a. Fetch source data (inventory field, collection file, or live SSH command)
+   b. Apply regex extraction (match/count/capture)
+   c. Evaluate condition blocks (AND/OR logic with operators)
+   d. Record result: compliant, non_compliant (with severity), skipped, error, or not_applicable
+   e. Real-time progress updates via Mercure
+6. Final score calculated as A-F grade based on severity-weighted penalties
+7. Score displayed on node cards and in the compliance tab
 ```
 
 ## Tech stack

@@ -45,6 +45,7 @@ interface ExtractItem {
   keyManual: string | null;
   keyExtractId: number | null;
   keyGroup: number | null;
+  keyLabel: string | null;
   valueGroup: number | null;
   valueMap: { label: string; group: number }[] | null;
   categoryId: number | null;
@@ -834,9 +835,9 @@ export default function CollectionRuleEditPage() {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   return (
-    <div className="space-y-6">
+    <div className={`space-y-6 ${activeTab === "test" ? "flex flex-col h-[calc(100vh-7rem)]" : ""}`}>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
           <button onClick={() => router.push("/collection-rules")} className="flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
             <ArrowLeft className="h-4 w-4" />
@@ -855,7 +856,7 @@ export default function CollectionRuleEditPage() {
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-slate-200 dark:border-slate-800">
+      <div className="border-b border-slate-200 dark:border-slate-800 shrink-0">
         <nav className="flex gap-1">
           {tabs.map((tab) => (
             <button
@@ -1103,7 +1104,7 @@ export default function CollectionRuleEditPage() {
           {showExtractModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center">
               <div className="fixed inset-0 bg-black/50 dark:bg-black/70" onClick={() => { setShowExtractModal(false); setEditingExtract(null); resetExtractForm(); }} />
-              <div className="relative z-10 w-[50vw] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl">
+              <div className="relative z-10 w-[65vw] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
                   <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
                     {editingExtract ? t("collection_rules.editExtract") : t("collection_rules.addExtract")}
@@ -1360,9 +1361,9 @@ export default function CollectionRuleEditPage() {
 
       {/* Test tab */}
       {activeTab === "test" && (
-        <div className="space-y-4">
+        <div className="flex flex-col flex-1 min-h-0 gap-4">
           {/* Node selector + execute */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm shrink-0">
             <div className="p-6 space-y-4">
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.testSelectNode")}</label>
@@ -1470,9 +1471,9 @@ export default function CollectionRuleEditPage() {
 
           {/* Result */}
           {testResult && (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 min-h-0 flex flex-col">
               {/* Result header */}
-              <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 dark:border-slate-800 shrink-0">
                 <div className="flex items-center gap-2">
                   {testResult.success ? (
                     <CheckCircle2 className="h-4 w-4 text-emerald-500" />
@@ -1502,7 +1503,7 @@ export default function CollectionRuleEditPage() {
 
               {/* Sub-tabs file / inventory */}
               {testResult.success && testResult.output && (
-                <div className="flex border-b border-slate-100 dark:border-slate-800">
+                <div className="flex border-b border-slate-100 dark:border-slate-800 shrink-0">
                   <button
                     onClick={() => { setResultTab("file"); setSelectedMatchId(null); }}
                     className={`flex items-center gap-1.5 px-5 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
@@ -1530,7 +1531,7 @@ export default function CollectionRuleEditPage() {
 
               {/* File tab content */}
               {testResult.success && testResult.output && resultTab === "file" && (
-                <div className="h-[500px] flex">
+                <div className="flex-1 min-h-0 flex">
                   {/* Left: raw file with highlights */}
                   <div className="flex-1 min-w-0 overflow-auto">
                     <pre className="text-xs font-mono text-slate-800 dark:text-slate-200 p-4 whitespace-pre-wrap break-words">
@@ -1625,7 +1626,7 @@ export default function CollectionRuleEditPage() {
 
               {/* Inventory tab content */}
               {testResult.success && testResult.output && resultTab === "inventory" && (
-                <div className="h-[500px]">
+                <div className="flex-1 min-h-0">
                   {inventoryData && inventoryData.length > 0 ? (
                     <div className="flex h-full">
                       {/* Sidebar */}

@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2 } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -58,7 +58,29 @@ const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-
 const selectClass = inputClass;
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-type TabKey = "summary" | "settings" | "collections" | "inventory";
+type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance";
+
+interface ComplianceResultEntry {
+  ruleId: number;
+  ruleIdentifier: string | null;
+  ruleName: string;
+  status: string;
+  severity: string | null;
+  message: string | null;
+  evaluatedAt: string;
+}
+
+interface CompliancePolicyResult {
+  policy: { id: number; name: string };
+  results: ComplianceResultEntry[];
+  stats: Record<string, number>;
+  evaluatedAt: string | null;
+}
+
+interface ComplianceData {
+  score: string | null;
+  policies: CompliancePolicyResult[];
+}
 
 interface InventoryCatData {
   categoryName: string;
@@ -121,6 +143,12 @@ export default function NodeDetailPage() {
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [selectedInventoryCat, setSelectedInventoryCat] = useState(0);
 
+  // Compliance state
+  const [complianceData, setComplianceData] = useState<ComplianceData | null>(null);
+  const [complianceLoading, setComplianceLoading] = useState(false);
+  const [complianceEvaluating, setComplianceEvaluating] = useState(false);
+  const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
+
   const dateLocale = locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
 
   const loadData = useCallback(async () => {
@@ -175,12 +203,20 @@ export default function NodeDetailPage() {
     setInventoryLoading(false);
   }, [nodeId]);
 
+  const loadCompliance = useCallback(async () => {
+    setComplianceLoading(true);
+    const res = await fetch(`/api/nodes/${nodeId}/compliance`);
+    if (res.ok) setComplianceData(await res.json());
+    setComplianceLoading(false);
+  }, [nodeId]);
+
   // Always load collections on mount (for tab spinner), then reload when switching to tab
   useEffect(() => { loadCollections(); }, [loadCollections]);
   useEffect(() => {
     if (tab === "inventory") loadInventory();
     if (tab === "collections") loadCollections();
-  }, [tab, loadCollections]);
+    if (tab === "compliance") loadCompliance();
+  }, [tab, loadCollections, loadCompliance]);
 
   // Open collection from query params (e.g. from Collections page)
   const [initialCollectionOpened, setInitialCollectionOpened] = useState(false);
@@ -197,6 +233,7 @@ export default function NodeDetailPage() {
     const url = new URL("/.well-known/mercure", window.location.origin);
     url.searchParams.append("topic", `nodes/context/${current.id}`);
     url.searchParams.append("topic", `collections/node/${nodeId}`);
+    url.searchParams.append("topic", `compliance/node/${nodeId}`);
     const es = new EventSource(url);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -215,9 +252,14 @@ export default function NodeDetailPage() {
           return [col, ...prev];
         });
       }
+      if (data.event === "compliance.evaluated" && data.nodeId === Number(nodeId)) {
+        setNode((prev) => prev ? { ...prev, score: data.score } : prev);
+        setComplianceEvaluating(false);
+        loadCompliance();
+      }
     };
     return () => es.close();
-  }, [current, nodeId]);
+  }, [current, nodeId, loadCompliance]);
 
   const handleManufacturerChange = (value: string) => {
     setManufacturerId(value);
@@ -371,6 +413,7 @@ export default function NodeDetailPage() {
   const tabs: { key: TabKey; label: string }[] = [
     { key: "summary", label: t("nodes.tabSummary") },
     { key: "inventory", label: t("nodes.tabInventory") },
+    { key: "compliance", label: t("compliance.title") },
     { key: "collections", label: t("nodes.tabCollections") },
     { key: "settings", label: t("nodes.tabSettings") },
   ];
@@ -402,7 +445,11 @@ export default function NodeDetailPage() {
         </Link>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {node.score ? (
+            {complianceEvaluating ? (
+              <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+              </div>
+            ) : node.score ? (
               <div className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white ${scoreColors[node.score] ?? "bg-slate-300 dark:bg-slate-600"}`}>{node.score}</div>
             ) : (
               <div className="h-9 w-9 rounded-full bg-slate-200 dark:bg-slate-700" />
@@ -653,6 +700,114 @@ export default function NodeDetailPage() {
             <div className="text-center py-12">
               <Table2 className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
               <p className="text-sm text-slate-400 dark:text-slate-500">{t("nodes.inventoryEmpty")}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab === "compliance" && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {node.score && !complianceEvaluating ? (
+                <span className={`inline-flex items-center justify-center h-10 w-10 rounded-xl text-lg font-bold text-white ${
+                  node.score === "A" ? "bg-emerald-500" : node.score === "B" ? "bg-green-500" : node.score === "C" ? "bg-yellow-500" : node.score === "D" ? "bg-orange-500" : node.score === "E" ? "bg-red-500" : "bg-red-700"
+                }`}>{node.score}</span>
+              ) : complianceEvaluating ? (
+                <span className="inline-flex items-center justify-center h-10 w-10 rounded-xl bg-slate-200 dark:bg-slate-700">
+                  <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+                </span>
+              ) : null}
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance.score")}</h3>
+                {complianceData?.policies && complianceData.policies.length > 0 && (
+                  <p className="text-xs text-slate-400">{complianceData.policies.length} {t("compliance.policy").toLowerCase()}{complianceData.policies.length > 1 ? "s" : ""}</p>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={async () => {
+                setComplianceEvaluating(true);
+                setNode((prev) => prev ? { ...prev, score: null } : prev);
+                await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+              }}
+              disabled={complianceEvaluating}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+            >
+              {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
+            </button>
+          </div>
+
+          {complianceLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            </div>
+          ) : !complianceData || complianceData.policies.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center shadow-sm">
+              <ShieldCheck className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("compliance.noResults")}</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("compliance.noResultsDesc")}</p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {complianceData.policies.map((pr) => {
+                  const isExp = expandedCompliancePolicies.has(pr.policy.id);
+                  const total = Object.values(pr.stats).reduce((a, b) => a + b, 0);
+
+                  return (
+                    <div key={pr.policy.id}>
+                      <button
+                        onClick={() => setExpandedCompliancePolicies((prev) => { const next = new Set(prev); next.has(pr.policy.id) ? next.delete(pr.policy.id) : next.add(pr.policy.id); return next; })}
+                        className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left"
+                      >
+                        {isExp ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+                        <ShieldCheck className="h-5 w-5 text-blue-500 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{pr.policy.name}</span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs shrink-0">
+                          {pr.stats.compliant > 0 && <span className="text-emerald-600 dark:text-emerald-400">{pr.stats.compliant} {t("compliance.compliant").toLowerCase()}</span>}
+                          {pr.stats.non_compliant > 0 && <span className="text-red-600 dark:text-red-400">{pr.stats.non_compliant} {t("compliance.nonCompliant").toLowerCase()}</span>}
+                          {pr.stats.error > 0 && <span className="text-orange-500">{pr.stats.error} {t("compliance.error").toLowerCase()}</span>}
+                          <span className="text-slate-400">{total} {t("compliance_rules.rule")}{total !== 1 ? "s" : ""}</span>
+                        </div>
+                      </button>
+                      {isExp && (
+                        <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
+                          {pr.results.map((r) => {
+                            const statusIcon = r.status === "compliant" ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                              : r.status === "non_compliant" ? <Ban className="h-4 w-4 text-red-500" />
+                              : r.status === "error" ? <XCircle className="h-4 w-4 text-orange-500" />
+                              : <Minus className="h-4 w-4 text-slate-400" />;
+                            const sevCls = r.severity === "critical" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
+                              : r.severity === "high" ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+                              : r.severity === "medium" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400"
+                              : r.severity === "low" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
+                              : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400";
+                            return (
+                              <div key={r.ruleId} className="flex items-center gap-3 px-4 py-2.5 pl-14">
+                                {statusIcon}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {r.ruleIdentifier && <code className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 font-mono">{r.ruleIdentifier}</code>}
+                                    <span className="text-sm text-slate-900 dark:text-slate-100">{r.ruleName}</span>
+                                  </div>
+                                  {r.message && <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">{r.message}</p>}
+                                </div>
+                                {r.severity && r.status === "non_compliant" && (
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

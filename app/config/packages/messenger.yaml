@@ -48,6 +48,16 @@ framework:
                 retry_strategy:
                     max_retries: 3
                     multiplier: 2
+            compliance:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: compliance
+                    queues:
+                        compliance: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
             failed: 'doctrine://default?queue_name=failed'
 
         default_bus: messenger.bus.default
@@ -62,3 +72,4 @@ framework:
 
             App\Message\PingNodeMessage: monitoring
             App\Message\CollectNodeMessage: collector
+            App\Message\EvaluateComplianceMessage: compliance

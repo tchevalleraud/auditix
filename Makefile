@@ -23,7 +23,7 @@ logs-php: ## Show PHP logs
 	docker compose logs -f php
 
 logs-workers: ## Show all workers logs
-	docker compose logs -f worker-scheduler worker-monitoring worker-collector worker-generator
+	docker compose logs -f worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
 
 console: ## Open a shell in the PHP container
 	docker compose exec php bash

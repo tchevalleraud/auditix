@@ -106,15 +106,20 @@ export default function ContextProvider({ children }: { children: React.ReactNod
         const data: AppContext[] = await res.json();
         setContexts(data);
 
-        // If current context is no longer accessible, switch to first available
+        // Update current context with fresh data, or fallback if no longer accessible
         const cur = currentRef.current;
-        if (cur && !data.find((c) => c.id === cur.id)) {
-          const fallback = data[0] ?? null;
-          setCurrentState(fallback);
-          if (fallback) {
-            localStorage.setItem("currentContextId", String(fallback.id));
+        if (cur) {
+          const updated = data.find((c) => c.id === cur.id);
+          if (updated) {
+            setCurrentState(updated);
           } else {
-            localStorage.removeItem("currentContextId");
+            const fallback = data[0] ?? null;
+            setCurrentState(fallback);
+            if (fallback) {
+              localStorage.setItem("currentContextId", String(fallback.id));
+            } else {
+              localStorage.removeItem("currentContextId");
+            }
           }
         }
 

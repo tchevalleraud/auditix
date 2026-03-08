@@ -94,6 +94,15 @@ services:
     deploy:
       replicas: ${WORKER_GENERATOR_REPLICAS:-1}
 
+  worker-compliance:
+    <<: *worker
+    command: php bin/console messenger:consume compliance --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-compliance
+    deploy:
+      replicas: ${WORKER_COMPLIANCE_REPLICAS:-2}
+
   worker-cleanup:
     <<: *worker
     command: php bin/console app:tasks:cleanup --loop

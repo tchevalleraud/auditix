@@ -113,6 +113,10 @@ class ContextController extends AbstractController
     #[Route('/{id}/users', methods: ['GET'])]
     public function getUsers(Context $context): JsonResponse
     {
+        if (!$this->isGranted('ROLE_ADMIN') && !$context->getUsers()->contains($this->getUser())) {
+            return $this->json(['error' => 'Access denied'], Response::HTTP_FORBIDDEN);
+        }
+
         return $this->json(array_map(
             $this->serializeUser(...),
             $context->getUsers()->toArray(),
@@ -126,6 +130,10 @@ class ContextController extends AbstractController
         UserRepository $userRepository,
         EntityManagerInterface $em,
     ): JsonResponse {
+        if (!$this->isGranted('ROLE_ADMIN') && !$context->getUsers()->contains($this->getUser())) {
+            return $this->json(['error' => 'Access denied'], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
         $userIds = $data['userIds'] ?? [];
 

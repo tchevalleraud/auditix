@@ -509,6 +509,7 @@ class CollectionRuleController extends AbstractController
             'keyManual' => $e->getKeyManual(),
             'keyExtractId' => $e->getKeyExtract()?->getId(),
             'keyGroup' => $e->getKeyGroup(),
+            'keyLabel' => $e->getKeyLabel(),
             'valueGroup' => $e->getValueGroup(),
             'valueMap' => $e->getValueMap(),
             'categoryId' => $e->getCategory()?->getId(),
@@ -554,6 +555,7 @@ class CollectionRuleController extends AbstractController
         $extract->setKeyManual($data['keyManual'] ?? null);
 
         $extract->setKeyGroup(isset($data['keyGroup']) ? (int)$data['keyGroup'] : null);
+        $extract->setKeyLabel($data['keyLabel'] ?? null);
         $extract->setValueGroup(isset($data['valueGroup']) ? (int)$data['valueGroup'] : null);
         $extract->setValueMap($data['valueMap'] ?? null);
 
@@ -602,6 +604,9 @@ class CollectionRuleController extends AbstractController
         }
         if (array_key_exists('keyGroup', $data)) {
             $extract->setKeyGroup($data['keyGroup'] !== null ? (int)$data['keyGroup'] : null);
+        }
+        if (array_key_exists('keyLabel', $data)) {
+            $extract->setKeyLabel($data['keyLabel'] ?: null);
         }
         if (array_key_exists('valueGroup', $data)) {
             $extract->setValueGroup($data['valueGroup'] !== null ? (int)$data['valueGroup'] : null);

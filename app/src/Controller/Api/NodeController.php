@@ -3,6 +3,8 @@
 namespace App\Controller\Api;
 
 use App\Entity\Collection;
+use App\Entity\CompliancePolicy;
+use App\Entity\ComplianceResult;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
@@ -10,6 +12,7 @@ use App\Entity\Node;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\NodeTag;
 use App\Entity\Profile;
+use App\Message\EvaluateComplianceMessage;
 use App\Message\PingNodeMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -282,14 +285,88 @@ class NodeController extends AbstractController
             $categories[$catKey]['rows'][$key]['values']['col:' . $label] = $entry->getValue();
         }
 
-        // Convert to indexed arrays
+        // Convert to indexed arrays with natural sort on keys
         $result = [];
         foreach ($categories as $cat) {
             unset($cat['columnSet']);
-            $cat['rows'] = array_values($cat['rows']);
+            $rows = array_values($cat['rows']);
+            usort($rows, fn($a, $b) => strnatcmp($a['key'], $b['key']));
+            $cat['rows'] = $rows;
             $result[] = $cat;
         }
 
         return $this->json($result);
+    }
+
+    #[Route('/{id}/evaluate-compliance', methods: ['POST'])]
+    public function evaluateCompliance(Node $node, EntityManagerInterface $em): JsonResponse
+    {
+        $policies = $em->createQuery(
+            'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
+        )->setParameter('node', $node)->getResult();
+
+        $dispatched = 0;
+        foreach ($policies as $policy) {
+            $this->bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
+            $dispatched++;
+        }
+
+        // Set score to null to indicate evaluation in progress
+        $node->setScore(null);
+        $em->flush();
+
+        return $this->json(['dispatched' => $dispatched]);
+    }
+
+    #[Route('/{id}/compliance', methods: ['GET'])]
+    public function compliance(Node $node, EntityManagerInterface $em): JsonResponse
+    {
+        $results = $em->getRepository(ComplianceResult::class)->findBy(
+            ['node' => $node],
+        );
+
+        // Group by policy
+        $policyMap = [];
+        foreach ($results as $r) {
+            $p = $r->getPolicy();
+            $pId = $p->getId();
+            if (!isset($policyMap[$pId])) {
+                $policyMap[$pId] = [
+                    'policy' => [
+                        'id' => $p->getId(),
+                        'name' => $p->getName(),
+                    ],
+                    'results' => [],
+                    'stats' => ['compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0, 'skipped' => 0],
+                    'evaluatedAt' => null,
+                ];
+            }
+
+            $rule = $r->getRule();
+            $policyMap[$pId]['results'][] = [
+                'ruleId' => $rule->getId(),
+                'ruleIdentifier' => $rule->getIdentifier(),
+                'ruleName' => $rule->getName(),
+                'status' => $r->getStatus(),
+                'severity' => $r->getSeverity(),
+                'message' => $r->getMessage(),
+                'evaluatedAt' => $r->getEvaluatedAt()->format('c'),
+            ];
+
+            $status = $r->getStatus();
+            if (isset($policyMap[$pId]['stats'][$status])) {
+                $policyMap[$pId]['stats'][$status]++;
+            }
+
+            $evalAt = $r->getEvaluatedAt()->format('c');
+            if (!$policyMap[$pId]['evaluatedAt'] || $evalAt > $policyMap[$pId]['evaluatedAt']) {
+                $policyMap[$pId]['evaluatedAt'] = $evalAt;
+            }
+        }
+
+        return $this->json([
+            'score' => $node->getScore(),
+            'policies' => array_values($policyMap),
+        ]);
     }
 }

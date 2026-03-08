@@ -29,13 +29,14 @@ security:
         - { path: ^/api/login, roles: PUBLIC_ACCESS }
         - { path: ^/api/avatars, roles: PUBLIC_ACCESS }
         - { path: ^/api/logos, roles: PUBLIC_ACCESS }
-        - { path: ^/api/contexts/\d+/users, roles: ROLE_ADMIN }
+        - { path: ^/api/contexts/\d+/users, roles: ROLE_USER }
         - { path: ^/api/manufacturers, roles: ROLE_USER }
         - { path: ^/api/models, roles: ROLE_USER }
         - { path: ^/api/nodes, roles: ROLE_USER }
         - { path: ^/api/profiles, roles: ROLE_USER }
         - { path: ^/api/snmp-credentials, roles: ROLE_USER }
         - { path: ^/api/cli-credentials, roles: ROLE_USER }
+        - { path: ^/api/users$, methods: [GET], roles: ROLE_USER }
         - { path: ^/api/users, roles: ROLE_ADMIN }
         - { path: ^/api, roles: ROLE_USER }
 
