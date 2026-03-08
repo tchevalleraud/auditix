@@ -3,6 +3,8 @@
 namespace App\Entity;
 
 use App\Repository\NodeRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: NodeRepository::class)]
@@ -56,10 +58,18 @@ class Node
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $lastPingAt = null;
 
+    #[ORM\ManyToMany(targetEntity: NodeTag::class)]
+    #[ORM\JoinTable(name: 'node_node_tag')]
+    private Collection $tags;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct() { $this->createdAt = new \DateTimeImmutable(); }
+    public function __construct()
+    {
+        $this->tags = new ArrayCollection();
+        $this->createdAt = new \DateTimeImmutable();
+    }
 
     public function getId(): ?int { return $this->id; }
     public function getName(): ?string { return $this->name; }
@@ -88,5 +98,9 @@ class Node
     public function setIsReachable(?bool $v): static { $this->isReachable = $v; return $this; }
     public function getLastPingAt(): ?\DateTimeImmutable { return $this->lastPingAt; }
     public function setLastPingAt(?\DateTimeImmutable $v): static { $this->lastPingAt = $v; return $this; }
+    /** @return Collection<int, NodeTag> */
+    public function getTags(): Collection { return $this->tags; }
+    public function addTag(NodeTag $tag): static { if (!$this->tags->contains($tag)) { $this->tags->add($tag); } return $this; }
+    public function removeTag(NodeTag $tag): static { $this->tags->removeElement($tag); return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

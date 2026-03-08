@@ -29,6 +29,7 @@ class CollectionController extends AbstractController
             'node' => [
                 'id' => $node->getId(),
                 'name' => $node->getName(),
+                'hostname' => $node->getHostname(),
                 'ipAddress' => $node->getIpAddress(),
             ],
             'tags' => $c->getTags(),
@@ -43,6 +44,46 @@ class CollectionController extends AbstractController
         ];
     }
 
+    #[Route('', methods: ['GET'])]
+    public function index(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
+        if (!$context) {
+            return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $collections = $em->getRepository(Collection::class)->findBy(
+            ['context' => $context],
+            ['createdAt' => 'DESC']
+        );
+
+        return $this->json(array_map($this->serialize(...), $collections));
+    }
+
+    #[Route('/bulk-delete', methods: ['POST'])]
+    public function bulkDelete(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $ids = $data['ids'] ?? [];
+
+        if (empty($ids)) {
+            return $this->json(['error' => 'No IDs provided'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $collections = $em->getRepository(Collection::class)->findBy(['id' => $ids]);
+
+        foreach ($collections as $collection) {
+            $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
+            $this->deleteDirectory($storageDir);
+            $em->remove($collection);
+        }
+
+        $em->flush();
+
+        return $this->json(['deleted' => count($collections)]);
+    }
+
     #[Route('/collect', methods: ['POST'])]
     public function collect(Request $request, EntityManagerInterface $em): JsonResponse
     {
@@ -53,7 +94,7 @@ class CollectionController extends AbstractController
         if (empty($rawTags) && !empty($data['tag'])) {
             $rawTags = [trim($data['tag'])];
         }
-        $tags = array_values(array_unique(array_filter(array_map('trim', $rawTags))));
+        $tags = array_values(array_unique(array_filter(array_map('trim', array_merge(['latest'], $rawTags)))));
         $contextId = $request->query->getInt('context');
 
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
@@ -65,15 +106,15 @@ class CollectionController extends AbstractController
             return $this->json(['error' => 'No nodes specified'], Response::HTTP_BAD_REQUEST);
         }
 
-        // Release tags from other collections in same context
-        foreach ($tags as $tag) {
-            $this->releaseTag($em, $tag, $context);
-        }
-
         $nodes = $em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
         $collections = [];
 
         foreach ($nodes as $node) {
+            // Release tags from other collections of the same node
+            foreach ($tags as $tag) {
+                $this->releaseTag($em, $tag, $node);
+            }
+
             $collection = new Collection();
             $collection->setNode($node);
             $collection->setContext($context);
@@ -179,7 +220,7 @@ class CollectionController extends AbstractController
         if ($tag === '') {
             return $this->json(['error' => 'Tag is required'], Response::HTTP_BAD_REQUEST);
         }
-        $this->releaseTag($em, $tag, $collection->getContext(), $collection);
+        $this->releaseTag($em, $tag, $collection->getNode(), $collection);
         $collection->addTag($tag);
         $em->flush();
         return $this->json($this->serialize($collection));
@@ -205,9 +246,9 @@ class CollectionController extends AbstractController
         return $this->json(null, Response::HTTP_NO_CONTENT);
     }
 
-    private function releaseTag(EntityManagerInterface $em, string $tag, Context $context, ?Collection $except = null): void
+    private function releaseTag(EntityManagerInterface $em, string $tag, Node $node, ?Collection $except = null): void
     {
-        $all = $em->getRepository(Collection::class)->findBy(['context' => $context]);
+        $all = $em->getRepository(Collection::class)->findBy(['node' => $node]);
         foreach ($all as $col) {
             if ($except && $col->getId() === $except->getId()) continue;
             if (in_array($tag, $col->getTags(), true)) {

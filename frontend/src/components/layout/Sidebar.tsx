@@ -17,6 +17,8 @@ import {
   ListTodo,
   Terminal,
   FileSearch,
+  Database,
+  Tags,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -47,6 +49,13 @@ const contextNav: NavCategory[] = [
       { key: "sidebar.models", href: "/models", icon: Cpu },
       { key: "sidebar.nodes", href: "/nodes", icon: Server },
       { key: "sidebar.profiles", href: "/profiles", icon: KeyRound },
+      { key: "sidebar.tags", href: "/tags", icon: Tags },
+    ],
+  },
+  {
+    label: "sidebar.catCollections",
+    items: [
+      { key: "sidebar.collections", href: "/collections", icon: Database },
       { key: "sidebar.collectionCommands", href: "/collection-commands", icon: Terminal },
       { key: "sidebar.collectionRules", href: "/collection-rules", icon: FileSearch },
     ],

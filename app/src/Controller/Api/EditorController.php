@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\CollectionFolder;
+use App\Entity\CollectionRuleFolder;
 use App\Entity\Context;
 use App\Entity\Editor;
 use Doctrine\ORM\EntityManagerInterface;
@@ -85,6 +86,14 @@ class EditorController extends AbstractController
         $folder->setContext($context);
         $em->persist($folder);
 
+        // Auto-create collection rule folder for this manufacturer
+        $ruleFolder = new CollectionRuleFolder();
+        $ruleFolder->setName($name);
+        $ruleFolder->setType(CollectionRuleFolder::TYPE_MANUFACTURER);
+        $ruleFolder->setManufacturer($editor);
+        $ruleFolder->setContext($context);
+        $em->persist($ruleFolder);
+
         $em->flush();
 
         return $this->json($this->serialize($editor), Response::HTTP_CREATED);
@@ -128,6 +137,15 @@ class EditorController extends AbstractController
         ]);
         if ($folder) {
             $folder->setName($name);
+        }
+
+        // Sync collection rule folder name
+        $ruleFolder = $em->getRepository(CollectionRuleFolder::class)->findOneBy([
+            'manufacturer' => $editor,
+            'type' => CollectionRuleFolder::TYPE_MANUFACTURER,
+        ]);
+        if ($ruleFolder) {
+            $ruleFolder->setName($name);
         }
 
         $em->flush();

@@ -162,7 +162,7 @@ export default function ProfileDetailPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
             <button type="submit" disabled={saving || !name.trim()} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {t("common.save")}

@@ -19,6 +19,7 @@ export default function NewModelPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [connectionScript, setConnectionScript] = useState("");
+  const [sendCtrlChar, setSendCtrlChar] = useState("");
   const [manufacturerId, setManufacturerId] = useState<number | "">("");
   const [manufacturers, setManufacturers] = useState<ManufacturerOption[]>([]);
   const [loading, setLoading] = useState(false);
@@ -43,6 +44,7 @@ export default function NewModelPage() {
           name,
           description: description || null,
           connectionScript: connectionScript || null,
+          sendCtrlChar: sendCtrlChar || null,
           manufacturerId,
         }),
       });
@@ -117,6 +119,26 @@ export default function NewModelPage() {
             </div>
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                {t("models.sendCtrlCharLabel")}
+              </label>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {t("models.sendCtrlCharHelp")}
+              </p>
+              <select
+                value={sendCtrlChar}
+                onChange={(e) => setSendCtrlChar(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+              >
+                <option value="">{t("models.sendCtrlCharNone")}</option>
+                {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => (
+                  <option key={letter} value={letter}>
+                    Ctrl+{letter}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                 {t("models.connectionScriptLabel")}
               </label>
               <p className="text-xs text-slate-400 dark:text-slate-500">
@@ -132,7 +154,7 @@ export default function NewModelPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
             <button
               type="submit"
               disabled={loading || !name.trim() || !manufacturerId}

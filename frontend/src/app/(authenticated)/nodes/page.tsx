@@ -17,6 +17,12 @@ import {
   XCircle,
 } from "lucide-react";
 
+interface NodeTag {
+  id: number;
+  name: string;
+  color: string;
+}
+
 interface NodeItem {
   id: number;
   name: string | null;
@@ -32,6 +38,7 @@ interface NodeItem {
   manufacturer: { id: number; name: string; logo: string | null } | null;
   model: { id: number; name: string } | null;
   profile: { id: number; name: string } | null;
+  tags: NodeTag[];
   createdAt: string;
 }
 
@@ -44,7 +51,8 @@ export default function NodesPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [pinging, setPinging] = useState(false);
   const [collectModal, setCollectModal] = useState(false);
-  const [collectTag, setCollectTag] = useState("");
+  const [collectTags, setCollectTags] = useState<string[]>([]);
+  const [collectTagInput, setCollectTagInput] = useState("");
   const [collecting, setCollecting] = useState(false);
 
   // Collection status indicators per node: pending | running | completed | failed
@@ -64,9 +72,28 @@ export default function NodesPage() {
     setFetchLoading(false);
   }, [current]);
 
+  // Load active collections (pending/running) on mount to restore status indicators
+  const loadActiveCollections = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/collections?context=${current.id}`);
+    if (!res.ok) return;
+    const cols: { node: { id: number }; status: string }[] = await res.json();
+    const active: Record<number, string> = {};
+    for (const col of cols) {
+      if (col.status === "pending" || col.status === "running") {
+        // Keep the most "active" status per node (running > pending)
+        if (!active[col.node.id] || col.status === "running") {
+          active[col.node.id] = col.status;
+        }
+      }
+    }
+    setCollectStatus((prev) => ({ ...active, ...prev }));
+  }, [current]);
+
   useEffect(() => {
     loadNodes();
-  }, [loadNodes]);
+    loadActiveCollections();
+  }, [loadNodes, loadActiveCollections]);
 
   // Mercure SSE for real-time ping + collection updates
   useEffect(() => {
@@ -180,10 +207,11 @@ export default function NodesPage() {
       await fetch(`/api/collections/collect?context=${current.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeIds, tag: collectTag.trim() || null }),
+        body: JSON.stringify({ nodeIds, tags: collectTags }),
       });
       setCollectModal(false);
-      setCollectTag("");
+      setCollectTags([]);
+      setCollectTagInput("");
       setSelected(new Set());
     } finally {
       setCollecting(false);
@@ -221,7 +249,7 @@ export default function NodesPage() {
           {selected.size > 0 && (
             <>
               <button
-                onClick={() => { setCollectTag(""); setCollectModal(true); }}
+                onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
                 <Play className="h-4 w-4" />
@@ -284,9 +312,6 @@ export default function NodesPage() {
                   {t("nodes.colManufacturer")}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colProfile")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   {t("nodes.colDiscoveredModel")}
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -303,7 +328,7 @@ export default function NodesPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-5 py-12 text-center">
+                  <td colSpan={9} className="px-5 py-12 text-center">
                     <Server className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
                     <p className="text-sm text-slate-400 dark:text-slate-500">
                       {search ? t("nodes.noResult") : t("nodes.noNodes")}
@@ -313,7 +338,7 @@ export default function NodesPage() {
               ) : (
                 filtered.map((node) => (
                   <tr key={node.id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${selected.has(node.id) ? "bg-slate-50 dark:bg-slate-800/30" : ""}`}>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-2 text-center">
                       <input
                         type="checkbox"
                         checked={selected.has(node.id)}
@@ -323,7 +348,7 @@ export default function NodesPage() {
                     </td>
 
                     {/* Score */}
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-2 text-center">
                       <div className="flex items-center justify-center">
                         {node.score ? (
                           <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${scoreColors[node.score] ?? "bg-slate-300 dark:bg-slate-600"}`}>
@@ -336,7 +361,7 @@ export default function NodesPage() {
                     </td>
 
                     {/* Hostname */}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <Link href={`/nodes/${node.id}`} className="group flex items-center gap-2">
                         {collectStatus[node.id] && (
                           collectStatus[node.id] === "completed" ? (
@@ -349,14 +374,34 @@ export default function NodesPage() {
                             <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
                           )
                         )}
-                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
-                          {node.hostname || node.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
-                        </span>
+                        <div>
+                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
+                            {node.hostname || node.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
+                          </span>
+                          {node.tags && node.tags.length > 0 && (
+                            <div className="flex items-center gap-1 mt-0.5">
+                              {node.tags.slice(0, 3).map((tag) => (
+                                <span
+                                  key={tag.id}
+                                  className="inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium text-white leading-4"
+                                  style={{ backgroundColor: tag.color }}
+                                >
+                                  {tag.name}
+                                </span>
+                              ))}
+                              {node.tags.length > 3 && (
+                                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                                  +{node.tags.length - 3}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </Link>
                     </td>
 
-                    {/* IP Address + model */}
-                    <td className="px-4 py-3">
+                    {/* IP Address + profile */}
+                    <td className="px-4 py-2">
                       <Link href={`/nodes/${node.id}`} className="group">
                         <span className="flex items-center gap-2">
                           <span className="text-sm text-slate-700 dark:text-slate-300 font-mono group-hover:underline">
@@ -366,49 +411,49 @@ export default function NodesPage() {
                             <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
                           )}
                         </span>
-                        {node.model && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">{node.model.name}</div>
+                        {node.profile && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400">{node.profile.name}</div>
                         )}
                       </Link>
                     </td>
 
-                    {/* Manufacturer */}
-                    <td className="px-4 py-3">
+                    {/* Manufacturer + Model */}
+                    <td className="px-4 py-2">
                       {node.manufacturer ? (
                         <div className="flex items-center gap-2">
                           {node.manufacturer.logo && (
-                            <img src={`/api/logos/${node.manufacturer.logo}`} alt="" className="h-5 w-5 object-contain" />
+                            <img src={`/api/logos/${node.manufacturer.logo}`} alt="" className="h-5 w-5 object-contain shrink-0" />
                           )}
-                          <span className="text-sm text-slate-700 dark:text-slate-300">{node.manufacturer.name}</span>
+                          <div>
+                            <div className="text-sm text-slate-700 dark:text-slate-300">{node.manufacturer.name}</div>
+                            {node.model && (
+                              <div className="text-xs text-slate-500 dark:text-slate-400">{node.model.name}</div>
+                            )}
+                          </div>
                         </div>
+                      ) : node.model ? (
+                        <div className="text-sm text-slate-700 dark:text-slate-300">{node.model.name}</div>
                       ) : (
                         <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>
                       )}
                     </td>
 
-                    {/* Profile */}
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-slate-700 dark:text-slate-300">
-                        {node.profile?.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
-                      </span>
-                    </td>
-
                     {/* Discovered Model */}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <span className="text-sm text-slate-700 dark:text-slate-300">
                         {node.discoveredModel || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
                       </span>
                     </td>
 
                     {/* Version */}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <span className="text-sm text-slate-700 dark:text-slate-300">
                         {node.discoveredVersion || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
                       </span>
                     </td>
 
                     {/* Policy */}
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-2 text-center">
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
                         node.policy === "enforce"
                           ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400"
@@ -419,7 +464,7 @@ export default function NodesPage() {
                     </td>
 
                     {/* Compliance bar */}
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                           <div className="h-full rounded-full bg-slate-200 dark:bg-slate-700" style={{ width: "100%" }} />
@@ -438,7 +483,7 @@ export default function NodesPage() {
       {/* Collect modal */}
       {collectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("nodes.collectTitle")}</h3>
               <button onClick={() => setCollectModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -456,13 +501,34 @@ export default function NodesPage() {
                     {t("nodes.collectTagLabel")}
                   </span>
                 </label>
-                <input
-                  type="text"
-                  value={collectTag}
-                  onChange={(e) => setCollectTag(e.target.value)}
-                  placeholder={t("nodes.collectTagPlaceholder")}
-                  className={inputClass}
-                />
+                <div className="flex flex-wrap items-center gap-1.5 min-h-[42px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2">
+                  {collectTags.map((tag) => (
+                    <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                      {tag}
+                      <button type="button" onClick={() => setCollectTags(collectTags.filter((t) => t !== tag))} className="hover:text-red-500 transition-colors">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={collectTagInput}
+                    onChange={(e) => setCollectTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === ",") && collectTagInput.trim()) {
+                        e.preventDefault();
+                        const tag = collectTagInput.trim().replace(/,/g, "");
+                        if (tag && !collectTags.includes(tag)) setCollectTags([...collectTags, tag]);
+                        setCollectTagInput("");
+                      }
+                      if (e.key === "Backspace" && !collectTagInput && collectTags.length > 0) {
+                        setCollectTags(collectTags.slice(0, -1));
+                      }
+                    }}
+                    placeholder={collectTags.length === 0 ? t("nodes.collectTagPlaceholder") : ""}
+                    className="flex-1 min-w-[120px] bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
+                  />
+                </div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">{t("nodes.collectTagHelp")}</p>
               </div>
             </div>

@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info } from "lucide-react";
 
 interface ManufacturerOption {
   id: number;
@@ -18,6 +18,7 @@ interface ModelDetail {
   name: string;
   description: string | null;
   connectionScript: string | null;
+  sendCtrlChar: string | null;
   manufacturer: ManufacturerOption;
   createdAt: string;
 }
@@ -41,7 +42,24 @@ interface AvailableCmd {
   folderName: string | null;
 }
 
-type Tab = "edit" | "script" | "collection";
+interface CollectionRuleItem {
+  id: number;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  inherited: boolean;
+  association: "auto" | "manual";
+}
+
+interface AvailableRule {
+  id: number;
+  name: string;
+  description: string | null;
+  enabled: boolean;
+  folderName: string | null;
+}
+
+type Tab = "edit" | "script" | "collection" | "rules";
 
 export default function ModelDetailPage() {
   const router = useRouter();
@@ -67,6 +85,7 @@ export default function ModelDetailPage() {
 
   // Script form state
   const [connectionScript, setConnectionScript] = useState("");
+  const [sendCtrlChar, setSendCtrlChar] = useState("");
   const [savingScript, setSavingScript] = useState(false);
   const [savedScript, setSavedScript] = useState(false);
 
@@ -81,6 +100,16 @@ export default function ModelDetailPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [associating, setAssociating] = useState(false);
+
+  // Collection rules state
+  const [collectionRules, setCollectionRules] = useState<CollectionRuleItem[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [showAssociateRuleModal, setShowAssociateRuleModal] = useState(false);
+  const [availableRules, setAvailableRules] = useState<AvailableRule[]>([]);
+  const [availableRulesLoading, setAvailableRulesLoading] = useState(false);
+  const [ruleSearchQuery, setRuleSearchQuery] = useState("");
+  const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
+  const [associatingRules, setAssociatingRules] = useState(false);
 
   const dateLocale =
     locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
@@ -102,6 +131,7 @@ export default function ModelDetailPage() {
       setDescription(found.description ?? "");
       setManufacturerId(found.manufacturer.id);
       setConnectionScript(found.connectionScript ?? "");
+      setSendCtrlChar(found.sendCtrlChar ?? "");
     }
     setFetchLoading(false);
   }, [modelId, current]);
@@ -118,9 +148,18 @@ export default function ModelDetailPage() {
     setCollectionLoading(false);
   }, [modelId]);
 
+  const loadCollectionRules = useCallback(async () => {
+    if (!modelId) return;
+    setRulesLoading(true);
+    const res = await fetch(`/api/collection-rules/by-model/${modelId}`);
+    if (res.ok) setCollectionRules(await res.json());
+    setRulesLoading(false);
+  }, [modelId]);
+
   useEffect(() => {
     if (activeTab === "collection") loadCollectionCmds();
-  }, [activeTab, loadCollectionCmds]);
+    if (activeTab === "rules") loadCollectionRules();
+  }, [activeTab, loadCollectionCmds, loadCollectionRules]);
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,6 +203,7 @@ export default function ModelDetailPage() {
           name: model.name,
           description: model.description,
           connectionScript: connectionScript || null,
+          sendCtrlChar: sendCtrlChar || null,
           manufacturerId: model.manufacturer.id,
         }),
       });
@@ -220,6 +260,49 @@ export default function ModelDetailPage() {
     return c.name.toLowerCase().includes(q) || (c.description?.toLowerCase().includes(q)) || (c.folderName?.toLowerCase().includes(q));
   });
 
+  // Rule association functions
+  const openAssociateRuleModal = async () => {
+    setShowAssociateRuleModal(true);
+    setRuleSearchQuery("");
+    setSelectedRuleIds([]);
+    setAvailableRulesLoading(true);
+    const res = await fetch(`/api/collection-rules/available-for-model/${modelId}`);
+    if (res.ok) setAvailableRules(await res.json());
+    setAvailableRulesLoading(false);
+  };
+
+  const handleAssociateRules = async () => {
+    if (selectedRuleIds.length === 0) return;
+    setAssociatingRules(true);
+    await fetch(`/api/collection-rules/by-model/${modelId}/associate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ruleIds: selectedRuleIds }),
+    });
+    setAssociatingRules(false);
+    setShowAssociateRuleModal(false);
+    loadCollectionRules();
+  };
+
+  const handleDissociateRule = async (ruleId: number) => {
+    await fetch(`/api/collection-rules/by-model/${modelId}/dissociate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ruleId }),
+    });
+    loadCollectionRules();
+  };
+
+  const toggleSelectedRule = (id: number) => {
+    setSelectedRuleIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+  };
+
+  const filteredAvailableRules = availableRules.filter((r) => {
+    if (!ruleSearchQuery.trim()) return true;
+    const q = ruleSearchQuery.toLowerCase();
+    return r.name.toLowerCase().includes(q) || (r.description?.toLowerCase().includes(q)) || (r.folderName?.toLowerCase().includes(q));
+  });
+
   if (fetchLoading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -236,10 +319,13 @@ export default function ModelDetailPage() {
     { key: "edit", label: t("models.tabEdit"), icon: <Pencil className="h-4 w-4" /> },
     { key: "script", label: t("models.tabScript"), icon: <TerminalSquare className="h-4 w-4" /> },
     { key: "collection", label: t("models.tabCollection"), icon: <Terminal className="h-4 w-4" /> },
+    { key: "rules", label: t("models.tabRules"), icon: <FileSearch className="h-4 w-4" /> },
   ];
 
   const autoCmds = collectionCmds.filter((c) => c.association === "auto");
   const manualCmds = collectionCmds.filter((c) => c.association === "manual");
+  const autoRules = collectionRules.filter((r) => r.association === "auto");
+  const manualRules = collectionRules.filter((r) => r.association === "manual");
 
   return (
     <div className="space-y-6">
@@ -331,7 +417,7 @@ export default function ModelDetailPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
                 disabled={saving || !name.trim() || !manufacturerId}
@@ -351,6 +437,28 @@ export default function ModelDetailPage() {
       {activeTab === "script" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
           <form onSubmit={handleSaveScript} className="p-6 space-y-5">
+            {/* Send control character option */}
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                {t("models.sendCtrlCharLabel")}
+              </label>
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                {t("models.sendCtrlCharHelp")}
+              </p>
+              <select
+                value={sendCtrlChar}
+                onChange={(e) => setSendCtrlChar(e.target.value)}
+                className={inputCls}
+              >
+                <option value="">{t("models.sendCtrlCharNone")}</option>
+                {"ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map((letter) => (
+                  <option key={letter} value={letter}>
+                    Ctrl+{letter}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                 {t("models.connectionScriptLabel")}
@@ -367,7 +475,7 @@ export default function ModelDetailPage() {
               />
             </div>
 
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
                 disabled={savingScript}
@@ -441,7 +549,7 @@ export default function ModelDetailPage() {
             )}
           </div>
 
-          {/* Associate modal */}
+          {/* Associate command modal */}
           {showAssociateModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
               <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[80vh] flex flex-col">
@@ -545,6 +653,213 @@ export default function ModelDetailPage() {
             </div>
           )}
         </div>
+      )}
+
+      {activeTab === "rules" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t("models.rulesSubtitle")}</p>
+            <button
+              onClick={openAssociateRuleModal}
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              {t("models.associateRule")}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            {rulesLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+              </div>
+            ) : collectionRules.length === 0 ? (
+              <div className="p-12 text-center">
+                <FileSearch className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="text-sm text-slate-400 dark:text-slate-500">{t("models.noCollectionRules")}</p>
+              </div>
+            ) : (
+              <div>
+                {autoRules.length > 0 && (
+                  <div>
+                    <div className="px-6 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{t("models.autoAssociated")}</span>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {autoRules.map((rule) => (
+                        <RuleRow key={rule.id} rule={rule} t={t} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {manualRules.length > 0 && (
+                  <div>
+                    <div className="px-6 py-2.5 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 border-t">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{t("models.manualAssociated")}</span>
+                    </div>
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {manualRules.map((rule) => (
+                        <RuleRow key={rule.id} rule={rule} t={t} onDissociate={() => handleDissociateRule(rule.id)} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Associate rule modal */}
+          {showAssociateRuleModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[80vh] flex flex-col">
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("models.associateRule")}</h3>
+                  <button onClick={() => setShowAssociateRuleModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    <X className="h-5 w-5 text-slate-400" />
+                  </button>
+                </div>
+
+                <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      value={ruleSearchQuery}
+                      onChange={(e) => setRuleSearchQuery(e.target.value)}
+                      placeholder={t("models.searchRules")}
+                      className={`${inputCls} pl-9`}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto">
+                  {availableRulesLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+                    </div>
+                  ) : filteredAvailableRules.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <p className="text-sm text-slate-400 dark:text-slate-500">{t("models.noAvailableRules")}</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filteredAvailableRules.map((rule) => {
+                        const isSelected = selectedRuleIds.includes(rule.id);
+                        return (
+                          <button
+                            key={rule.id}
+                            onClick={() => toggleSelectedRule(rule.id)}
+                            className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-colors ${
+                              isSelected ? "bg-slate-100 dark:bg-slate-800" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <div className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                              isSelected
+                                ? "bg-slate-900 dark:bg-white border-slate-900 dark:border-white"
+                                : "border-slate-300 dark:border-slate-600"
+                            }`}>
+                              {isSelected && (
+                                <svg className="h-3 w-3 text-white dark:text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{rule.name}</span>
+                                {rule.folderName && (
+                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{rule.folderName}</span>
+                                )}
+                                {!rule.enabled && (
+                                  <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{t("collection_rules.disabled")}</span>
+                                )}
+                              </div>
+                              {rule.description && (
+                                <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{rule.description}</p>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-sm text-slate-500 dark:text-slate-400">
+                    {selectedRuleIds.length > 0 ? t("models.selectedCount").replace("{count}", String(selectedRuleIds.length)) : ""}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowAssociateRuleModal(false)}
+                      className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                    <button
+                      onClick={handleAssociateRules}
+                      disabled={selectedRuleIds.length === 0 || associatingRules}
+                      className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                    >
+                      {associatingRules && <Loader2 className="h-4 w-4 animate-spin" />}
+                      <LinkIcon className="h-4 w-4" />
+                      {t("models.associate")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RuleRow({ rule, t, onDissociate }: { rule: CollectionRuleItem; t: (k: string) => string; onDissociate?: () => void }) {
+  return (
+    <div className="flex items-center gap-3 px-6 py-3">
+      <FileText className={`h-4 w-4 shrink-0 ${rule.enabled ? "text-emerald-500" : "text-slate-300 dark:text-slate-600"}`} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-medium ${rule.enabled ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>
+            {rule.name}
+          </span>
+          {rule.inherited && (
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-sky-700 bg-sky-50 ring-1 ring-inset ring-sky-600/20 dark:text-sky-400 dark:bg-sky-500/10 dark:ring-sky-500/20">
+              {t("models.inheritedFromManufacturer")}
+            </span>
+          )}
+          {rule.association === "manual" && (
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-violet-700 bg-violet-50 ring-1 ring-inset ring-violet-600/20 dark:text-violet-400 dark:bg-violet-500/10 dark:ring-violet-500/20">
+              {t("models.manualAssociation")}
+            </span>
+          )}
+          {!rule.enabled && (
+            <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-200 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-700">
+              {t("collection_rules.disabled")}
+            </span>
+          )}
+        </div>
+        {rule.description && (
+          <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{rule.description}</p>
+        )}
+      </div>
+      {rule.enabled ? (
+        <ToggleRight className="h-5 w-5 text-emerald-500 shrink-0" />
+      ) : (
+        <ToggleLeft className="h-5 w-5 text-slate-300 dark:text-slate-600 shrink-0" />
+      )}
+      {onDissociate && (
+        <button
+          onClick={onDissociate}
+          className="rounded-lg p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+          title={t("models.dissociate")}
+        >
+          <X className="h-4 w-4" />
+        </button>
       )}
     </div>
   );

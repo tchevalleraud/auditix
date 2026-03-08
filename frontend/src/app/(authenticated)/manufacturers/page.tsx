@@ -138,9 +138,9 @@ export default function EditorsPage() {
                           <Box className="h-4 w-4 text-slate-400 dark:text-slate-500" />
                         </div>
                       )}
-                      <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      <Link href={`/manufacturers/${editor.id}/edit`} className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:underline">
                         {editor.name}
-                      </span>
+                      </Link>
                     </div>
                   </td>
                   <td className="px-5 py-3.5">

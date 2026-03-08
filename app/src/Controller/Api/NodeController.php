@@ -2,14 +2,18 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\Collection;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
 use App\Entity\Node;
+use App\Entity\NodeInventoryEntry;
+use App\Entity\NodeTag;
 use App\Entity\Profile;
 use App\Message\PingNodeMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,6 +25,8 @@ class NodeController extends AbstractController
 {
     public function __construct(
         private readonly MessageBusInterface $bus,
+        #[Autowire('%kernel.project_dir%')]
+        private readonly string $projectDir,
     ) {}
 
     private function serialize(Node $n): array
@@ -55,6 +61,11 @@ class NodeController extends AbstractController
                 'id' => $profile->getId(),
                 'name' => $profile->getName(),
             ] : null,
+            'tags' => $n->getTags()->map(fn(NodeTag $t) => [
+                'id' => $t->getId(),
+                'name' => $t->getName(),
+                'color' => $t->getColor(),
+            ])->toArray(),
             'createdAt' => $n->getCreatedAt()->format('c'),
         ];
     }
@@ -135,7 +146,41 @@ class NodeController extends AbstractController
         if (array_key_exists('profileId', $data)) {
             $node->setProfile($data['profileId'] ? $em->getRepository(Profile::class)->find($data['profileId']) : null);
         }
+        if (array_key_exists('tagIds', $data)) {
+            // Clear and re-set tags
+            foreach ($node->getTags()->toArray() as $tag) { $node->removeTag($tag); }
+            foreach (($data['tagIds'] ?? []) as $tagId) {
+                $tag = $em->getRepository(NodeTag::class)->find($tagId);
+                if ($tag) $node->addTag($tag);
+            }
+        }
 
+        $em->flush();
+
+        return $this->json($this->serialize($node));
+    }
+
+    #[Route('/{id}/tags', methods: ['POST'])]
+    public function addTag(Node $node, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $tagId = $data['tagId'] ?? null;
+        if (!$tagId) return $this->json(['error' => 'tagId is required'], Response::HTTP_BAD_REQUEST);
+
+        $tag = $em->getRepository(NodeTag::class)->find($tagId);
+        if (!$tag) return $this->json(['error' => 'Tag not found'], Response::HTTP_NOT_FOUND);
+
+        $node->addTag($tag);
+        $em->flush();
+
+        return $this->json($this->serialize($node));
+    }
+
+    #[Route('/{id}/tags/{tagId}', methods: ['DELETE'])]
+    public function removeTag(Node $node, int $tagId, EntityManagerInterface $em): JsonResponse
+    {
+        $tag = $em->getRepository(NodeTag::class)->find($tagId);
+        if ($tag) $node->removeTag($tag);
         $em->flush();
 
         return $this->json($this->serialize($node));
@@ -166,9 +211,85 @@ class NodeController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        // Delete collection storage files
+        $collections = $em->getRepository(Collection::class)->findBy(['node' => $node]);
+        foreach ($collections as $collection) {
+            $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
+            $this->deleteDirectory($storageDir);
+        }
+
         $em->remove($node);
         $em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    private function deleteDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) return;
+        $items = scandir($dir);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->deleteDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+        rmdir($dir);
+    }
+
+    #[Route('/{id}/inventory', methods: ['GET'])]
+    public function inventory(Node $node, EntityManagerInterface $em): JsonResponse
+    {
+        $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(
+            ['node' => $node],
+            ['categoryName' => 'ASC', 'entryKey' => 'ASC', 'colLabel' => 'ASC']
+        );
+
+        // Group by category → key → colLabel
+        $categories = [];
+        foreach ($entries as $entry) {
+            $catName = $entry->getCategoryName();
+            $catId = $entry->getCategory()?->getId();
+            $catKeyLabel = $entry->getCategory()?->getKeyLabel();
+            $catKey = $catId ? (string)$catId : '__' . $catName;
+
+            if (!isset($categories[$catKey])) {
+                $categories[$catKey] = [
+                    'categoryName' => $catName,
+                    'keyLabel' => $catKeyLabel,
+                    'columns' => [],
+                    'rows' => [],
+                    'columnSet' => [],
+                ];
+            }
+
+            $key = $entry->getEntryKey();
+            $label = $entry->getColLabel();
+
+            // Track columns
+            if (!in_array($label, $categories[$catKey]['columnSet'], true)) {
+                $categories[$catKey]['columnSet'][] = $label;
+                $categories[$catKey]['columns'][] = ['colKey' => 'col:' . $label, 'label' => $label];
+            }
+
+            // Build rows
+            if (!isset($categories[$catKey]['rows'][$key])) {
+                $categories[$catKey]['rows'][$key] = ['key' => $key, 'values' => []];
+            }
+            $categories[$catKey]['rows'][$key]['values']['col:' . $label] = $entry->getValue();
+        }
+
+        // Convert to indexed arrays
+        $result = [];
+        foreach ($categories as $cat) {
+            unset($cat['columnSet']);
+            $cat['rows'] = array_values($cat['rows']);
+            $result[] = $cat;
+        }
+
+        return $this->json($result);
     }
 }

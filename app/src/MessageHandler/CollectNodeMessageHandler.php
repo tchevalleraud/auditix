@@ -5,7 +5,11 @@ namespace App\MessageHandler;
 use App\Entity\Collection;
 use App\Entity\CollectionCommand;
 use App\Entity\CollectionFolder;
+use App\Entity\CollectionRule;
+use App\Entity\CollectionRuleExtract;
+use App\Entity\CollectionRuleFolder;
 use App\Entity\Node;
+use App\Entity\NodeInventoryEntry;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -104,14 +108,7 @@ class CollectNodeMessageHandler
             $this->readFullResponse($ssh);
 
             // Execute connection script
-            $connectionScript = $model?->getConnectionScript();
-            if ($connectionScript) {
-                $scriptLines = array_filter(array_map('trim', explode("\n", $connectionScript)), fn($l) => $l !== '');
-                foreach ($scriptLines as $line) {
-                    $ssh->write($line . "\n");
-                    $this->readFullResponse($ssh);
-                }
-            }
+            $this->executeConnectionScript($ssh, $model?->getConnectionScript(), $model?->getSendCtrlChar());
 
             // Execute each collection command (rule)
             $completedCount = 0;
@@ -165,6 +162,11 @@ class CollectNodeMessageHandler
             $this->em->flush();
             $this->publishUpdate($collection);
 
+            // Apply collection rules and extract inventory data
+            if (!$hasError) {
+                $this->processInventoryRules($collection, $node, $baseDir);
+            }
+
         } catch (\Throwable $e) {
             $collection->setStatus(Collection::STATUS_FAILED);
             $collection->setError('SSH error: ' . $e->getMessage());
@@ -209,6 +211,40 @@ class CollectNodeMessageHandler
         $ssh->setTimeout($prevTimeout);
 
         return $output;
+    }
+
+    /**
+     * Execute the connection script on an SSH session.
+     * Supports control characters with ^X notation (e.g. ^Y for Ctrl+Y, ^C for Ctrl+C).
+     */
+    /**
+     * Execute the connection script on an SSH session.
+     * If sendCtrlChar is set (A-Z), sends the corresponding control character before the script.
+     * Supports control characters with ^X notation (e.g. ^C for Ctrl+C).
+     */
+    private function executeConnectionScript(SSH2 $ssh, ?string $connectionScript, ?string $sendCtrlChar = null): void
+    {
+        if ($sendCtrlChar && preg_match('/^[A-Z]$/i', $sendCtrlChar)) {
+            $ssh->write(chr(ord(strtoupper($sendCtrlChar)) - 64));
+            $this->readFullResponse($ssh);
+        }
+
+        if (!$connectionScript) {
+            return;
+        }
+
+        $scriptLines = array_filter(array_map('trim', explode("\n", $connectionScript)), fn($l) => $l !== '');
+        foreach ($scriptLines as $line) {
+            // Detect control character notation: ^A through ^Z
+            if (preg_match('/^\^([A-Za-z])$/', $line, $m)) {
+                $char = strtoupper($m[1]);
+                $controlChar = chr(ord($char) - 64);
+                $ssh->write($controlChar);
+            } else {
+                $ssh->write($line . "\n");
+            }
+            $this->readFullResponse($ssh);
+        }
     }
 
     private function resolveCommands($model): array
@@ -304,6 +340,301 @@ class CollectNodeMessageHandler
                 ],
             ]),
         ));
+    }
+
+    private function processInventoryRules(Collection $collection, Node $node, string $baseDir): void
+    {
+        $model = $node->getModel();
+        $rules = $this->resolveRules($model);
+
+        if (empty($rules)) {
+            return;
+        }
+
+        // Delete existing inventory for this node (full refresh)
+        $this->em->createQueryBuilder()
+            ->delete(NodeInventoryEntry::class, 'e')
+            ->where('e.node = :node')
+            ->setParameter('node', $node)
+            ->getQuery()
+            ->execute();
+
+        $nodeFieldUpdates = [];
+
+        foreach ($rules as $rule) {
+            // Get file content for this rule
+            $text = $this->getRuleOutput($rule, $baseDir, $collection, $node);
+            if (!$text) {
+                continue;
+            }
+
+            /** @var CollectionRuleExtract[] $extracts */
+            $extracts = $rule->getExtracts()->toArray();
+
+            foreach ($extracts as $ext) {
+                $this->applyExtract($ext, $text, $node, $rule, $collection);
+
+                // If this extract maps to a node field (only non-multiline)
+                if (!$ext->isMultiline() && $ext->getNodeField()) {
+                    $value = $this->extractNodeFieldValue($ext, $text);
+                    if ($value !== null) {
+                        $nodeFieldUpdates[$ext->getNodeField()] = $value;
+                    }
+                }
+            }
+        }
+
+        // Apply node field updates
+        foreach ($nodeFieldUpdates as $field => $value) {
+            match ($field) {
+                'hostname' => $node->setHostname($value),
+                'discoveredModel' => $node->setDiscoveredModel($value),
+                'discoveredVersion' => $node->setDiscoveredVersion($value),
+                default => null,
+            };
+        }
+
+        $this->em->flush();
+    }
+
+    private function getRuleOutput(CollectionRule $rule, string $baseDir, Collection $collection, Node $node): ?string
+    {
+        if ($rule->getSource() === CollectionRule::SOURCE_LOCAL) {
+            $tag = $rule->getTag();
+            $command = $rule->getCommand();
+
+            // If this rule has a tag, find the latest tagged collection for this node
+            if ($tag) {
+                $conn = $this->em->getConnection();
+                $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1';
+                $row = $conn->fetchAssociative($sql, [
+                    'node' => $node->getId(),
+                    'status' => Collection::STATUS_COMPLETED,
+                    'tag' => '%"' . $tag . '"%',
+                ]);
+                $taggedCollection = $row ? $this->em->getRepository(Collection::class)->find($row['id']) : null;
+                if ($taggedCollection) {
+                    $storageDir = $this->projectDir . '/var/' . $taggedCollection->getStoragePath();
+                } else {
+                    return null;
+                }
+            } else {
+                $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
+            }
+
+            if (!is_dir($storageDir)) {
+                return null;
+            }
+
+            // If a command is specified, look for the matching file first
+            if ($command) {
+                $commandSlug = $this->slugify($command);
+                $dirs = @scandir($storageDir);
+                if ($dirs !== false) {
+                    foreach ($dirs as $dir) {
+                        if ($dir === '.' || $dir === '..') continue;
+                        $filePath = $storageDir . '/' . $dir . '/' . $commandSlug . '.txt';
+                        if (file_exists($filePath)) {
+                            $content = file_get_contents($filePath);
+                            if ($content !== false) {
+                                return $content;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Fallback: read all files
+            $allContent = [];
+            $dirs = @scandir($storageDir);
+            if ($dirs === false) return null;
+
+            foreach ($dirs as $dir) {
+                if ($dir === '.' || $dir === '..') continue;
+                $ruleDir = $storageDir . '/' . $dir;
+                if (!is_dir($ruleDir)) continue;
+                $files = @scandir($ruleDir);
+                if ($files === false) continue;
+                foreach ($files as $file) {
+                    if ($file === '.' || $file === '..' || $file === '_error.txt') continue;
+                    $filepath = $ruleDir . '/' . $file;
+                    if (is_file($filepath)) {
+                        $content = file_get_contents($filepath);
+                        if ($content !== false) {
+                            $allContent[] = $content;
+                        }
+                    }
+                }
+            }
+
+            return !empty($allContent) ? implode("\n", $allContent) : null;
+        }
+
+        if ($rule->getSource() === CollectionRule::SOURCE_SSH && $rule->getCommand()) {
+            // For SSH rules, execute the command live
+            $profile = $node->getProfile();
+            $cliCred = $profile?->getCliCredential();
+            if (!$cliCred || !$cliCred->getUsername()) return null;
+
+            try {
+                $ssh = new SSH2($node->getIpAddress(), $cliCred->getPort() ?: 22, self::SSH_TIMEOUT);
+                $ssh->enablePTY();
+                if (!$ssh->login($cliCred->getUsername(), $cliCred->getPassword() ?? '')) return null;
+                $ssh->setTimeout(self::READ_TIMEOUT);
+                $this->readFullResponse($ssh);
+
+                $this->executeConnectionScript($ssh, $node->getModel()?->getConnectionScript(), $node->getModel()?->getSendCtrlChar());
+
+                $ssh->write($rule->getCommand() . "\n");
+                $response = $this->readFullResponse($ssh);
+                $ssh->disconnect();
+
+                $responseLines = explode("\n", $response);
+                if (!empty($responseLines) && str_contains($responseLines[0], trim($rule->getCommand()))) {
+                    array_shift($responseLines);
+                }
+                if (!empty($responseLines) && preg_match(self::PROMPT_REGEX, end($responseLines))) {
+                    array_pop($responseLines);
+                }
+
+                return implode("\n", $responseLines);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private function applyExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection): void
+    {
+        $regex = $ext->getRegex();
+        if (!$regex) return;
+
+        $hasValueMap = $ext->getValueMap() && count($ext->getValueMap()) > 0;
+        $categoryName = $ext->getCategory() ? $ext->getCategory()->getName() : 'Uncategorized';
+
+        $lines = explode("\n", $text);
+
+        foreach ($lines as $rawLine) {
+            $line = rtrim($rawLine, "\r");
+            if (!preg_match('/' . $regex . '/', $line, $m)) {
+                continue;
+            }
+
+            // Resolve key
+            $key = null;
+            if ($ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT && $ext->getKeyGroup()) {
+                $kg = $ext->getKeyGroup();
+                $key = $m[$kg] ?? null;
+            } else {
+                $key = $ext->getKeyManual() ?: $ext->getName();
+            }
+            if ($key === null || $key === '') continue;
+
+            // Resolve values
+            if ($hasValueMap) {
+                foreach ($ext->getValueMap() as $vm) {
+                    $label = $vm['label'] ?? 'Value';
+                    $group = $vm['group'] ?? 1;
+                    $value = $m[$group] ?? '';
+
+                    $entry = new NodeInventoryEntry();
+                    $entry->setNode($node);
+                    $entry->setCategory($ext->getCategory());
+                    $entry->setCategoryName($categoryName);
+                    $entry->setEntryKey($key);
+                    $entry->setColLabel($label);
+                    $entry->setValue($value);
+                    $entry->setRule($rule);
+                    $entry->setCollection($collection);
+                    $entry->setUpdatedAt(new \DateTimeImmutable());
+                    $this->em->persist($entry);
+                }
+            } else {
+                $vg = $ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT
+                    ? ($ext->getValueGroup() ?? 2)
+                    : ($ext->getValueGroup() ?? 1);
+                $value = $m[$vg] ?? $m[1] ?? $m[0] ?? '';
+
+                $entry = new NodeInventoryEntry();
+                $entry->setNode($node);
+                $entry->setCategory($ext->getCategory());
+                $entry->setCategoryName($categoryName);
+                $entry->setEntryKey($key);
+                $entry->setColLabel('Value#1');
+                $entry->setValue($value);
+                $entry->setRule($rule);
+                $entry->setCollection($collection);
+                $entry->setUpdatedAt(new \DateTimeImmutable());
+                $this->em->persist($entry);
+            }
+        }
+    }
+
+    private function extractNodeFieldValue(CollectionRuleExtract $ext, string $text): ?string
+    {
+        $regex = $ext->getRegex();
+        $group = $ext->getNodeFieldGroup() ?? 1;
+        $lines = explode("\n", $text);
+
+        foreach ($lines as $rawLine) {
+            $line = rtrim($rawLine, "\r");
+            if (preg_match('/' . $regex . '/', $line, $m)) {
+                return $m[$group] ?? null;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveRules($model): array
+    {
+        if (!$model) {
+            return [];
+        }
+
+        $rules = [];
+        $seenIds = [];
+
+        // Manufacturer folder rules
+        $manFolder = $this->em->getRepository(CollectionRuleFolder::class)->findOneBy([
+            'manufacturer' => $model->getManufacturer(),
+            'model' => null,
+            'type' => CollectionRuleFolder::TYPE_MANUFACTURER,
+        ]);
+        if ($manFolder) {
+            foreach ($this->em->getRepository(CollectionRule::class)->findBy(['folder' => $manFolder, 'enabled' => true]) as $r) {
+                if (!empty($r->getExtracts()->toArray())) {
+                    $rules[] = $r;
+                    $seenIds[] = $r->getId();
+                }
+            }
+        }
+
+        // Model folder rules
+        $modelFolder = $this->em->getRepository(CollectionRuleFolder::class)->findOneBy([
+            'model' => $model,
+            'type' => CollectionRuleFolder::TYPE_MODEL,
+        ]);
+        if ($modelFolder) {
+            foreach ($this->em->getRepository(CollectionRule::class)->findBy(['folder' => $modelFolder, 'enabled' => true]) as $r) {
+                if (!in_array($r->getId(), $seenIds, true) && !empty($r->getExtracts()->toArray())) {
+                    $rules[] = $r;
+                    $seenIds[] = $r->getId();
+                }
+            }
+        }
+
+        // Manual rules
+        foreach ($model->getManualRules() as $r) {
+            if ($r->isEnabled() && !in_array($r->getId(), $seenIds, true) && !empty($r->getExtracts()->toArray())) {
+                $rules[] = $r;
+                $seenIds[] = $r->getId();
+            }
+        }
+
+        return $rules;
     }
 
     private function slugify(string $text): string

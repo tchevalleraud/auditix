@@ -32,9 +32,16 @@ class DeviceModel
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $connectionScript = null;
 
+    #[ORM\Column(length: 1, nullable: true)]
+    private ?string $sendCtrlChar = null;
+
     #[ORM\ManyToMany(targetEntity: CollectionCommand::class, inversedBy: 'models')]
     #[ORM\JoinTable(name: 'device_model_collection_command')]
     private Collection $manualCommands;
+
+    #[ORM\ManyToMany(targetEntity: CollectionRule::class, inversedBy: 'models')]
+    #[ORM\JoinTable(name: 'device_model_collection_rule')]
+    private Collection $manualRules;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -42,6 +49,7 @@ class DeviceModel
     public function __construct()
     {
         $this->manualCommands = new ArrayCollection();
+        $this->manualRules = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -94,6 +102,17 @@ class DeviceModel
         return $this;
     }
 
+    public function getSendCtrlChar(): ?string
+    {
+        return $this->sendCtrlChar;
+    }
+
+    public function setSendCtrlChar(?string $sendCtrlChar): static
+    {
+        $this->sendCtrlChar = $sendCtrlChar ? strtoupper($sendCtrlChar) : null;
+        return $this;
+    }
+
     public function getContext(): ?Context
     {
         return $this->context;
@@ -119,6 +138,23 @@ class DeviceModel
     public function removeManualCommand(CollectionCommand $cmd): static
     {
         $this->manualCommands->removeElement($cmd);
+        return $this;
+    }
+
+    /** @return Collection<int, CollectionRule> */
+    public function getManualRules(): Collection { return $this->manualRules; }
+
+    public function addManualRule(CollectionRule $rule): static
+    {
+        if (!$this->manualRules->contains($rule)) {
+            $this->manualRules->add($rule);
+        }
+        return $this;
+    }
+
+    public function removeManualRule(CollectionRule $rule): static
+    {
+        $this->manualRules->removeElement($rule);
         return $this;
     }
 

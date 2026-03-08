@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\CollectionFolder;
+use App\Entity\CollectionRuleFolder;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
@@ -28,6 +29,7 @@ class DeviceModelController extends AbstractController
                 'logo' => $m->getManufacturer()?->getLogo() ? '/api/logos/' . $m->getManufacturer()->getLogo() : null,
             ],
             'connectionScript' => $m->getConnectionScript(),
+            'sendCtrlChar' => $m->getSendCtrlChar(),
             'createdAt' => $m->getCreatedAt()->format('c'),
         ];
     }
@@ -78,6 +80,7 @@ class DeviceModelController extends AbstractController
         $model->setName($name);
         $model->setDescription($data['description'] ?? null);
         $model->setConnectionScript($data['connectionScript'] ?? null);
+        $model->setSendCtrlChar($data['sendCtrlChar'] ?? null);
         $model->setManufacturer($manufacturer);
         $model->setContext($context);
 
@@ -97,6 +100,21 @@ class DeviceModelController extends AbstractController
         $modelFolder->setParent($manFolder);
         $modelFolder->setContext($context);
         $em->persist($modelFolder);
+
+        // Auto-create collection rule folder for this model under manufacturer rule folder
+        $manRuleFolder = $em->getRepository(CollectionRuleFolder::class)->findOneBy([
+            'manufacturer' => $manufacturer,
+            'type' => CollectionRuleFolder::TYPE_MANUFACTURER,
+        ]);
+
+        $modelRuleFolder = new CollectionRuleFolder();
+        $modelRuleFolder->setName($name);
+        $modelRuleFolder->setType(CollectionRuleFolder::TYPE_MODEL);
+        $modelRuleFolder->setModel($model);
+        $modelRuleFolder->setManufacturer($manufacturer);
+        $modelRuleFolder->setParent($manRuleFolder);
+        $modelRuleFolder->setContext($context);
+        $em->persist($modelRuleFolder);
 
         $em->flush();
 
@@ -126,6 +144,9 @@ class DeviceModelController extends AbstractController
         $model->setName($name);
         $model->setDescription($data['description'] ?? null);
         $model->setConnectionScript($data['connectionScript'] ?? null);
+        if (array_key_exists('sendCtrlChar', $data)) {
+            $model->setSendCtrlChar($data['sendCtrlChar'] ?: null);
+        }
         $model->setManufacturer($manufacturer);
 
         // Sync collection folder name
@@ -135,6 +156,15 @@ class DeviceModelController extends AbstractController
         ]);
         if ($modelFolder) {
             $modelFolder->setName($name);
+        }
+
+        // Sync collection rule folder name
+        $modelRuleFolder = $em->getRepository(CollectionRuleFolder::class)->findOneBy([
+            'model' => $model,
+            'type' => CollectionRuleFolder::TYPE_MODEL,
+        ]);
+        if ($modelRuleFolder) {
+            $modelRuleFolder->setName($name);
         }
 
         $em->flush();

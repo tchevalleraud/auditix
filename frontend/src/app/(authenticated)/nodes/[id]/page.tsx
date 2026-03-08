@@ -1,15 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2 } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
 interface ProfileItem { id: number; name: string }
+
+interface NodeTag { id: number; name: string; color: string }
 
 interface NodeDetail {
   id: number;
@@ -26,6 +28,7 @@ interface NodeDetail {
   manufacturer: { id: number; name: string; logo: string | null } | null;
   model: { id: number; name: string } | null;
   profile: { id: number; name: string } | null;
+  tags: NodeTag[];
   createdAt: string;
 }
 
@@ -55,16 +58,26 @@ const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-
 const selectClass = inputClass;
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-type TabKey = "summary" | "settings" | "collections";
+type TabKey = "summary" | "settings" | "collections" | "inventory";
+
+interface InventoryCatData {
+  categoryName: string;
+  keyLabel: string | null;
+  columns: { colKey: string; label: string }[];
+  rows: { key: string; values: Record<string, string> }[];
+}
 
 export default function NodeDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t, locale } = useI18n();
   const { current } = useAppContext();
   const nodeId = params.id as string;
 
-  const [tab, setTab] = useState<TabKey>("summary");
+  const initialTab = (searchParams.get("tab") as TabKey) || "summary";
+  const initialCollectionId = searchParams.get("collectionId");
+  const [tab, setTab] = useState<TabKey>(initialTab);
   const [node, setNode] = useState<NodeDetail | null>(null);
   const [fetchLoading, setFetchLoading] = useState(true);
 
@@ -82,12 +95,15 @@ export default function NodeDetailPage() {
   const [filteredModels, setFilteredModels] = useState<Model[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [profiles, setProfiles] = useState<ProfileItem[]>([]);
+  const [allTags, setAllTags] = useState<NodeTag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
 
   // Collections state
   const [collections, setCollections] = useState<CollectionItem[]>([]);
   const [collectionsLoading, setCollectionsLoading] = useState(false);
   const [collectModal, setCollectModal] = useState(false);
-  const [collectTag, setCollectTag] = useState("");
+  const [collectTags, setCollectTags] = useState<string[]>([]);
+  const [collectTagInput, setCollectTagInput] = useState("");
   const [collecting, setCollecting] = useState(false);
 
   // Collection detail modal
@@ -100,15 +116,21 @@ export default function NodeDetailPage() {
   const [selectedCollections, setSelectedCollections] = useState<Set<number>>(new Set());
   const [deletingSelected, setDeletingSelected] = useState(false);
 
+  // Inventory state
+  const [inventoryData, setInventoryData] = useState<InventoryCatData[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [selectedInventoryCat, setSelectedInventoryCat] = useState(0);
+
   const dateLocale = locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
 
   const loadData = useCallback(async () => {
     if (!current) return;
-    const [nRes, mRes, mdRes, pRes] = await Promise.all([
+    const [nRes, mRes, mdRes, pRes, tRes] = await Promise.all([
       fetch(`/api/nodes?context=${current.id}`),
       fetch(`/api/manufacturers?context=${current.id}`),
       fetch(`/api/models?context=${current.id}`),
       fetch(`/api/profiles?context=${current.id}`),
+      fetch(`/api/node-tags?context=${current.id}`),
     ]);
     const nodes: NodeDetail[] = nRes.ok ? await nRes.json() : [];
     const found = nodes.find((n) => n.id === Number(nodeId));
@@ -123,12 +145,14 @@ export default function NodeDetailPage() {
       setModelId(found.model ? String(found.model.id) : "");
       setProfileId(found.profile ? String(found.profile.id) : "");
       setPolicy(found.policy);
+      setSelectedTagIds(found.tags ? found.tags.map((t) => t.id) : []);
 
       const mfId = found.manufacturer ? String(found.manufacturer.id) : "";
       setFilteredModels(mfId ? loadedModels.filter((m) => m.manufacturer && m.manufacturer.id === Number(mfId)) : loadedModels);
     }
     if (mRes.ok) setManufacturers(await mRes.json());
     if (pRes.ok) setProfiles(await pRes.json());
+    if (tRes.ok) setAllTags(await tRes.json());
     setFetchLoading(false);
   }, [nodeId, current]);
 
@@ -141,9 +165,31 @@ export default function NodeDetailPage() {
     setCollectionsLoading(false);
   }, [nodeId]);
 
+  const loadInventory = useCallback(async () => {
+    setInventoryLoading(true);
+    const res = await fetch(`/api/nodes/${nodeId}/inventory`);
+    if (res.ok) {
+      setInventoryData(await res.json());
+      setSelectedInventoryCat(0);
+    }
+    setInventoryLoading(false);
+  }, [nodeId]);
+
+  // Always load collections on mount (for tab spinner), then reload when switching to tab
+  useEffect(() => { loadCollections(); }, [loadCollections]);
   useEffect(() => {
+    if (tab === "inventory") loadInventory();
     if (tab === "collections") loadCollections();
   }, [tab, loadCollections]);
+
+  // Open collection from query params (e.g. from Collections page)
+  const [initialCollectionOpened, setInitialCollectionOpened] = useState(false);
+  useEffect(() => {
+    if (initialCollectionId && !initialCollectionOpened && tab === "collections" && !collectionsLoading) {
+      setInitialCollectionOpened(true);
+      openCollection(Number(initialCollectionId));
+    }
+  }, [initialCollectionId, initialCollectionOpened, tab, collectionsLoading]);
 
   // Mercure SSE for real-time updates
   useEffect(() => {
@@ -199,6 +245,7 @@ export default function NodeDetailPage() {
           modelId: modelId ? Number(modelId) : null,
           profileId: profileId ? Number(profileId) : null,
           policy,
+          tagIds: selectedTagIds,
         }),
       });
       if (res.ok) {
@@ -225,10 +272,11 @@ export default function NodeDetailPage() {
       await fetch(`/api/collections/collect?context=${current.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeIds: [Number(nodeId)], tag: collectTag.trim() || null }),
+        body: JSON.stringify({ nodeIds: [Number(nodeId)], tags: collectTags }),
       });
       setCollectModal(false);
-      setCollectTag("");
+      setCollectTags([]);
+      setCollectTagInput("");
       if (tab === "collections") loadCollections();
       else setTab("collections");
     } finally {
@@ -316,8 +364,13 @@ export default function NodeDetailPage() {
     D: "bg-orange-500", E: "bg-red-400", F: "bg-red-600",
   };
 
+  const hasRunning = collections.some((c) => c.status === "running");
+  const hasPending = collections.some((c) => c.status === "pending");
+  const collectionsTabStatus = hasRunning ? "running" : hasPending ? "pending" : null;
+
   const tabs: { key: TabKey; label: string }[] = [
     { key: "summary", label: t("nodes.tabSummary") },
+    { key: "inventory", label: t("nodes.tabInventory") },
     { key: "collections", label: t("nodes.tabCollections") },
     { key: "settings", label: t("nodes.tabSettings") },
   ];
@@ -341,7 +394,7 @@ export default function NodeDetailPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6 h-[calc(100vh-7rem)]">
       <div>
         <Link href="/nodes" className="inline-flex items-center gap-1.5 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors mb-3">
           <ArrowLeft className="h-4 w-4" />
@@ -356,18 +409,13 @@ export default function NodeDetailPage() {
             )}
             <div>
               <h1 className="flex items-center gap-3 text-2xl font-bold text-slate-900 dark:text-slate-100">
-                {node.name || node.ipAddress}
-                {node.name && (
-                  <span className="flex items-center gap-1.5 text-base font-normal text-slate-400 dark:text-slate-500 font-mono">
-                    {node.ipAddress}
-                    {node.monitoringEnabled && (
-                      <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
-                    )}
-                  </span>
-                )}
-                {!node.name && node.monitoringEnabled && (
-                  <span className={`inline-block h-2.5 w-2.5 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
-                )}
+                {node.hostname || node.name || node.ipAddress}
+                <span className="flex items-center gap-1.5 text-base font-normal text-slate-400 dark:text-slate-500 font-mono">
+                  {(node.hostname || node.name) && node.ipAddress}
+                  {node.monitoringEnabled && (
+                    <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
+                  )}
+                </span>
               </h1>
               <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                 {node.manufacturer && (
@@ -382,18 +430,51 @@ export default function NodeDetailPage() {
                     <span>{node.model.name}</span>
                   </>
                 )}
+                {node.tags && node.tags.length > 0 && (
+                  <>
+                    {(node.manufacturer || node.model) && <span className="text-slate-300 dark:text-slate-600">|</span>}
+                    <div className="flex items-center gap-1">
+                      {node.tags.slice(0, 3).map((tag) => (
+                        <span
+                          key={tag.id}
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium text-white"
+                          style={{ backgroundColor: tag.color }}
+                        >
+                          {tag.name}
+                        </span>
+                      ))}
+                      {node.tags.length > 3 && (
+                        <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                          +{node.tags.length - 3}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
-          {node.model && (
-            <button
-              onClick={() => { setCollectTag(""); setCollectModal(true); }}
-              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-            >
-              <Play className="h-4 w-4" />
-              {t("nodes.collect")}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {selectedCollections.size > 0 && (
+              <button
+                onClick={deleteSelectedCollections}
+                disabled={deletingSelected}
+                className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 transition-colors"
+              >
+                {deletingSelected ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {t("nodes.deleteSelected", { count: String(selectedCollections.size) })}
+              </button>
+            )}
+            {node.model && (
+              <button
+                onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+              >
+                <Play className="h-4 w-4" />
+                {t("nodes.collect")}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -409,7 +490,12 @@ export default function NodeDetailPage() {
                   : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
               }`}
             >
-              {tb.label}
+              <span className="flex items-center gap-1.5">
+                {tb.key === "collections" && collectionsTabStatus && (
+                  <Loader2 className={`h-3.5 w-3.5 animate-spin ${collectionsTabStatus === "running" ? "text-blue-500" : "text-slate-400"}`} />
+                )}
+                {tb.label}
+              </span>
             </button>
           ))}
         </nav>
@@ -428,18 +514,6 @@ export default function NodeDetailPage() {
 
       {tab === "collections" && (
         <div className="space-y-3">
-          {selectedCollections.size > 0 && (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={deleteSelectedCollections}
-                disabled={deletingSelected}
-                className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 disabled:opacity-50 transition-colors"
-              >
-                {deletingSelected ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                {t("nodes.deleteSelected", { count: String(selectedCollections.size) })}
-              </button>
-            </div>
-          )}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
             {collectionsLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -507,6 +581,83 @@ export default function NodeDetailPage() {
         </div>
       )}
 
+      {tab === "inventory" && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+          {inventoryLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            </div>
+          ) : inventoryData.length > 0 ? (
+            <div className="flex flex-1 min-h-0">
+              {/* Sidebar */}
+              <div className="w-52 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto">
+                <nav className="py-2">
+                  {inventoryData.map((cat, catIdx) => (
+                    <button
+                      key={catIdx}
+                      onClick={() => setSelectedInventoryCat(catIdx)}
+                      className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                        selectedInventoryCat === catIdx
+                          ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium border-r-2 border-r-slate-900 dark:border-r-slate-100 shadow-sm"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">{cat.categoryName}</span>
+                        <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 rounded-full px-1.5 py-0.5 flex-shrink-0">{cat.rows.length}</span>
+                      </div>
+                    </button>
+                  ))}
+                </nav>
+              </div>
+
+              {/* Table */}
+              <div className="flex-1 min-w-0 overflow-auto">
+                {(() => {
+                  const cat = inventoryData[selectedInventoryCat] ?? inventoryData[0];
+                  if (!cat) return null;
+                  return (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
+                          <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">{cat.keyLabel || t("nodes.inventoryKey")}</th>
+                          {cat.columns.map((col) => (
+                            <th key={col.colKey} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">{col.label}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {cat.rows.map((row, rowIdx) => (
+                          <tr key={rowIdx} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                            <td className="px-4 py-2.5 font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                              <code className="text-xs bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{row.key}</code>
+                            </td>
+                            {cat.columns.map((col) => (
+                              <td key={col.colKey} className="px-4 py-2.5 text-slate-600 dark:text-slate-400">
+                                {row.values[col.colKey] ? (
+                                  <code className="text-xs font-mono">{row.values[col.colKey]}</code>
+                                ) : (
+                                  <span className="text-xs text-slate-300 dark:text-slate-600">—</span>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  );
+                })()}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <Table2 className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+              <p className="text-sm text-slate-400 dark:text-slate-500">{t("nodes.inventoryEmpty")}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === "settings" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
           <form onSubmit={handleSave} className="p-6 space-y-5">
@@ -547,7 +698,34 @@ export default function NodeDetailPage() {
                 <option value="enforce">{t("nodes.policyEnforce")}</option>
               </select>
             </div>
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            {allTags.length > 0 && (
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("sidebar.tags")}</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {allTags.map((tag) => {
+                    const isSelected = selectedTagIds.includes(tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        onClick={() => setSelectedTagIds((prev) =>
+                          isSelected ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
+                        )}
+                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                          isSelected
+                            ? "text-white ring-2 ring-offset-1 ring-slate-900 dark:ring-white"
+                            : "text-white opacity-40 hover:opacity-70"
+                        }`}
+                        style={{ backgroundColor: tag.color }}
+                      >
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button type="submit" disabled={saving || !ipAddress.trim()} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t("common.save")}
@@ -568,7 +746,7 @@ export default function NodeDetailPage() {
       {/* Collect modal */}
       {collectModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("nodes.collectTitle")}</h3>
               <button onClick={() => setCollectModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -584,13 +762,34 @@ export default function NodeDetailPage() {
                     {t("nodes.collectTagLabel")}
                   </span>
                 </label>
-                <input
-                  type="text"
-                  value={collectTag}
-                  onChange={(e) => setCollectTag(e.target.value)}
-                  placeholder={t("nodes.collectTagPlaceholder")}
-                  className={inputClass}
-                />
+                <div className="flex flex-wrap items-center gap-1.5 min-h-[42px] rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2">
+                  {collectTags.map((tag) => (
+                    <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-slate-200 dark:bg-slate-700 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                      {tag}
+                      <button type="button" onClick={() => setCollectTags(collectTags.filter((t) => t !== tag))} className="hover:text-red-500 transition-colors">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <input
+                    type="text"
+                    value={collectTagInput}
+                    onChange={(e) => setCollectTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if ((e.key === "Enter" || e.key === ",") && collectTagInput.trim()) {
+                        e.preventDefault();
+                        const tag = collectTagInput.trim().replace(/,/g, "");
+                        if (tag && !collectTags.includes(tag)) setCollectTags([...collectTags, tag]);
+                        setCollectTagInput("");
+                      }
+                      if (e.key === "Backspace" && !collectTagInput && collectTags.length > 0) {
+                        setCollectTags(collectTags.slice(0, -1));
+                      }
+                    }}
+                    placeholder={collectTags.length === 0 ? t("nodes.collectTagPlaceholder") : ""}
+                    className="flex-1 min-w-[120px] bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none"
+                  />
+                </div>
                 <p className="text-xs text-slate-400 dark:text-slate-500">{t("nodes.collectTagHelp")}</p>
               </div>
             </div>

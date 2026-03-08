@@ -34,14 +34,16 @@ The project is composed of three main layers, orchestrated by Docker Compose:
 
 ### Fleet management
 - **Nodes**: network device inventory (IP, manufacturer, model, profile)
-- **Manufacturers & Models**: device catalog with logos
+- **Tags**: color-coded labels for organizing and categorizing nodes
+- **Manufacturers & Models**: device catalog with logos and connection scripts
 - **Profiles**: credential groups (SSH/SNMP) for device access
 - **Contexts**: multi-tenancy, each context isolates its own data
 
 ### Configuration collection
-- **SSH connection** via phpseclib3 with per-model connection scripts
-- **Collection rules**: folders and commands organized in a tree structure
-- **Automatic and manual association** of commands to device models
+- **SSH connection** via phpseclib3 with per-model connection scripts and control character support
+- **Collection commands**: folders and commands organized in a tree structure
+- **Collection rules**: data extraction with regex, inventory mapping, and node field updates
+- **Automatic and manual association** of commands and rules to device models
 - **File-based storage**: each command produces a text file, organized by rule
 - **Multiple tags** per collection with per-context uniqueness
 - **Asynchronous execution** via dedicated RabbitMQ workers (scalable)
@@ -156,10 +158,13 @@ auditix/
 │   │   ├── app/                  # Pages (App Router)
 │   │   │   ├── (authenticated)/  # Protected pages
 │   │   │   │   ├── nodes/        # Node management
+│   │   │   │   ├── tags/         # Node tag management
 │   │   │   │   ├── manufacturers/# Manufacturers
 │   │   │   │   ├── models/       # Models
 │   │   │   │   ├── profiles/     # Profiles
+│   │   │   │   ├── collections/  # Collection history
 │   │   │   │   ├── collection-commands/ # Collection commands
+│   │   │   │   ├── collection-rules/    # Collection rules
 │   │   │   │   └── admin/        # Administration
 │   │   │   └── login/            # Login page
 │   │   ├── components/           # React components
