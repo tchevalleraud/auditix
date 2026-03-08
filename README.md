@@ -1,10 +1,10 @@
 # Auditix
 
-Auditix est une plateforme d'audit et de conformite reseau. Elle permet de gerer un parc d'equipements reseau, de collecter automatiquement leurs configurations via SSH, et d'analyser leur conformite selon des regles definies.
+Auditix is a network audit and compliance platform. It manages a fleet of network devices, automatically collects their configurations via SSH, and analyzes their compliance against defined rules.
 
 ## Architecture
 
-Le projet est compose de trois briques principales, orchestrees par Docker Compose :
+The project is composed of three main layers, orchestrated by Docker Compose:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -16,52 +16,52 @@ Le projet est compose de trois briques principales, orchestrees par Docker Compo
 │  Backend API     │  Mercure SSE     │  Frontend         │
 ├──────────────────┴──────────────────┴───────────────────┤
 │              PostgreSQL  │  RabbitMQ                    │
-│              Base de     │  File de messages            │
-│              donnees     │  (workers async)             │
+│              Database    │  Message queue               │
+│                          │  (async workers)             │
 └─────────────────────────────────────────────────────────┘
 ```
 
-| Service | Technologie | Role |
-|---------|-------------|------|
-| **Backend** | Symfony 7.2 / PHP 8.3 | API REST, logique metier, securite |
-| **Frontend** | Next.js 15 / React 19 | Interface utilisateur SPA |
-| **Base de donnees** | PostgreSQL 16 | Persistance des donnees |
-| **Message broker** | RabbitMQ 3.13 | Execution asynchrone des taches |
-| **Temps reel** | Mercure | Server-Sent Events (SSE) |
-| **Reverse proxy** | Nginx 1.26 | Routage, point d'entree unique |
+| Service | Technology | Role |
+|---------|------------|------|
+| **Backend** | Symfony 7.2 / PHP 8.3 | REST API, business logic, security |
+| **Frontend** | Next.js 15 / React 19 | Single-page application UI |
+| **Database** | PostgreSQL 16 | Data persistence |
+| **Message broker** | RabbitMQ 3.13 | Asynchronous task execution |
+| **Real-time** | Mercure | Server-Sent Events (SSE) |
+| **Reverse proxy** | Nginx 1.26 | Routing, single entry point |
 
-## Fonctionnalites
+## Features
 
-### Gestion du parc
-- **Noeuds** : inventaire des equipements reseau (IP, constructeur, modele, profil)
-- **Constructeurs & Modeles** : catalogue d'equipements avec logos
-- **Profils** : regroupement de credentials (SSH/SNMP) pour l'acces aux equipements
-- **Contextes** : multi-tenancy, chaque contexte isole ses propres donnees
+### Fleet management
+- **Nodes**: network device inventory (IP, manufacturer, model, profile)
+- **Manufacturers & Models**: device catalog with logos
+- **Profiles**: credential groups (SSH/SNMP) for device access
+- **Contexts**: multi-tenancy, each context isolates its own data
 
-### Collecte de configurations
-- **Connexion SSH** via phpseclib3 avec support des scripts de connexion par modele
-- **Regles de collecte** : dossiers et commandes organisables en arborescence
-- **Association automatique et manuelle** des commandes aux modeles d'equipements
-- **Stockage fichier** : chaque commande produit un fichier texte, organise par regle
-- **Tags multiples** par collecte avec unicite par contexte
-- **Execution asynchrone** via workers RabbitMQ dedies (scalables)
+### Configuration collection
+- **SSH connection** via phpseclib3 with per-model connection scripts
+- **Collection rules**: folders and commands organized in a tree structure
+- **Automatic and manual association** of commands to device models
+- **File-based storage**: each command produces a text file, organized by rule
+- **Multiple tags** per collection with per-context uniqueness
+- **Asynchronous execution** via dedicated RabbitMQ workers (scalable)
 
 ### Monitoring
-- **Ping ICMP** des equipements avec mise a jour temps reel
-- **Indicateurs visuels** dans le tableau des noeuds (statut collecte, joignabilite)
+- **ICMP ping** with real-time status updates
+- **Visual indicators** in the nodes table (collection status, reachability)
 
-### Temps reel
-- **Mercure SSE** pour les mises a jour instantanees (progression des collectes, resultats de ping, taches admin)
+### Real-time
+- **Mercure SSE** for instant updates (collection progress, ping results, admin tasks)
 
 ### Administration
-- **Gestion des utilisateurs** et des contextes
-- **Tableau des taches** unifie (taches + collectes)
-- **Health check** et **logs** systeme
+- **User and context management**
+- **Unified task board** (tasks + collections)
+- **Health check** and system **logs**
 
 ### Interface
-- **6 langues** : francais, anglais, espagnol, allemand, italien, japonais
-- **Dark mode** natif
-- **Responsive** avec Tailwind CSS
+- **6 languages**: French, English, Spanish, German, Italian, Japanese
+- **Dark mode** built-in
+- **Responsive** with Tailwind CSS
 
 ## Prerequisites
 
@@ -70,20 +70,20 @@ Le projet est compose de trois briques principales, orchestrees par Docker Compo
 
 ## Installation
 
-### 1. Cloner le depot
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/tchevalleraud/auditix.git
 cd auditix
 ```
 
-### 2. Configurer l'environnement
+### 2. Configure the environment
 
 ```bash
 cp .env.example .env
 ```
 
-Editer le fichier `.env` selon vos besoins. Les valeurs par defaut fonctionnent pour le developpement local :
+Edit the `.env` file as needed. Default values work for local development:
 
 ```env
 APP_ENV=dev
@@ -98,79 +98,79 @@ RABBITMQ_USER=auditix
 RABBITMQ_PASSWORD=auditix
 ```
 
-### 3. Demarrer l'application
+### 3. Start the application
 
 ```bash
 make up
 ```
 
-Cette commande :
-- Construit les images Docker
-- Demarre tous les services (base de donnees, message broker, backend, frontend, workers)
-- Execute les migrations Doctrine
-- Cree l'utilisateur par defaut
+This command:
+- Builds the Docker images
+- Starts all services (database, message broker, backend, frontend, workers)
+- Runs Doctrine migrations
+- Creates the default user
 
-### 4. Acceder a l'application
+### 4. Access the application
 
 | URL | Service |
 |-----|---------|
 | http://localhost | Application (frontend) |
-| http://localhost/api | API Symfony |
+| http://localhost/api | Symfony API |
 | http://localhost:15672 | RabbitMQ Management |
 
-**Credentials par defaut** : `admin` / `admin`
+**Default credentials**: `admin` / `admin`
 
-## Commandes utiles
+## Useful commands
 
 ```bash
-make up              # Demarrer tous les services
-make down            # Arreter tous les services
-make restart         # Redemarrer tous les services
-make build           # Reconstruire les images Docker
-make logs            # Afficher les logs de tous les services
-make logs-php        # Afficher les logs PHP
-make logs-workers    # Afficher les logs des workers
-make console         # Ouvrir un shell dans le conteneur PHP
-make sf CMD="..."    # Executer une commande Symfony (ex: make sf CMD="cache:clear")
-make composer CMD="..." # Executer une commande Composer
+make up              # Start all services
+make down            # Stop all services
+make restart         # Restart all services
+make build           # Rebuild Docker images
+make logs            # Show logs for all services
+make logs-php        # Show PHP logs
+make logs-workers    # Show worker logs
+make console         # Open a shell in the PHP container
+make sf CMD="..."    # Run a Symfony command (e.g. make sf CMD="cache:clear")
+make composer CMD="..." # Run a Composer command
 ```
 
-## Structure du projet
+## Project structure
 
 ```
 auditix/
-├── app/                          # Backend Symfony
-│   ├── config/                   # Configuration Symfony
-│   ├── migrations/               # Migrations Doctrine
+├── app/                          # Symfony backend
+│   ├── config/                   # Symfony configuration
+│   ├── migrations/               # Doctrine migrations
 │   ├── src/
-│   │   ├── Command/              # Commandes console (scheduler, cleanup)
-│   │   ├── Controller/Api/       # Controleurs API REST
-│   │   ├── Entity/               # Entites Doctrine (Node, Collection, etc.)
-│   │   ├── Message/              # Messages asynchrones
-│   │   ├── MessageHandler/       # Handlers des workers
-│   │   ├── Repository/           # Repositories Doctrine
-│   │   └── Security/             # Authentification
+│   │   ├── Command/              # Console commands (scheduler, cleanup)
+│   │   ├── Controller/Api/       # REST API controllers
+│   │   ├── Entity/               # Doctrine entities (Node, Collection, etc.)
+│   │   ├── Message/              # Async messages
+│   │   ├── MessageHandler/       # Worker handlers
+│   │   ├── Repository/           # Doctrine repositories
+│   │   └── Security/             # Authentication
 │   └── composer.json
-├── frontend/                     # Frontend Next.js
+├── frontend/                     # Next.js frontend
 │   ├── src/
 │   │   ├── app/                  # Pages (App Router)
-│   │   │   ├── (authenticated)/  # Pages protegees
-│   │   │   │   ├── nodes/        # Gestion des noeuds
-│   │   │   │   ├── manufacturers/# Constructeurs
-│   │   │   │   ├── models/       # Modeles
-│   │   │   │   ├── profiles/     # Profils
-│   │   │   │   ├── collection-commands/ # Commandes de collecte
+│   │   │   ├── (authenticated)/  # Protected pages
+│   │   │   │   ├── nodes/        # Node management
+│   │   │   │   ├── manufacturers/# Manufacturers
+│   │   │   │   ├── models/       # Models
+│   │   │   │   ├── profiles/     # Profiles
+│   │   │   │   ├── collection-commands/ # Collection commands
 │   │   │   │   └── admin/        # Administration
-│   │   │   └── login/            # Page de connexion
-│   │   ├── components/           # Composants React
-│   │   └── i18n/                 # Fichiers de traduction (6 langues)
+│   │   │   └── login/            # Login page
+│   │   ├── components/           # React components
+│   │   └── i18n/                 # Translation files (6 languages)
 │   └── package.json
-├── docker/                       # Fichiers Docker
-│   ├── nginx/default.conf        # Configuration Nginx
-│   ├── php/Dockerfile            # Image PHP 8.3 + extensions
-│   └── node/Dockerfile           # Image Node 22
-├── data/                         # Volumes Docker (ignore par git)
-│   └── collections/              # Fichiers de collecte (monte dans les workers)
+├── docker/                       # Docker files
+│   ├── nginx/default.conf        # Nginx configuration
+│   ├── php/Dockerfile            # PHP 8.3 image + extensions
+│   └── node/Dockerfile           # Node 22 image
+├── data/                         # Docker volumes (git-ignored)
+│   └── collections/              # Collection files (mounted in workers)
 ├── docker-compose.yml
 ├── Makefile
 └── .env.example
@@ -178,43 +178,43 @@ auditix/
 
 ## Workers
 
-L'application utilise plusieurs workers asynchrones via RabbitMQ :
+The application uses several asynchronous workers via RabbitMQ:
 
 | Worker | Transport | Replicas | Role |
 |--------|-----------|----------|------|
-| `worker-scheduler` | — | 1 | Planification du monitoring |
-| `worker-monitoring` | `monitoring` | 1 | Execution des pings ICMP |
-| `worker-collector` | `collector` | 2 | Collecte SSH des configurations |
-| `worker-generator` | `generator` | 1 | Generation (reserve) |
-| `worker-cleanup` | — | 1 | Nettoyage des taches |
+| `worker-scheduler` | — | 1 | Monitoring scheduling |
+| `worker-monitoring` | `monitoring` | 1 | ICMP ping execution |
+| `worker-collector` | `collector` | 2 | SSH configuration collection |
+| `worker-generator` | `generator` | 1 | Generation (reserved) |
+| `worker-cleanup` | — | 1 | Task cleanup |
 
-Les replicas du worker-collector peuvent etre augmentes dans le `.env` pour paralleliser les collectes :
+Collector worker replicas can be increased in `.env` to parallelize collections:
 
 ```env
 WORKER_COLLECTOR_REPLICAS=4
 ```
 
-## Flux de collecte
+## Collection workflow
 
 ```
-1. L'utilisateur selectionne des noeuds et lance une collecte
-2. Le backend cree des entites Collection et dispatch des messages
-3. Les workers collector consomment les messages :
-   a. Connexion SSH a l'equipement
-   b. Execution du script de connexion (selon le modele)
-   c. Execution de chaque commande de collecte
-   d. Stockage des resultats en fichiers (1 dossier/regle, 1 fichier/commande)
-   e. Mise a jour en temps reel via Mercure
-4. L'utilisateur visualise les resultats dans l'interface
+1. User selects nodes and triggers a collection
+2. Backend creates Collection entities and dispatches messages
+3. Collector workers consume the messages:
+   a. SSH connection to the device
+   b. Run connection script (model-specific)
+   c. Execute each collection command
+   d. Store results as files (1 folder/rule, 1 file/command)
+   e. Real-time progress updates via Mercure
+4. User views results in the interface
 ```
 
-## Technologies
+## Tech stack
 
-**Backend** : PHP 8.3, Symfony 7.2, Doctrine ORM, phpseclib3, Messenger + AMQP
+**Backend**: PHP 8.3, Symfony 7.2, Doctrine ORM, phpseclib3, Messenger + AMQP
 
-**Frontend** : Node 22, Next.js 15, React 19, TypeScript 5.7, Tailwind CSS 4
+**Frontend**: Node 22, Next.js 15, React 19, TypeScript 5.7, Tailwind CSS 4
 
-**Infrastructure** : Docker, Nginx, PostgreSQL 16, RabbitMQ 3.13, Mercure
+**Infrastructure**: Docker, Nginx, PostgreSQL 16, RabbitMQ 3.13, Mercure
 
 ## License
 
