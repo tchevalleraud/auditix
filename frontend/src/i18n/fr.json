@@ -342,7 +342,10 @@
     "loadingModels": "Chargement des modeles...",
     "tabSummary": "Resume",
     "tabSettings": "Parametres",
+    "settingsDesc": "Configurer les paramètres réseau, matériel et tags du noeud.",
     "deleteNode": "Supprimer ce noeud",
+    "dangerZone": "Zone de danger",
+    "dangerZoneDesc": "La suppression de ce noeud et de toutes ses données est irréversible.",
     "compliancePlaceholder": "Les donnees de conformite apparaitront ici apres le premier audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Collecter ({count})",
@@ -785,12 +788,15 @@
     "noResults": "Aucun resultat d'evaluation",
     "noResultsDesc": "Lancez une evaluation pour verifier la conformite des noeuds.",
     "lastEvaluated": "Derniere evaluation",
-    "rulesCount": "{count} regle(s)"
+    "rulesCount": "{count} regle(s)",
+    "deleteResults": "Supprimer les resultats",
+    "confirmDeleteResults": "Voulez-vous vraiment supprimer tous les resultats d'evaluation de cette politique ?"
   },
   "compliance": {
     "title": "Conformite",
     "evaluateCompliance": "Evaluer la conformite",
     "evaluating": "Evaluation en cours...",
+    "pending": "En attente...",
     "noResults": "Aucun resultat de conformite",
     "noResultsDesc": "Lancez une evaluation pour verifier la conformite de cet equipement.",
     "score": "Score",
@@ -801,7 +807,14 @@
     "skipped": "Ignoree",
     "severity": "Severite",
     "lastEvaluated": "Derniere evaluation",
-    "policy": "Politique"
+    "policy": "Politique",
+    "legend": "Légende",
+    "legendIcons": "Icônes de statut des règles",
+    "legendProgressBar": "Barre de progression",
+    "legendCompliant": "La règle est conforme — l'équipement respecte l'exigence.",
+    "legendNonCompliant": "La règle est non conforme — l'équipement ne respecte pas l'exigence.",
+    "legendError": "Erreur — la règle n'a pas pu être évaluée (échec de connexion, données manquantes, etc.).",
+    "legendNotApplicable": "Non applicable — aucune source de données ou conditions d'évaluation configurées."
   },
   "status": {
     "completed": "Termine",

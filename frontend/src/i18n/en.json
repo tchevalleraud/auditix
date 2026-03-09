@@ -342,7 +342,10 @@
     "loadingModels": "Loading models...",
     "tabSummary": "Summary",
     "tabSettings": "Settings",
+    "settingsDesc": "Configure the node's network, hardware, and tag settings.",
     "deleteNode": "Delete this node",
+    "dangerZone": "Danger zone",
+    "dangerZoneDesc": "Deleting this node and all its data is irreversible.",
     "compliancePlaceholder": "Compliance data will appear here after the first audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Collect ({count})",
@@ -785,12 +788,15 @@
     "noResults": "No evaluation results",
     "noResultsDesc": "Run an evaluation to check the compliance of nodes.",
     "lastEvaluated": "Last evaluated",
-    "rulesCount": "{count} rule(s)"
+    "rulesCount": "{count} rule(s)",
+    "deleteResults": "Delete results",
+    "confirmDeleteResults": "Are you sure you want to delete all evaluation results for this policy?"
   },
   "compliance": {
     "title": "Compliance",
     "evaluateCompliance": "Evaluate compliance",
     "evaluating": "Evaluating...",
+    "pending": "Pending...",
     "noResults": "No compliance results",
     "noResultsDesc": "Run an evaluation to check the compliance of this device.",
     "score": "Score",
@@ -801,7 +807,14 @@
     "skipped": "Skipped",
     "severity": "Severity",
     "lastEvaluated": "Last evaluated",
-    "policy": "Policy"
+    "policy": "Policy",
+    "legend": "Legend",
+    "legendIcons": "Rule status icons",
+    "legendProgressBar": "Progress bar",
+    "legendCompliant": "The rule is compliant — the device meets the requirement.",
+    "legendNonCompliant": "The rule is non-compliant — the device does not meet the requirement.",
+    "legendError": "Error — the rule could not be evaluated (connection failure, missing data, etc.).",
+    "legendNotApplicable": "Not applicable — no data source or evaluation conditions configured."
   },
   "status": {
     "completed": "Completed",

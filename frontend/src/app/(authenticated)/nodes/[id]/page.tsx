@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -64,6 +64,7 @@ interface ComplianceResultEntry {
   ruleId: number;
   ruleIdentifier: string | null;
   ruleName: string;
+  ruleDescription: string | null;
   status: string;
   severity: string | null;
   message: string | null;
@@ -412,9 +413,11 @@ export default function NodeDetailPage() {
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "summary", label: t("nodes.tabSummary") },
-    { key: "inventory", label: t("nodes.tabInventory") },
     { key: "compliance", label: t("compliance.title") },
+    { key: "inventory", label: t("nodes.tabInventory") },
     { key: "collections", label: t("nodes.tabCollections") },
+  ];
+  const rightTabs: { key: TabKey; label: string }[] = [
     { key: "settings", label: t("nodes.tabSettings") },
   ];
 
@@ -512,6 +515,28 @@ export default function NodeDetailPage() {
                 {t("nodes.deleteSelected", { count: String(selectedCollections.size) })}
               </button>
             )}
+            {tab === "settings" && (
+              <button
+                onClick={() => { const form = document.getElementById("node-settings-form") as HTMLFormElement; form?.requestSubmit(); }}
+                disabled={saving || !ipAddress.trim()}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {t("common.save")}
+              </button>
+            )}
+            <button
+              onClick={async () => {
+                setComplianceEvaluating(true);
+                setNode((prev) => prev ? { ...prev, score: null } : prev);
+                await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+              }}
+              disabled={complianceEvaluating}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+            >
+              {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+              {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
+            </button>
             {node.model && (
               <button
                 onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
@@ -526,25 +551,45 @@ export default function NodeDetailPage() {
       </div>
 
       <div className="border-b border-slate-200 dark:border-slate-800">
-        <nav className="flex gap-6">
-          {tabs.map((tb) => (
-            <button
-              key={tb.key}
-              onClick={() => setTab(tb.key)}
-              className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
-                tab === tb.key
-                  ? "border-slate-900 dark:border-white text-slate-900 dark:text-white"
-                  : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              }`}
-            >
-              <span className="flex items-center gap-1.5">
-                {tb.key === "collections" && collectionsTabStatus && (
-                  <Loader2 className={`h-3.5 w-3.5 animate-spin ${collectionsTabStatus === "running" ? "text-blue-500" : "text-slate-400"}`} />
-                )}
+        <nav className="flex justify-between">
+          <div className="flex gap-6">
+            {tabs.map((tb) => (
+              <button
+                key={tb.key}
+                onClick={() => setTab(tb.key)}
+                className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+                  tab === tb.key
+                    ? "border-slate-900 dark:border-white text-slate-900 dark:text-white"
+                    : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
+                <span className="flex items-center gap-1.5">
+                  {tb.key === "collections" && collectionsTabStatus && (
+                    <Loader2 className={`h-3.5 w-3.5 animate-spin ${collectionsTabStatus === "running" ? "text-blue-500" : "text-slate-400"}`} />
+                  )}
+                  {tb.key === "compliance" && complianceEvaluating && (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                  )}
+                  {tb.label}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-6">
+            {rightTabs.map((tb) => (
+              <button
+                key={tb.key}
+                onClick={() => setTab(tb.key)}
+                className={`pb-3 text-sm font-medium transition-colors border-b-2 ${
+                  tab === tb.key
+                    ? "border-slate-900 dark:border-white text-slate-900 dark:text-white"
+                    : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                }`}
+              >
                 {tb.label}
-              </span>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </nav>
       </div>
 
@@ -707,37 +752,6 @@ export default function NodeDetailPage() {
 
       {tab === "compliance" && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {node.score && !complianceEvaluating ? (
-                <span className={`inline-flex items-center justify-center h-10 w-10 rounded-xl text-lg font-bold text-white ${
-                  node.score === "A" ? "bg-emerald-500" : node.score === "B" ? "bg-green-500" : node.score === "C" ? "bg-yellow-500" : node.score === "D" ? "bg-orange-500" : node.score === "E" ? "bg-red-500" : "bg-red-700"
-                }`}>{node.score}</span>
-              ) : complianceEvaluating ? (
-                <span className="inline-flex items-center justify-center h-10 w-10 rounded-xl bg-slate-200 dark:bg-slate-700">
-                  <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-                </span>
-              ) : null}
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance.score")}</h3>
-                {complianceData?.policies && complianceData.policies.length > 0 && (
-                  <p className="text-xs text-slate-400">{complianceData.policies.length} {t("compliance.policy").toLowerCase()}{complianceData.policies.length > 1 ? "s" : ""}</p>
-                )}
-              </div>
-            </div>
-            <button
-              onClick={async () => {
-                setComplianceEvaluating(true);
-                setNode((prev) => prev ? { ...prev, score: null } : prev);
-                await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
-              }}
-              disabled={complianceEvaluating}
-              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-            >
-              {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
-            </button>
-          </div>
 
           {complianceLoading ? (
             <div className="flex items-center justify-center py-20">
@@ -752,7 +766,7 @@ export default function NodeDetailPage() {
           ) : (
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {complianceData.policies.map((pr) => {
+                {[...complianceData.policies].sort((a, b) => a.policy.name.localeCompare(b.policy.name)).map((pr) => {
                   const isExp = expandedCompliancePolicies.has(pr.policy.id);
                   const total = Object.values(pr.stats).reduce((a, b) => a + b, 0);
 
@@ -767,19 +781,52 @@ export default function NodeDetailPage() {
                         <div className="flex-1 min-w-0">
                           <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{pr.policy.name}</span>
                         </div>
-                        <div className="flex items-center gap-3 text-xs shrink-0">
-                          {pr.stats.compliant > 0 && <span className="text-emerald-600 dark:text-emerald-400">{pr.stats.compliant} {t("compliance.compliant").toLowerCase()}</span>}
-                          {pr.stats.non_compliant > 0 && <span className="text-red-600 dark:text-red-400">{pr.stats.non_compliant} {t("compliance.nonCompliant").toLowerCase()}</span>}
-                          {pr.stats.error > 0 && <span className="text-orange-500">{pr.stats.error} {t("compliance.error").toLowerCase()}</span>}
-                          <span className="text-slate-400">{total} {t("compliance_rules.rule")}{total !== 1 ? "s" : ""}</span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {(() => {
+                            const c = pr.stats.compliant || 0;
+                            const nc = pr.stats.non_compliant || 0;
+                            const err = pr.stats.error || 0;
+                            const na = pr.stats.not_applicable || 0;
+                            const t2 = c + nc + err + na;
+                            if (t2 === 0) return null;
+                            const pC = (c / t2) * 100;
+                            const pNC = ((c + nc) / t2) * 100;
+                            const pErr = ((c + nc + err) / t2) * 100;
+                            return (
+                              <div className="h-2.5 w-56 rounded-full overflow-hidden relative">
+                                <div className="absolute inset-0" style={{
+                                  background: `linear-gradient(to right, ${[
+                                    ...(c > 0 ? [`#10b981 0%, #10b981 ${pC}%`] : []),
+                                    ...(nc > 0 ? [`#ef4444 ${pC}%, #ef4444 ${pNC}%`] : []),
+                                    ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 ${pErr}%`] : []),
+                                    ...(na > 0 ? [`#e2e8f0 ${pErr}%, #e2e8f0 100%`] : []),
+                                  ].join(", ")})`
+                                }} />
+                                {err > 0 && (
+                                  <div className="absolute inset-0" style={{
+                                    clipPath: `inset(0 ${100 - pErr}% 0 ${pNC}%)`,
+                                    backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
+                                  }} />
+                                )}
+                              </div>
+                            );
+                          })()}
+                          <span className="text-xs text-slate-400">{total}</span>
                         </div>
                       </button>
                       {isExp && (
                         <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
-                          {pr.results.map((r) => {
+                          {pr.results.filter((r) => r.status !== "skipped").map((r) => {
                             const statusIcon = r.status === "compliant" ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                               : r.status === "non_compliant" ? <Ban className="h-4 w-4 text-red-500" />
-                              : r.status === "error" ? <XCircle className="h-4 w-4 text-orange-500" />
+                              : r.status === "error" ? (
+                                <span className="relative inline-flex h-4 w-4">
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                  <span className="absolute inset-0 flex items-center justify-center">
+                                    <span className="block w-[18px] h-[1.5px] bg-red-500 rotate-45 rounded-full" />
+                                  </span>
+                                </span>
+                              )
                               : <Minus className="h-4 w-4 text-slate-400" />;
                             const sevCls = r.severity === "critical" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
                               : r.severity === "high" ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
@@ -793,11 +840,14 @@ export default function NodeDetailPage() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {r.ruleIdentifier && <code className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 font-mono">{r.ruleIdentifier}</code>}
                                     <span className="text-sm text-slate-900 dark:text-slate-100">{r.ruleName}</span>
+                                    {r.severity && r.status === "non_compliant" && (
+                                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                    )}
                                   </div>
-                                  {r.message && <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">{r.message}</p>}
+                                  {r.ruleDescription && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{r.ruleDescription}</p>}
                                 </div>
-                                {r.severity && r.status === "non_compliant" && (
-                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                {r.message && (
+                                  <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0 max-w-xs truncate text-right">{r.message}</span>
                                 )}
                               </div>
                             );
@@ -814,82 +864,90 @@ export default function NodeDetailPage() {
       )}
 
       {tab === "settings" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <form onSubmit={handleSave} className="p-6 space-y-5">
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("nodes.colIpAddress")}</label>
-              <input type="text" value={ipAddress} onChange={(e) => setIpAddress(e.target.value)} required className={inputClass} placeholder={t("nodes.ipPlaceholder")} />
+        <div className="space-y-6">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("nodes.tabSettings")}</h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{t("nodes.settingsDesc")}</p>
             </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("nodes.colManufacturer")}</label>
-              <select value={manufacturerId} onChange={(e) => handleManufacturerChange(e.target.value)} className={selectClass}>
-                <option value="">{"\u2014"}</option>
-                {manufacturers.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>
-                <span className="flex items-center gap-2">
-                  {t("nodes.colModel")}
-                  {modelsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
-                </span>
-              </label>
-              <select value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={modelsLoading} className={`${selectClass} ${modelsLoading ? "opacity-50" : ""}`}>
-                <option value="">{modelsLoading ? t("nodes.loadingModels") : "\u2014"}</option>
-                {filteredModels.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("nodes.colProfile")}</label>
-              <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className={selectClass}>
-                <option value="">{"\u2014"}</option>
-                {profiles.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("nodes.colPolicy")}</label>
-              <select value={policy} onChange={(e) => setPolicy(e.target.value)} className={selectClass}>
-                <option value="audit">{t("nodes.policyAudit")}</option>
-                <option value="enforce">{t("nodes.policyEnforce")}</option>
-              </select>
-            </div>
-            {allTags.length > 0 && (
+            <form id="node-settings-form" onSubmit={handleSave} className="p-6 space-y-5">
               <div className="space-y-1.5">
-                <label className={labelClass}>{t("sidebar.tags")}</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {allTags.map((tag) => {
-                    const isSelected = selectedTagIds.includes(tag.id);
-                    return (
-                      <button
-                        key={tag.id}
-                        type="button"
-                        onClick={() => setSelectedTagIds((prev) =>
-                          isSelected ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
-                        )}
-                        className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
-                          isSelected
-                            ? "text-white ring-2 ring-offset-1 ring-slate-900 dark:ring-white"
-                            : "text-white opacity-40 hover:opacity-70"
-                        }`}
-                        style={{ backgroundColor: tag.color }}
-                      >
-                        {tag.name}
-                      </button>
-                    );
-                  })}
-                </div>
+                <label className={labelClass}>{t("nodes.colIpAddress")}</label>
+                <input type="text" value={ipAddress} onChange={(e) => setIpAddress(e.target.value)} required className={inputClass} placeholder={t("nodes.ipPlaceholder")} />
               </div>
-            )}
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <button type="submit" disabled={saving || !ipAddress.trim()} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t("common.save")}
-              </button>
-              {saved && <span className="text-sm text-green-600 dark:text-green-400">{t("nodes.saved")}</span>}
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("nodes.colManufacturer")}</label>
+                <select value={manufacturerId} onChange={(e) => handleManufacturerChange(e.target.value)} className={selectClass}>
+                  <option value="">{"\u2014"}</option>
+                  {manufacturers.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>
+                  <span className="flex items-center gap-2">
+                    {t("nodes.colModel")}
+                    {modelsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />}
+                  </span>
+                </label>
+                <select value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={modelsLoading} className={`${selectClass} ${modelsLoading ? "opacity-50" : ""}`}>
+                  <option value="">{modelsLoading ? t("nodes.loadingModels") : "\u2014"}</option>
+                  {filteredModels.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("nodes.colProfile")}</label>
+                <select value={profileId} onChange={(e) => setProfileId(e.target.value)} className={selectClass}>
+                  <option value="">{"\u2014"}</option>
+                  {profiles.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("nodes.colPolicy")}</label>
+                <select value={policy} onChange={(e) => setPolicy(e.target.value)} className={selectClass}>
+                  <option value="audit">{t("nodes.policyAudit")}</option>
+                  <option value="enforce">{t("nodes.policyEnforce")}</option>
+                </select>
+              </div>
+              {allTags.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("sidebar.tags")}</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allTags.map((tag) => {
+                      const isSelected = selectedTagIds.includes(tag.id);
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() => setSelectedTagIds((prev) =>
+                            isSelected ? prev.filter((id) => id !== tag.id) : [...prev, tag.id]
+                          )}
+                          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium transition-all ${
+                            isSelected
+                              ? "text-white ring-2 ring-offset-1 ring-slate-900 dark:ring-white"
+                              : "text-white opacity-40 hover:opacity-70"
+                          }`}
+                          style={{ backgroundColor: tag.color }}
+                        >
+                          {tag.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </form>
+            {saved && <div className="px-6 pb-4"><span className="text-sm text-green-600 dark:text-green-400">{t("nodes.saved")}</span></div>}
+          </div>
+
+          <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="px-6 py-4 border-b border-red-100 dark:border-red-500/10">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-4 w-4" />
+                {t("nodes.dangerZone")}
+              </h3>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{t("nodes.dangerZoneDesc")}</p>
             </div>
-          </form>
-          <div className="px-6 pb-6 pt-2">
-            <div className="border-t border-red-200 dark:border-red-500/20 pt-5">
+            <div className="p-6">
               <button onClick={handleDelete} className="rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
                 {t("nodes.deleteNode")}
               </button>

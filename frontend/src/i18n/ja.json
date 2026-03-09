@@ -342,7 +342,10 @@
     "loadingModels": "モデルを読み込み中...",
     "tabSummary": "サマリー",
     "tabSettings": "設定",
+    "settingsDesc": "ノードのネットワーク、ハードウェア、タグの設定を構成します。",
     "deleteNode": "このノードを削除",
+    "dangerZone": "危険ゾーン",
+    "dangerZoneDesc": "このノードとそのすべてのデータの削除は元に戻せません。",
     "compliancePlaceholder": "コンプライアンスデータは最初の監査後にここに表示されます",
     "pingSelected": "Ping ({count})",
     "collectSelected": "収集 ({count})",
@@ -785,12 +788,15 @@
     "noResults": "評価結果なし",
     "noResultsDesc": "評価を実行してノードのコンプライアンスを確認してください。",
     "lastEvaluated": "最終評価",
-    "rulesCount": "{count}個のルール"
+    "rulesCount": "{count}個のルール",
+    "deleteResults": "結果を削除",
+    "confirmDeleteResults": "このポリシーのすべての評価結果を削除してもよろしいですか？"
   },
   "compliance": {
     "title": "コンプライアンス",
     "evaluateCompliance": "コンプライアンスを評価",
     "evaluating": "評価中...",
+    "pending": "待機中...",
     "noResults": "コンプライアンス結果なし",
     "noResultsDesc": "評価を実行してこのデバイスのコンプライアンスを確認してください。",
     "score": "スコア",
@@ -801,7 +807,14 @@
     "skipped": "スキップ",
     "severity": "重大度",
     "lastEvaluated": "最終評価",
-    "policy": "ポリシー"
+    "policy": "ポリシー",
+    "legend": "凡例",
+    "legendIcons": "ルールステータスアイコン",
+    "legendProgressBar": "プログレスバー",
+    "legendCompliant": "ルールは準拠 — デバイスは要件を満たしています。",
+    "legendNonCompliant": "ルールは非準拠 — デバイスは要件を満たしていません。",
+    "legendError": "エラー — ルールを評価できませんでした（接続障害、データ不足など）。",
+    "legendNotApplicable": "該当なし — データソースまたは評価条件が設定されていません。"
   },
   "status": {
     "completed": "完了",

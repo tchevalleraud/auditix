@@ -334,13 +334,13 @@ class CompliancePolicyController extends AbstractController
     public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus): JsonResponse
     {
         $nodes = $policy->getNodes();
-        $dispatched = 0;
+        $nodeIds = [];
         foreach ($nodes as $node) {
             $bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
-            $dispatched++;
+            $nodeIds[] = $node->getId();
         }
 
-        return $this->json(['dispatched' => $dispatched]);
+        return $this->json(['dispatched' => count($nodeIds), 'nodeIds' => $nodeIds]);
     }
 
     #[Route('/{id}/results', methods: ['GET'])]
@@ -357,6 +357,10 @@ class CompliancePolicyController extends AbstractController
             $nodeId = $r->getNode()->getId();
             if (!isset($nodeMap[$nodeId])) {
                 $n = $r->getNode();
+                $tags = [];
+                foreach ($n->getTags() as $tag) {
+                    $tags[] = ['id' => $tag->getId(), 'name' => $tag->getName(), 'color' => $tag->getColor()];
+                }
                 $nodeMap[$nodeId] = [
                     'node' => [
                         'id' => $n->getId(),
@@ -364,6 +368,7 @@ class CompliancePolicyController extends AbstractController
                         'ipAddress' => $n->getIpAddress(),
                         'hostname' => $n->getHostname(),
                         'score' => $n->getScore(),
+                        'tags' => $tags,
                     ],
                     'results' => [],
                     'stats' => ['compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0, 'skipped' => 0],
@@ -371,18 +376,26 @@ class CompliancePolicyController extends AbstractController
                 ];
             }
 
+            $status = $r->getStatus();
+
+            // Count skipped but don't include in results list
+            if ($status === 'skipped') {
+                $nodeMap[$nodeId]['stats']['skipped']++;
+                continue;
+            }
+
             $rule = $r->getRule();
             $nodeMap[$nodeId]['results'][] = [
                 'ruleId' => $rule->getId(),
                 'ruleIdentifier' => $rule->getIdentifier(),
                 'ruleName' => $rule->getName(),
+                'ruleDescription' => $rule->getDescription(),
                 'status' => $r->getStatus(),
                 'severity' => $r->getSeverity(),
                 'message' => $r->getMessage(),
                 'evaluatedAt' => $r->getEvaluatedAt()->format('c'),
             ];
 
-            $status = $r->getStatus();
             if (isset($nodeMap[$nodeId]['stats'][$status])) {
                 $nodeMap[$nodeId]['stats'][$status]++;
             }
@@ -393,7 +406,31 @@ class CompliancePolicyController extends AbstractController
             }
         }
 
+        // Sort results by rule identifier (natural sort)
+        foreach ($nodeMap as &$entry) {
+            usort($entry['results'], function ($a, $b) {
+                return strnatcasecmp($a['ruleIdentifier'] ?? '', $b['ruleIdentifier'] ?? '') ?: strcmp($a['ruleName'], $b['ruleName']);
+            });
+        }
+        unset($entry);
+
         return $this->json(array_values($nodeMap));
+    }
+
+    #[Route('/{id}/results/{nodeId}', methods: ['DELETE'])]
+    public function deleteNodeResults(CompliancePolicy $policy, int $nodeId, EntityManagerInterface $em): JsonResponse
+    {
+        $node = $em->getRepository(Node::class)->find($nodeId);
+        if (!$node) return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
+
+        $em->createQuery(
+            'DELETE FROM App\Entity\ComplianceResult r WHERE r.policy = :policy AND r.node = :node'
+        )->setParameter('policy', $policy)->setParameter('node', $node)->execute();
+
+        $node->setScore(null);
+        $em->flush();
+
+        return $this->json(['ok' => true]);
     }
 
     #[Route('/{id}', methods: ['DELETE'])]

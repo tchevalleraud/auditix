@@ -121,18 +121,17 @@ make up
 This command:
 - Builds the Docker images
 - Starts all services (database, message broker, backend, frontend, workers)
-- Runs Doctrine migrations
-- Creates the default user
+- Installs PHP dependencies (`composer install`) on first launch
+- Runs database migrations automatically
+- Creates the default admin user (`admin` / `password`)
 
 ### 4. Access the application
 
 | URL | Service |
 |-----|---------|
-| http://localhost | Application (frontend) |
-| http://localhost/api | Symfony API |
-| http://localhost:15672 | RabbitMQ Management |
+| http://localhost | Application |
 
-**Default credentials**: `admin` / `admin`
+**Default credentials**: `admin` / `password`
 
 ## Useful commands
 

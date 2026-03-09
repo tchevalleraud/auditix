@@ -65,6 +65,9 @@ class EvaluateComplianceMessageHandler
             if ($status === 'non_compliant') {
                 $severity = $evaluation['severity'] ?? 'info';
                 $penaltySum += ComplianceEvaluator::SEVERITY_WEIGHTS[$severity] ?? 0;
+            } elseif ($status === 'error') {
+                // Errors are penalized with maximum weight (critical) since compliance cannot be verified
+                $penaltySum += ComplianceEvaluator::SEVERITY_WEIGHTS['critical'] ?? 10;
             }
 
             $evaluated++;

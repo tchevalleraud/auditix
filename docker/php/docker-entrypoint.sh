@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+# Install Symfony skeleton if no project exists (first-ever run)
 if [ ! -f /var/www/composer.json ]; then
     echo ">> Installing Symfony project..."
     composer create-project symfony/skeleton:"7.2.*" /tmp/symfony --no-interaction
@@ -12,6 +13,7 @@ if [ ! -f /var/www/composer.json ]; then
     composer require symfony/messenger symfony/amqp-messenger --no-interaction
 fi
 
+# Always install dependencies if vendor is missing
 if [ -f /var/www/composer.json ] && [ ! -d /var/www/vendor ]; then
     echo ">> Installing dependencies..."
     composer install --no-interaction --optimize-autoloader
@@ -23,8 +25,11 @@ if [ -f /var/www/bin/console ]; then
         sleep 2
     done
 
-    echo ">> Updating database schema..."
-    php bin/console doctrine:schema:update --force --no-interaction
+    echo ">> Running database migrations..."
+    php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration 2>/dev/null || {
+        echo ">> Migrations failed, falling back to schema update..."
+        php bin/console doctrine:schema:update --force --no-interaction
+    }
 
     echo ">> Creating default user..."
     php bin/console app:create-default-user

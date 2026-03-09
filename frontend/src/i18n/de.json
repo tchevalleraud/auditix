@@ -342,7 +342,10 @@
     "loadingModels": "Modelle werden geladen...",
     "tabSummary": "Ubersicht",
     "tabSettings": "Einstellungen",
+    "settingsDesc": "Netzwerk-, Hardware- und Tag-Einstellungen des Knotens konfigurieren.",
     "deleteNode": "Diesen Knoten loschen",
+    "dangerZone": "Gefahrenzone",
+    "dangerZoneDesc": "Das Löschen dieses Knotens und aller zugehörigen Daten ist unwiderruflich.",
     "compliancePlaceholder": "Konformitatsdaten erscheinen hier nach dem ersten Audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Sammeln ({count})",
@@ -785,12 +788,15 @@
     "noResults": "Keine Auswertungsergebnisse",
     "noResultsDesc": "Starten Sie eine Auswertung, um die Konformitat der Knoten zu prufen.",
     "lastEvaluated": "Letzte Auswertung",
-    "rulesCount": "{count} Regel(n)"
+    "rulesCount": "{count} Regel(n)",
+    "deleteResults": "Ergebnisse loschen",
+    "confirmDeleteResults": "Mochten Sie wirklich alle Bewertungsergebnisse dieser Richtlinie loschen?"
   },
   "compliance": {
     "title": "Konformitat",
     "evaluateCompliance": "Konformitat auswerten",
     "evaluating": "Auswertung lauft...",
+    "pending": "Wartend...",
     "noResults": "Keine Konformitatsergebnisse",
     "noResultsDesc": "Starten Sie eine Auswertung, um die Konformitat dieses Gerats zu prufen.",
     "score": "Bewertung",
@@ -801,7 +807,14 @@
     "skipped": "Ubersprungen",
     "severity": "Schweregrad",
     "lastEvaluated": "Letzte Auswertung",
-    "policy": "Richtlinie"
+    "policy": "Richtlinie",
+    "legend": "Legende",
+    "legendIcons": "Regelstatus-Symbole",
+    "legendProgressBar": "Fortschrittsbalken",
+    "legendCompliant": "Die Regel ist konform — das Gerät erfüllt die Anforderung.",
+    "legendNonCompliant": "Die Regel ist nicht konform — das Gerät erfüllt die Anforderung nicht.",
+    "legendError": "Fehler — die Regel konnte nicht ausgewertet werden (Verbindungsfehler, fehlende Daten usw.).",
+    "legendNotApplicable": "Nicht anwendbar — keine Datenquelle oder Auswertungsbedingungen konfiguriert."
   },
   "status": {
     "completed": "Abgeschlossen",

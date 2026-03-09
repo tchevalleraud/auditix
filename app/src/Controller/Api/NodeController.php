@@ -342,18 +342,25 @@ class NodeController extends AbstractController
                 ];
             }
 
+            $status = $r->getStatus();
+
+            // Skip disabled rules (skipped status)
+            if ($status === 'skipped') {
+                continue;
+            }
+
             $rule = $r->getRule();
             $policyMap[$pId]['results'][] = [
                 'ruleId' => $rule->getId(),
                 'ruleIdentifier' => $rule->getIdentifier(),
                 'ruleName' => $rule->getName(),
+                'ruleDescription' => $rule->getDescription(),
                 'status' => $r->getStatus(),
                 'severity' => $r->getSeverity(),
                 'message' => $r->getMessage(),
                 'evaluatedAt' => $r->getEvaluatedAt()->format('c'),
             ];
 
-            $status = $r->getStatus();
             if (isset($policyMap[$pId]['stats'][$status])) {
                 $policyMap[$pId]['stats'][$status]++;
             }
@@ -363,6 +370,14 @@ class NodeController extends AbstractController
                 $policyMap[$pId]['evaluatedAt'] = $evalAt;
             }
         }
+
+        // Sort results by rule identifier (natural sort)
+        foreach ($policyMap as &$entry) {
+            usort($entry['results'], function ($a, $b) {
+                return strnatcasecmp($a['ruleIdentifier'] ?? '', $b['ruleIdentifier'] ?? '') ?: strcmp($a['ruleName'], $b['ruleName']);
+            });
+        }
+        unset($entry);
 
         return $this->json([
             'score' => $node->getScore(),

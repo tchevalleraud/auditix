@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
@@ -87,6 +87,7 @@ interface PolicyResultEntry {
   ruleId: number;
   ruleIdentifier: string | null;
   ruleName: string;
+  ruleDescription: string | null;
   status: string;
   severity: string | null;
   message: string | null;
@@ -94,7 +95,7 @@ interface PolicyResultEntry {
 }
 
 interface PolicyNodeResult {
-  node: { id: number; name: string | null; ipAddress: string; hostname: string | null; score: string | null };
+  node: { id: number; name: string | null; ipAddress: string; hostname: string | null; score: string | null; tags?: { id: number; name: string; color: string }[] };
   results: PolicyResultEntry[];
   stats: Record<string, number>;
   evaluatedAt: string | null;
@@ -148,7 +149,10 @@ export default function CompliancePolicyEditPage() {
   const [policyResults, setPolicyResults] = useState<PolicyNodeResult[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [legendOpen, setLegendOpen] = useState(false);
   const [expandedResultNodes, setExpandedResultNodes] = useState<Set<number>>(new Set());
+  // Per-node evaluation status: "pending" (queued, grey), "running" (in progress, blue), "done" (finished)
+  const [nodeEvalStatus, setNodeEvalStatus] = useState<Record<number, "pending" | "running" | "done">>({});
 
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -192,20 +196,24 @@ export default function CompliancePolicyEditPage() {
     if (res.ok) setAvailableTags(await res.json());
   }, [current]);
 
-  const loadResults = useCallback(async () => {
-    setLoadingResults(true);
+  const loadResults = useCallback(async (silent = false) => {
+    if (!silent) setLoadingResults(true);
     try {
       const res = await fetch(`/api/compliance-policies/${policyId}/results`);
       if (res.ok) setPolicyResults(await res.json());
-    } finally { setLoadingResults(false); }
+    } finally { if (!silent) setLoadingResults(false); }
   }, [policyId]);
 
   useEffect(() => { loadPolicy(); }, [loadPolicy]);
 
+  const resultsLoadedRef = useRef(false);
+  const rulesLoadedRef = useRef(false);
+  const nodesLoadedRef = useRef(false);
+
   useEffect(() => {
-    if (activeTab === "rules") loadRules();
-    if (activeTab === "nodes") { loadNodes(); loadAvailableTags(); }
-    if (activeTab === "results") loadResults();
+    if (activeTab === "rules" && !rulesLoadedRef.current) { rulesLoadedRef.current = true; loadRules(); }
+    if (activeTab === "nodes" && !nodesLoadedRef.current) { nodesLoadedRef.current = true; loadNodes(); loadAvailableTags(); }
+    if (activeTab === "results" && !resultsLoadedRef.current) { resultsLoadedRef.current = true; loadResults(); }
   }, [activeTab, loadRules, loadNodes, loadAvailableTags, loadResults]);
 
   // Mercure SSE for compliance results
@@ -216,9 +224,18 @@ export default function CompliancePolicyEditPage() {
     const es = new EventSource(url);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      if (data.event === "compliance.evaluated") {
-        loadResults();
-        setEvaluating(false);
+      if (data.event === "compliance.progress" && data.nodeId) {
+        setNodeEvalStatus((prev) => ({ ...prev, [data.nodeId]: "running" }));
+      }
+      if (data.event === "compliance.evaluated" && data.nodeId) {
+        setNodeEvalStatus((prev) => {
+          const next = { ...prev, [data.nodeId]: "done" as const };
+          // If all nodes are done, stop evaluating
+          const allDone = Object.values(next).every((s) => s === "done");
+          if (allDone) setTimeout(() => setEvaluating(false), 300);
+          return next;
+        });
+        loadResults(true);
       }
     };
     return () => es.close();
@@ -995,17 +1012,30 @@ export default function CompliancePolicyEditPage() {
       {/* Results tab */}
       {activeTab === "results" && (
         <div className="space-y-6">
-          <div className="flex items-center justify-end">
+          <div className="flex items-center justify-end gap-2">
             <button
               onClick={async () => {
                 setEvaluating(true);
-                await fetch(`/api/compliance-policies/${policyId}/evaluate`, { method: "POST" });
+                const res = await fetch(`/api/compliance-policies/${policyId}/evaluate`, { method: "POST" });
+                if (res.ok) {
+                  const data = await res.json();
+                  const ids: number[] = data.nodeIds || [];
+                  const pending: Record<number, "pending"> = {};
+                  ids.forEach((id) => { pending[id] = "pending"; });
+                  setNodeEvalStatus(pending);
+                }
               }}
               disabled={evaluating}
               className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
             >
               {evaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               {evaluating ? t("compliance_policies.evaluating") : t("compliance_policies.evaluateAll")}
+            </button>
+            <button
+              onClick={() => setLegendOpen(true)}
+              className="flex items-center justify-center h-10 w-10 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-sm font-semibold"
+            >
+              ?
             </button>
           </div>
 
@@ -1022,38 +1052,109 @@ export default function CompliancePolicyEditPage() {
           ) : (
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
               <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                {policyResults.map((nr) => {
+                {[...policyResults].sort((a, b) => {
+                  const aLabel = (a.node.hostname || a.node.name || a.node.ipAddress || "").toLowerCase();
+                  const bLabel = (b.node.hostname || b.node.name || b.node.ipAddress || "").toLowerCase();
+                  return aLabel.localeCompare(bLabel);
+                }).map((nr) => {
                   const isExp = expandedResultNodes.has(nr.node.id);
                   const total = Object.values(nr.stats).reduce((a, b) => a + b, 0);
+                  const evalStatus = nodeEvalStatus[nr.node.id];
+                  const isNodeEvaluating = evalStatus === "pending" || evalStatus === "running";
                   const scoreCls = nr.node.score === "A" ? "bg-emerald-500" : nr.node.score === "B" ? "bg-green-500" : nr.node.score === "C" ? "bg-yellow-500" : nr.node.score === "D" ? "bg-orange-500" : nr.node.score === "E" ? "bg-red-500" : nr.node.score === "F" ? "bg-red-700" : "bg-slate-300 dark:bg-slate-600";
 
                   return (
                     <div key={nr.node.id}>
-                      <button
-                        onClick={() => setExpandedResultNodes((prev) => { const next = new Set(prev); next.has(nr.node.id) ? next.delete(nr.node.id) : next.add(nr.node.id); return next; })}
-                        className="w-full flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left"
-                      >
-                        {isExp ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
-                        <span className={`inline-flex items-center justify-center h-7 w-7 rounded-lg text-xs font-bold text-white ${scoreCls}`}>
-                          {nr.node.score || "?"}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{nr.node.name || nr.node.hostname || nr.node.ipAddress}</span>
-                          <span className="ml-2 text-xs text-slate-400 font-mono">{nr.node.ipAddress}</span>
-                        </div>
-                        <div className="flex items-center gap-3 text-xs shrink-0">
-                          {nr.stats.compliant > 0 && <span className="text-emerald-600 dark:text-emerald-400">{nr.stats.compliant} {t("compliance.compliant").toLowerCase()}</span>}
-                          {nr.stats.non_compliant > 0 && <span className="text-red-600 dark:text-red-400">{nr.stats.non_compliant} {t("compliance.nonCompliant").toLowerCase()}</span>}
-                          {nr.stats.error > 0 && <span className="text-orange-500">{nr.stats.error} {t("compliance.error").toLowerCase()}</span>}
-                          <span className="text-slate-400">{total} {t("compliance_rules.rule")}{total !== 1 ? "s" : ""}</span>
-                        </div>
-                      </button>
+                      <div className="flex items-center">
+                        <button
+                          onClick={() => setExpandedResultNodes((prev) => { const next = new Set(prev); next.has(nr.node.id) ? next.delete(nr.node.id) : next.add(nr.node.id); return next; })}
+                          className="flex-1 flex items-center gap-4 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left"
+                        >
+                          {isExp ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+                          {isNodeEvaluating ? (
+                            <span className={`inline-flex items-center justify-center h-7 w-7 rounded-lg ${evalStatus === "running" ? "bg-blue-500" : "bg-slate-300 dark:bg-slate-600"}`}>
+                              <Loader2 className="h-4 w-4 animate-spin text-white" />
+                            </span>
+                          ) : (
+                            <span className={`inline-flex items-center justify-center h-7 w-7 rounded-lg text-xs font-bold text-white ${scoreCls}`}>
+                              {nr.node.score || "?"}
+                            </span>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{nr.node.hostname || nr.node.name || nr.node.ipAddress}</span>
+                              <span className="text-xs text-slate-400 font-mono">{nr.node.ipAddress}</span>
+                              {nr.node.tags?.map((tag) => (
+                                <span key={tag.id} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-white" style={{ backgroundColor: tag.color }}>
+                                  {tag.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          {isNodeEvaluating ? (
+                            <span className={`text-xs shrink-0 ${evalStatus === "running" ? "text-blue-500" : "text-slate-400"}`}>
+                              {evalStatus === "running" ? t("compliance_policies.evaluating") : t("compliance.pending")}
+                            </span>
+                          ) : (() => {
+                            const c = nr.stats.compliant || 0;
+                            const nc = nr.stats.non_compliant || 0;
+                            const err = nr.stats.error || 0;
+                            const na = nr.stats.not_applicable || 0;
+                            const t2 = c + nc + err + na;
+                            if (t2 === 0) return null;
+                            const pC = (c / t2) * 100;
+                            const pNC = ((c + nc) / t2) * 100;
+                            const pErr = ((c + nc + err) / t2) * 100;
+                            return (
+                              <div className="flex items-center gap-2.5 shrink-0 w-56">
+                                <div className="h-2.5 flex-1 rounded-full overflow-hidden relative">
+                                  <div className="absolute inset-0" style={{
+                                    background: `linear-gradient(to right, ${[
+                                      ...(c > 0 ? [`#10b981 0%, #10b981 ${pC}%`] : []),
+                                      ...(nc > 0 ? [`#ef4444 ${pC}%, #ef4444 ${pNC}%`] : []),
+                                      ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 ${pErr}%`] : []),
+                                      ...(na > 0 ? [`#e2e8f0 ${pErr}%, #e2e8f0 100%`] : []),
+                                    ].join(", ")})`
+                                  }} />
+                                  {err > 0 && (
+                                    <div className="absolute inset-0" style={{
+                                      clipPath: `inset(0 ${100 - pErr}% 0 ${pNC}%)`,
+                                      backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
+                                    }} />
+                                  )}
+                                </div>
+                                <span className="text-[10px] text-slate-400 shrink-0 tabular-nums">{c}/{t2}</span>
+                              </div>
+                            );
+                          })()}
+                        </button>
+                        {!isNodeEvaluating && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              await fetch(`/api/compliance-policies/${policyId}/results/${nr.node.id}`, { method: "DELETE" });
+                              setPolicyResults((prev) => prev.filter((p) => p.node.id !== nr.node.id));
+                            }}
+                            className="shrink-0 p-2.5 mr-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            title={t("compliance_policies.deleteResults")}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                       {isExp && (
                         <div className="border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20">
-                          {nr.results.map((r) => {
+                          {nr.results.filter((r) => r.status !== "skipped").map((r) => {
                             const statusIcon = r.status === "compliant" ? <CheckCircle2 className="h-4 w-4 text-emerald-500" />
                               : r.status === "non_compliant" ? <Ban className="h-4 w-4 text-red-500" />
-                              : r.status === "error" ? <XCircle className="h-4 w-4 text-orange-500" />
+                              : r.status === "error" ? (
+                                <span className="relative inline-flex h-4 w-4">
+                                  <XCircle className="h-4 w-4 text-red-500" />
+                                  <span className="absolute inset-0 flex items-center justify-center">
+                                    <span className="block w-[18px] h-[1.5px] bg-red-500 rotate-45 rounded-full" />
+                                  </span>
+                                </span>
+                              )
                               : <Minus className="h-4 w-4 text-slate-400" />;
                             const sevCls = r.severity === "critical" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
                               : r.severity === "high" ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
@@ -1067,11 +1168,14 @@ export default function CompliancePolicyEditPage() {
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {r.ruleIdentifier && <code className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 font-mono">{r.ruleIdentifier}</code>}
                                     <span className="text-sm text-slate-900 dark:text-slate-100">{r.ruleName}</span>
+                                    {r.severity && r.status === "non_compliant" && (
+                                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                    )}
                                   </div>
-                                  {r.message && <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">{r.message}</p>}
+                                  {r.ruleDescription && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{r.ruleDescription}</p>}
                                 </div>
-                                {r.severity && r.status === "non_compliant" && (
-                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                {r.message && (
+                                  <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0 max-w-xs truncate text-right">{r.message}</span>
                                 )}
                               </div>
                             );
@@ -1104,6 +1208,68 @@ export default function CompliancePolicyEditPage() {
               >
                 {t("common.delete")}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legend modal */}
+      {legendOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("compliance.legend")}</h3>
+              <button onClick={() => setLegendOpen(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <X className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-3">
+                <h4 className="text-xs font-semibold uppercase text-slate-400 tracking-wider">{t("compliance.legendIcons")}</h4>
+                <div className="flex items-center gap-3">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendCompliant")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Ban className="h-5 w-5 text-red-500 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendNonCompliant")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="relative inline-flex h-5 w-5 shrink-0">
+                    <XCircle className="h-5 w-5 text-red-500" />
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      <span className="block w-[22px] h-[2px] bg-red-500 rotate-45 rounded-full" />
+                    </span>
+                  </span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendError")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Minus className="h-5 w-5 text-slate-400 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendNotApplicable")}</span>
+                </div>
+              </div>
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4 space-y-3">
+                <h4 className="text-xs font-semibold uppercase text-slate-400 tracking-wider">{t("compliance.legendProgressBar")}</h4>
+                <div className="flex items-center gap-3">
+                  <span className="inline-block h-3 w-6 rounded-full bg-emerald-500 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendCompliant")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="inline-block h-3 w-6 rounded-full bg-red-500 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendNonCompliant")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="inline-block h-3 w-6 rounded-full shrink-0 overflow-hidden relative">
+                    <span className="absolute inset-0 bg-red-500" />
+                    <span className="absolute inset-0" style={{ backgroundImage: "repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)" }} />
+                  </span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendError")}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="inline-block h-3 w-6 rounded-full bg-slate-200 dark:bg-slate-600 shrink-0" />
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{t("compliance.legendNotApplicable")}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

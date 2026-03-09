@@ -342,7 +342,10 @@
     "loadingModels": "Caricamento modelli...",
     "tabSummary": "Riepilogo",
     "tabSettings": "Impostazioni",
+    "settingsDesc": "Configura le impostazioni di rete, hardware e tag del nodo.",
     "deleteNode": "Elimina questo nodo",
+    "dangerZone": "Zona di pericolo",
+    "dangerZoneDesc": "L'eliminazione di questo nodo e di tutti i suoi dati è irreversibile.",
     "compliancePlaceholder": "I dati di conformita appariranno qui dopo il primo audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Raccogli ({count})",
@@ -785,12 +788,15 @@
     "noResults": "Nessun risultato di valutazione",
     "noResultsDesc": "Avvia una valutazione per verificare la conformita dei nodi.",
     "lastEvaluated": "Ultima valutazione",
-    "rulesCount": "{count} regola/e"
+    "rulesCount": "{count} regola/e",
+    "deleteResults": "Elimina risultati",
+    "confirmDeleteResults": "Vuoi davvero eliminare tutti i risultati di valutazione di questa politica?"
   },
   "compliance": {
     "title": "Conformita",
     "evaluateCompliance": "Valuta conformita",
     "evaluating": "Valutazione in corso...",
+    "pending": "In attesa...",
     "noResults": "Nessun risultato di conformita",
     "noResultsDesc": "Avvia una valutazione per verificare la conformita di questo dispositivo.",
     "score": "Punteggio",
@@ -801,7 +807,14 @@
     "skipped": "Saltata",
     "severity": "Gravita",
     "lastEvaluated": "Ultima valutazione",
-    "policy": "Politica"
+    "policy": "Politica",
+    "legend": "Legenda",
+    "legendIcons": "Icone di stato delle regole",
+    "legendProgressBar": "Barra di avanzamento",
+    "legendCompliant": "La regola è conforme — il dispositivo soddisfa il requisito.",
+    "legendNonCompliant": "La regola non è conforme — il dispositivo non soddisfa il requisito.",
+    "legendError": "Errore — la regola non è stata valutata (errore di connessione, dati mancanti, ecc.).",
+    "legendNotApplicable": "Non applicabile — nessuna fonte dati o condizioni di valutazione configurate."
   },
   "status": {
     "completed": "Completato",

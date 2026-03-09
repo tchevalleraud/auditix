@@ -43,12 +43,12 @@ class ComplianceEvaluator
         }
 
         if ($rule->getSourceType() === ComplianceRule::SOURCE_NONE) {
-            return ['status' => 'skipped', 'severity' => null, 'message' => 'No data source configured'];
+            return ['status' => 'not_applicable', 'severity' => null, 'message' => 'No data source configured'];
         }
 
         $conditionTree = $rule->getConditionTree();
         if (!$conditionTree || empty($conditionTree['blocks'] ?? [])) {
-            return ['status' => 'skipped', 'severity' => null, 'message' => 'No conditions configured'];
+            return ['status' => 'not_applicable', 'severity' => null, 'message' => 'No conditions configured'];
         }
 
         $sourceData = $this->getSourceData($rule, $node);
