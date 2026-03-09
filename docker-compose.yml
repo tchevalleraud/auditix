@@ -7,6 +7,7 @@ x-worker: &worker
     - ./data/collections:/var/www/var/collections
   environment: &worker-env
     APP_ENV: ${APP_ENV:-dev}
+    DEFAULT_URI: ${DEFAULT_URI:-http://localhost}
     DATABASE_URL: postgresql://${POSTGRES_USER:-auditix}:${POSTGRES_PASSWORD:-auditix}@postgres:5432/${POSTGRES_DB:-auditix}?serverVersion=16&charset=utf8
     MESSENGER_TRANSPORT_DSN: amqp://${RABBITMQ_USER:-auditix}:${RABBITMQ_PASSWORD:-auditix}@rabbitmq:5672/%2f/messages
     MERCURE_URL: http://mercure/.well-known/mercure

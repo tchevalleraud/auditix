@@ -19,7 +19,8 @@ if [ -f /var/www/composer.json ] && [ ! -f /var/www/.env ]; then
     cat > /var/www/.env <<'ENVEOF'
 APP_ENV=dev
 APP_SECRET=
-DATABASE_URL="postgresql://${POSTGRES_USER:-auditix}:${POSTGRES_PASSWORD:-auditix}@postgres:5432/${POSTGRES_DB:-auditix}?serverVersion=16&charset=utf8"
+DEFAULT_URI=http://localhost
+DATABASE_URL="postgresql://auditix:auditix@postgres:5432/auditix?serverVersion=16&charset=utf8"
 MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0
 MERCURE_URL=http://mercure/.well-known/mercure
 MERCURE_PUBLIC_URL=/.well-known/mercure
