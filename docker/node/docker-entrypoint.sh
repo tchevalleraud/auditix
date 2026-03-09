@@ -6,4 +6,11 @@ if [ ! -d /app/node_modules ]; then
     npm install
 fi
 
-exec "$@"
+if [ "$APP_ENV" = "prod" ]; then
+    echo ">> Building Next.js for production..."
+    npm run build
+    echo ">> Starting production server..."
+    exec npm start
+else
+    exec "$@"
+fi

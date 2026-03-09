@@ -48,6 +48,12 @@ if [ -f /var/www/bin/console ]; then
 
     echo ">> Creating default user..."
     php bin/console app:create-default-user
+
+    echo ">> Warming up cache..."
+    php bin/console cache:warmup --no-interaction 2>/dev/null || true
+
+    echo ">> Fixing permissions..."
+    chown -R www-data:www-data /var/www/var 2>/dev/null || true
 fi
 
 # Allow www-data to access Docker socket for health checks

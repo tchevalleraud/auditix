@@ -39,6 +39,8 @@ services:
       context: ./docker/node
     volumes:
       - ./frontend:/app
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
     restart: unless-stopped
 
   php:
