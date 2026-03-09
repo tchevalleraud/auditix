@@ -166,7 +166,7 @@ When deploying on a remote server with a public IP, configure:
 
 ```env
 APP_ENV=prod
-DEFAULT_URI=http://your-server-ip
+DEFAULT_URI=http://your-server-ip:8080
 HTTP_PORT=8080
 ```
 
