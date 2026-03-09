@@ -8,8 +8,8 @@ The project is composed of three main layers, orchestrated by Docker Compose:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      Nginx (port 80)                    │
-│                     Reverse Proxy                       │
+│                   Nginx (HTTP_PORT)                      │
+│                    Reverse Proxy                         │
 ├──────────────────┬──────────────────┬───────────────────┤
 │  /api/*          │  /.well-known/   │  /*               │
 │  Symfony (PHP)   │  mercure         │  Next.js (Node)   │
@@ -54,11 +54,13 @@ The project is composed of three main layers, orchestrated by Docker Compose:
 - **Regex-based evaluation**: match, count, or capture modes with named groups and value mapping
 - **Condition engine**: operators (equals, contains, matches, greater_than, etc.) with AND/OR logic blocks
 - **Severity levels**: info, low, medium, high, critical — each with a weighted score
-- **A-F grading**: automatic score calculation based on rule severity (A >= 90%, B >= 75%, C >= 60%, D >= 45%, E >= 30%, F < 30%)
+- **A-F grading**: automatic score calculation based on severity-weighted penalties (A >= 90%, B >= 75%, C >= 60%, D >= 45%, E >= 30%, F < 30%)
+- **Error penalty**: rules that cannot be evaluated (errors) are penalized with maximum weight (critical)
 - **Folder-based rule organization**: tree structure within policies, plus extra standalone rules
 - **Asynchronous evaluation** via dedicated compliance workers (scalable)
 - **Per-node compliance tab**: view all policy results and launch evaluations from node detail
 - **Real-time progress** via Mercure SSE during evaluation
+- **Visual result indicators**: color-coded icons (green = compliant, red = non-compliant, red striped = error, grey = not applicable) with interactive legend
 
 ### Monitoring
 - **ICMP ping** with real-time status updates
@@ -102,6 +104,12 @@ Edit the `.env` file as needed. Default values work for local development:
 ```env
 APP_ENV=dev
 
+# Base URL (set to your server IP/domain if not localhost)
+# DEFAULT_URI=http://localhost
+
+# Exposed HTTP port (default: 80)
+# HTTP_PORT=80
+
 # PostgreSQL
 POSTGRES_DB=auditix
 POSTGRES_USER=auditix
@@ -121,17 +129,46 @@ make up
 This command:
 - Builds the Docker images
 - Starts all services (database, message broker, backend, frontend, workers)
-- Installs PHP dependencies (`composer install`) on first launch
+- Installs dependencies (`composer install`, `npm install`) on first launch
 - Runs database migrations automatically
 - Creates the default admin user (`admin` / `password`)
 
 ### 4. Access the application
 
-| URL | Service |
-|-----|---------|
-| http://localhost | Application |
+Open `http://localhost` (or `http://<your-ip>:<HTTP_PORT>` if configured).
 
 **Default credentials**: `admin` / `password`
+
+## Environment modes
+
+### Development (default)
+
+```env
+APP_ENV=dev
+```
+
+- Next.js runs in dev mode with hot reload (Turbopack)
+- Symfony runs with debug toolbar and detailed error pages
+
+### Production
+
+```env
+APP_ENV=prod
+```
+
+- Next.js is built and served as a static production build
+- Symfony cache is warmed up with optimized autoloader
+- Recommended for remote/server deployments
+
+### Remote deployment
+
+When deploying on a remote server with a public IP, configure:
+
+```env
+APP_ENV=prod
+DEFAULT_URI=http://your-server-ip
+HTTP_PORT=8080
+```
 
 ## Useful commands
 
@@ -241,9 +278,12 @@ WORKER_COMPLIANCE_REPLICAS=4
    a. Fetch source data (inventory field, collection file, or live SSH command)
    b. Apply regex extraction (match/count/capture)
    c. Evaluate condition blocks (AND/OR logic with operators)
-   d. Record result: compliant, non_compliant (with severity), skipped, error, or not_applicable
-   e. Real-time progress updates via Mercure
+   d. Record result: compliant, non_compliant (with severity), error, or not_applicable
+   e. Disabled rules are skipped and hidden from results
+   f. Real-time progress updates via Mercure
 6. Final score calculated as A-F grade based on severity-weighted penalties
+   - Errors are penalized with maximum weight (critical = 10)
+   - Not applicable rules are excluded from the score
 7. Score displayed on node cards and in the compliance tab
 ```
 
