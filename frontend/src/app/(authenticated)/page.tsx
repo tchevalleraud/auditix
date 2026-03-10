@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -88,20 +88,66 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const prevContextId = useRef<number | null>(null);
+
   useEffect(() => {
     if (!current) {
       setData(null);
       setLoading(false);
+      prevContextId.current = null;
       return;
     }
 
-    setLoading(true);
+    // Only show loading spinner on initial load or context switch, not on background refreshes
+    const contextChanged = current.id !== prevContextId.current;
+    if (contextChanged) {
+      setLoading(true);
+      setData(null);
+      prevContextId.current = current.id;
+    }
+
     fetch(`/api/contexts/${current.id}/dashboard`)
       .then((res) => (res.ok ? res.json() : null))
       .then((d) => setData(d))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [current]);
+
+  // Silent re-fetch for Mercure updates (no spinner)
+  const silentRefresh = useCallback(() => {
+    if (!current) return;
+    fetch(`/api/contexts/${current.id}/dashboard`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((d) => { if (d) setData(d); })
+      .catch(() => {});
+  }, [current]);
+
+  // Mercure SSE: real-time ping updates for node reachability
+  useEffect(() => {
+    if (!current || !data?.monitoring) return;
+
+    const url = new URL("/.well-known/mercure", window.location.origin);
+    url.searchParams.append("topic", `nodes/context/${current.id}`);
+
+    const es = new EventSource(url);
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "ping") {
+          // Debounce: wait 500ms after last ping event before re-fetching
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(silentRefresh, 500);
+        }
+      } catch {}
+    };
+
+    return () => {
+      es.close();
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [current, data?.monitoring, silentRefresh]);
 
   if (!current) {
     return (

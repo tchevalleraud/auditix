@@ -104,14 +104,23 @@ export default function ContextProvider({ children }: { children: React.ReactNod
       const res = await fetch("/api/contexts");
       if (res.ok) {
         const data: AppContext[] = await res.json();
-        setContexts(data);
+
+        // Only update contexts if data actually changed (prevents unnecessary re-renders)
+        setContexts((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(data)) return prev;
+          return data;
+        });
 
         // Update current context with fresh data, or fallback if no longer accessible
         const cur = currentRef.current;
         if (cur) {
           const updated = data.find((c) => c.id === cur.id);
           if (updated) {
-            setCurrentState(updated);
+            // Only update if data actually changed (prevents downstream useEffect re-runs)
+            setCurrentState((prev) => {
+              if (prev && JSON.stringify(prev) === JSON.stringify(updated)) return prev;
+              return updated;
+            });
           } else {
             const fallback = data[0] ?? null;
             setCurrentState(fallback);
