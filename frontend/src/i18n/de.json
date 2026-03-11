@@ -814,7 +814,20 @@
     "legendCompliant": "Die Regel ist konform — das Gerät erfüllt die Anforderung.",
     "legendNonCompliant": "Die Regel ist nicht konform — das Gerät erfüllt die Anforderung nicht.",
     "legendError": "Fehler — die Regel konnte nicht ausgewertet werden (Verbindungsfehler, fehlende Daten usw.).",
-    "legendNotApplicable": "Nicht anwendbar — keine Datenquelle oder Auswertungsbedingungen konfiguriert."
+    "legendNotApplicable": "Nicht anwendbar — keine Datenquelle oder Auswertungsbedingungen konfiguriert.",
+    "scoreCalculation": "Wie wird die Note berechnet?",
+    "scoreCalculationDesc": "Die Note wird aus den Compliance-Ergebnissen aller zugehörigen Richtlinien berechnet. Jede nicht konforme oder fehlerhafte Regel führt zu einer Strafe basierend auf ihrem Schweregrad. Regeln mit dem Status 'nicht anwendbar' oder 'übersprungen' werden von der Berechnung ausgeschlossen.",
+    "scoreFormula": "Score = (Max. Strafe - Tatsächliche Strafe) / Max. Strafe × 100",
+    "scoreMaxPenalty": "Max. Strafe = Anzahl bewerteter Regeln × 10",
+    "scoreSeverityWeights": "Strafen nach Schweregrad",
+    "scoreSeverityInfo": "Info",
+    "scoreSeverityLow": "Niedrig",
+    "scoreSeverityMedium": "Mittel",
+    "scoreSeverityHigh": "Hoch",
+    "scoreSeverityCritical": "Kritisch",
+    "scoreSeverityError": "Fehler (Regelausfall)",
+    "scoreGradeScale": "Notenskala",
+    "scoreGradeNote": "Prozentsatz ≥"
   },
   "status": {
     "completed": "Abgeschlossen",

@@ -150,6 +150,7 @@ export default function NodeDetailPage() {
   const [complianceLoading, setComplianceLoading] = useState(false);
   const [complianceEvaluating, setComplianceEvaluating] = useState(false);
   const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
+  const [scoreCalcOpen, setScoreCalcOpen] = useState(false);
 
   const dateLocale = locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
 
@@ -532,9 +533,14 @@ export default function NodeDetailPage() {
             )}
             <button
               onClick={async () => {
-                setComplianceEvaluating(true);
-                setNode((prev) => prev ? { ...prev, score: null } : prev);
-                await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+                const res = await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data.dispatched > 0) {
+                    setComplianceEvaluating(true);
+                    setNode((prev) => prev ? { ...prev, score: null } : prev);
+                  }
+                }
               }}
               disabled={complianceEvaluating}
               className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
@@ -865,6 +871,166 @@ export default function NodeDetailPage() {
               </div>
             </div>
           )}
+
+          {/* Score calculation explanation */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            <button
+              onClick={() => setScoreCalcOpen(!scoreCalcOpen)}
+              className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors text-left"
+            >
+              {scoreCalcOpen ? <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />}
+              <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{t("compliance.scoreCalculation")}</span>
+            </button>
+            {scoreCalcOpen && (
+              <div className="border-t border-slate-100 dark:border-slate-800 px-5 py-4 space-y-4">
+                <p className="text-sm text-slate-600 dark:text-slate-400">{t("compliance.scoreCalculationDesc")}</p>
+
+                <div className="space-y-1.5">
+                  <code className="block text-xs bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-lg px-3 py-2 font-mono">{t("compliance.scoreFormula")}</code>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{t("compliance.scoreMaxPenalty")}</p>
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100 mb-2">{t("compliance.scoreSeverityWeights")}</h4>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                    {[
+                      { label: t("compliance.scoreSeverityInfo"), value: 1, cls: "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400" },
+                      { label: t("compliance.scoreSeverityLow"), value: 3, cls: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400" },
+                      { label: t("compliance.scoreSeverityMedium"), value: 5, cls: "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400" },
+                      { label: t("compliance.scoreSeverityHigh"), value: 8, cls: "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400" },
+                      { label: t("compliance.scoreSeverityCritical"), value: 10, cls: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400" },
+                      { label: t("compliance.scoreSeverityError"), value: 10, cls: "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400" },
+                    ].map((s) => (
+                      <div key={s.label} className="flex items-center justify-between py-1">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${s.cls}`}>{s.label}</span>
+                        <span className="text-xs font-mono text-slate-500 dark:text-slate-400">{s.value} / 10</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100 mb-2">{t("compliance.scoreGradeScale")}</h4>
+                  <div className="flex gap-1.5">
+                    {[
+                      { grade: "A", pct: "90%", bg: "bg-emerald-500" },
+                      { grade: "B", pct: "75%", bg: "bg-lime-500" },
+                      { grade: "C", pct: "60%", bg: "bg-yellow-500" },
+                      { grade: "D", pct: "45%", bg: "bg-orange-500" },
+                      { grade: "E", pct: "30%", bg: "bg-red-400" },
+                      { grade: "F", pct: "<30%", bg: "bg-red-600" },
+                    ].map((g) => (
+                      <div key={g.grade} className="flex flex-col items-center gap-1">
+                        <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${g.bg}`}>{g.grade}</div>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500">{g.grade === "F" ? g.pct : `≥${g.pct}`}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Score breakdown for this node */}
+                {complianceData && complianceData.policies.length > 0 && (() => {
+                  const severityWeights: Record<string, number> = { info: 1, low: 3, medium: 5, high: 8, critical: 10 };
+                  const allResults = complianceData.policies.flatMap((p) => p.results.filter((r) => r.status !== "skipped"));
+                  const scored = allResults.filter((r) => r.status !== "not_applicable");
+                  const totalScorable = scored.length;
+                  const maxPenalty = totalScorable * 10;
+                  let totalPenalty = 0;
+                  const rows = allResults.map((r) => {
+                    let penalty = 0;
+                    if (r.status === "non_compliant") {
+                      penalty = severityWeights[r.severity ?? "info"] ?? 1;
+                    } else if (r.status === "error") {
+                      penalty = 10;
+                    }
+                    totalPenalty += penalty;
+                    return { ...r, penalty };
+                  });
+                  const percentage = maxPenalty > 0 ? Math.round(((maxPenalty - totalPenalty) / maxPenalty) * 100) : 100;
+                  const sevCls = (sev: string | null) =>
+                    sev === "critical" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
+                    : sev === "high" ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400"
+                    : sev === "medium" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400"
+                    : sev === "low" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
+                    : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400";
+
+                  return (
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-900 dark:text-slate-100 mb-2">{t("compliance.scoreCalculation")} — {complianceData.score ?? "–"}</h4>
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700">
+                              <th className="px-3 py-1.5 text-left font-semibold text-slate-500 dark:text-slate-400">{t("compliance.policy")}</th>
+                              <th className="px-3 py-1.5 text-left font-semibold text-slate-500 dark:text-slate-400">{t("nodes.colCompliance")}</th>
+                              <th className="px-3 py-1.5 text-center font-semibold text-slate-500 dark:text-slate-400">{t("status.completed")}</th>
+                              <th className="px-3 py-1.5 text-center font-semibold text-slate-500 dark:text-slate-400">{t("compliance.severity")}</th>
+                              <th className="px-3 py-1.5 text-right font-semibold text-slate-500 dark:text-slate-400">Penalty</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {complianceData.policies.flatMap((p) =>
+                              p.results.filter((r) => r.status !== "skipped").map((r) => {
+                                const row = rows.find((rr) => rr.ruleId === r.ruleId);
+                                const statusIcon = r.status === "compliant" ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                  : r.status === "non_compliant" ? <Ban className="h-3.5 w-3.5 text-red-500" />
+                                  : r.status === "error" ? <XCircle className="h-3.5 w-3.5 text-red-500" />
+                                  : <Minus className="h-3.5 w-3.5 text-slate-400" />;
+                                return (
+                                  <tr key={`${p.policy.id}-${r.ruleId}`} className={r.status === "not_applicable" ? "opacity-50" : ""}>
+                                    <td className="px-3 py-1.5 text-slate-500 dark:text-slate-400">{p.policy.name}</td>
+                                    <td className="px-3 py-1.5">
+                                      <div className="flex items-center gap-1.5">
+                                        {statusIcon}
+                                        <span className="text-slate-700 dark:text-slate-300">{r.ruleIdentifier ? `${r.ruleIdentifier} — ` : ""}{r.ruleName}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center">
+                                      <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                                        r.status === "compliant" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400"
+                                        : r.status === "non_compliant" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
+                                        : r.status === "error" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400"
+                                        : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400"
+                                      }`}>
+                                        {r.status === "compliant" ? t("compliance.compliant")
+                                          : r.status === "non_compliant" ? t("compliance.nonCompliant")
+                                          : r.status === "error" ? t("compliance.error")
+                                          : t("compliance.notApplicable")}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-1.5 text-center">
+                                      {r.severity && r.status === "non_compliant" ? (
+                                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${sevCls(r.severity)}`}>{r.severity}</span>
+                                      ) : r.status === "error" ? (
+                                        <span className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-medium ${sevCls("critical")}`}>{t("compliance.error")}</span>
+                                      ) : (
+                                        <span className="text-slate-300 dark:text-slate-600">—</span>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-1.5 text-right font-mono text-slate-500 dark:text-slate-400">
+                                      {r.status === "not_applicable" ? "—" : row?.penalty ?? 0}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                          <tfoot>
+                            <tr className="border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+                              <td colSpan={4} className="px-3 py-2 text-right font-semibold text-slate-700 dark:text-slate-300">
+                                {totalPenalty} / {maxPenalty} → {percentage}% → <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${scoreColors[complianceData.score ?? ""] ?? "bg-slate-400"}`}>{complianceData.score ?? "–"}</span>
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono font-semibold text-slate-700 dark:text-slate-300">{totalPenalty}</td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -814,7 +814,20 @@
     "legendCompliant": "The rule is compliant — the device meets the requirement.",
     "legendNonCompliant": "The rule is non-compliant — the device does not meet the requirement.",
     "legendError": "Error — the rule could not be evaluated (connection failure, missing data, etc.).",
-    "legendNotApplicable": "Not applicable — no data source or evaluation conditions configured."
+    "legendNotApplicable": "Not applicable — no data source or evaluation conditions configured.",
+    "scoreCalculation": "How is the score calculated?",
+    "scoreCalculationDesc": "The score is calculated from the compliance results of all associated policies. Each non-compliant or error rule incurs a penalty based on its severity. Rules with status \"not applicable\" or \"skipped\" are excluded from the calculation.",
+    "scoreFormula": "Score = (Max penalty - Actual penalty) / Max penalty × 100",
+    "scoreMaxPenalty": "Max penalty = Number of evaluated rules × 10",
+    "scoreSeverityWeights": "Severity penalties",
+    "scoreSeverityInfo": "Info",
+    "scoreSeverityLow": "Low",
+    "scoreSeverityMedium": "Medium",
+    "scoreSeverityHigh": "High",
+    "scoreSeverityCritical": "Critical",
+    "scoreSeverityError": "Error (rule failure)",
+    "scoreGradeScale": "Grade scale",
+    "scoreGradeNote": "Percentage ≥"
   },
   "status": {
     "completed": "Completed",

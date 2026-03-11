@@ -317,6 +317,10 @@ class NodeController extends AbstractController
                 'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
             )->setParameter('node', $node)->getResult();
 
+            if (empty($policies)) {
+                continue;
+            }
+
             foreach ($policies as $policy) {
                 $this->bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
                 $dispatched++;
@@ -344,9 +348,10 @@ class NodeController extends AbstractController
             $dispatched++;
         }
 
-        // Set score to null to indicate evaluation in progress
-        $node->setScore(null);
-        $node->setComplianceEvaluating('pending');
+        if ($dispatched > 0) {
+            $node->setScore(null);
+            $node->setComplianceEvaluating('pending');
+        }
         $em->flush();
 
         return $this->json(['dispatched' => $dispatched]);

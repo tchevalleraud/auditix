@@ -268,21 +268,23 @@ export default function NodesPage() {
   const handleEvaluateCompliance = async () => {
     if (selected.size === 0) return;
     const nodeIds = Array.from(selected);
-    // Reset scores to null and mark as pending
-    setNodes((prev) =>
-      prev.map((n) => selected.has(n.id) ? { ...n, score: null } : n)
-    );
-    setComplianceStatus((prev) => {
-      const next = { ...prev };
-      nodeIds.forEach((id) => { next[id] = "pending"; });
-      return next;
-    });
     try {
-      await fetch("/api/nodes/evaluate-compliance", {
+      const res = await fetch("/api/nodes/evaluate-compliance", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodeIds }),
       });
+      if (res.ok) {
+        // Reload nodes to get actual complianceEvaluating state from backend
+        const nodesRes = await fetch(`/api/nodes?context=${current?.id}`);
+        if (nodesRes.ok) {
+          const data: NodeItem[] = await nodesRes.json();
+          setNodes(data);
+          const evaluating: Record<number, string> = {};
+          data.forEach((n) => { if (n.complianceEvaluating) evaluating[n.id] = n.complianceEvaluating; });
+          setComplianceStatus(evaluating);
+        }
+      }
     } finally {
       setSelected(new Set());
     }

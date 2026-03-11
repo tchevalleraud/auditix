@@ -18,10 +18,10 @@ class ComplianceEvaluator
     private const STABLE_WAIT = 2;
 
     public const SEVERITY_WEIGHTS = [
-        'info' => 0,
-        'low' => 1,
-        'medium' => 3,
-        'high' => 5,
+        'info' => 1,
+        'low' => 3,
+        'medium' => 5,
+        'high' => 8,
         'critical' => 10,
     ];
 

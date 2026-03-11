@@ -814,7 +814,20 @@
     "legendCompliant": "ルールは準拠 — デバイスは要件を満たしています。",
     "legendNonCompliant": "ルールは非準拠 — デバイスは要件を満たしていません。",
     "legendError": "エラー — ルールを評価できませんでした（接続障害、データ不足など）。",
-    "legendNotApplicable": "該当なし — データソースまたは評価条件が設定されていません。"
+    "legendNotApplicable": "該当なし — データソースまたは評価条件が設定されていません。",
+    "scoreCalculation": "スコアの計算方法",
+    "scoreCalculationDesc": "スコアは、関連するすべてのポリシーのコンプライアンス結果から計算されます。非準拠またはエラーの各ルールには、重大度に基づくペナルティが課されます。「該当なし」または「スキップ」のステータスのルールは計算から除外されます。",
+    "scoreFormula": "スコア = (最大ペナルティ - 実際のペナルティ) / 最大ペナルティ × 100",
+    "scoreMaxPenalty": "最大ペナルティ = 評価されたルール数 × 10",
+    "scoreSeverityWeights": "重大度別ペナルティ",
+    "scoreSeverityInfo": "情報",
+    "scoreSeverityLow": "低",
+    "scoreSeverityMedium": "中",
+    "scoreSeverityHigh": "高",
+    "scoreSeverityCritical": "重大",
+    "scoreSeverityError": "エラー（ルール失敗）",
+    "scoreGradeScale": "評価スケール",
+    "scoreGradeNote": "パーセンテージ ≥"
   },
   "status": {
     "completed": "完了",

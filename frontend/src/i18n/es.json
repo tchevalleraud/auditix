@@ -814,7 +814,20 @@
     "legendCompliant": "La regla es conforme — el dispositivo cumple el requisito.",
     "legendNonCompliant": "La regla no es conforme — el dispositivo no cumple el requisito.",
     "legendError": "Error — la regla no pudo ser evaluada (fallo de conexión, datos faltantes, etc.).",
-    "legendNotApplicable": "No aplicable — no hay fuente de datos o condiciones de evaluación configuradas."
+    "legendNotApplicable": "No aplicable — no hay fuente de datos o condiciones de evaluación configuradas.",
+    "scoreCalculation": "¿Cómo se calcula la nota?",
+    "scoreCalculationDesc": "La nota se calcula a partir de los resultados de cumplimiento de todas las políticas asociadas. Cada regla no conforme o con error genera una penalización basada en su severidad. Las reglas con estado «no aplicable» u «omitida» se excluyen del cálculo.",
+    "scoreFormula": "Puntuación = (Penalización máx. - Penalización real) / Penalización máx. × 100",
+    "scoreMaxPenalty": "Penalización máx. = Número de reglas evaluadas × 10",
+    "scoreSeverityWeights": "Penalizaciones por severidad",
+    "scoreSeverityInfo": "Info",
+    "scoreSeverityLow": "Bajo",
+    "scoreSeverityMedium": "Medio",
+    "scoreSeverityHigh": "Alto",
+    "scoreSeverityCritical": "Crítico",
+    "scoreSeverityError": "Error (fallo de la regla)",
+    "scoreGradeScale": "Escala de calificación",
+    "scoreGradeNote": "Porcentaje ≥"
   },
   "status": {
     "completed": "Completado",
