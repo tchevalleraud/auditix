@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -109,6 +109,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { adminMode, setAdminMode } = useAppContext();
   const { t } = useI18n();
+  const [versionStatus, setVersionStatus] = useState<{ upToDate: boolean; latest: string | null } | null>(null);
 
   useEffect(() => {
     const isAdminPath = pathname.startsWith("/admin");
@@ -116,6 +117,23 @@ export default function Sidebar() {
       setAdminMode(isAdminPath);
     }
   }, [pathname, adminMode, setAdminMode]);
+
+  useEffect(() => {
+    const check = () => {
+      if (!navigator.onLine) { setVersionStatus(null); return; }
+      fetch("/version-check")
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data && data.latest) setVersionStatus({ upToDate: data.upToDate, latest: data.latest }); else setVersionStatus(null); })
+        .catch(() => setVersionStatus(null));
+    };
+    check();
+    const interval = setInterval(check, 3600_000); // every hour
+    const onOnline = () => check();
+    const onOffline = () => setVersionStatus(null);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    return () => { clearInterval(interval); window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
+  }, []);
 
   const navigation = adminMode ? adminNav : contextNav;
 
@@ -187,7 +205,16 @@ export default function Sidebar() {
           </Link>
         )}
         <div className="border-t border-slate-200 dark:border-slate-800 mt-3 pt-3">
-          <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Auditix v{process.env.APP_VERSION}</p>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-xs text-slate-400 dark:text-slate-500">Auditix v{process.env.APP_VERSION}</span>
+            {versionStatus && (
+              versionStatus.upToDate ? (
+                <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-400 dark:text-slate-500">latest</span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-blue-100 dark:bg-blue-500/20 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">update</span>
+              )
+            )}
+          </div>
         </div>
       </div>
     </aside>

@@ -13,23 +13,16 @@ down: ## Stop all services
 restart: ## Restart all services
 	docker compose restart
 
-build: ## Rebuild Docker images
-	docker compose build
-
 logs: ## Show logs for all services
 	docker compose logs -f
 
-logs-php: ## Show PHP logs
-	docker compose logs -f php
-
-logs-workers: ## Show all workers logs
-	docker compose logs -f worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
-
-console: ## Open a shell in the PHP container
-	docker compose exec php bash
-
-sf: ## Run a Symfony console command (usage: make sf CMD="cache:clear")
-	docker compose exec php php bin/console $(CMD)
-
-composer: ## Run a Composer command (usage: make composer CMD="require package")
-	docker compose exec php composer $(CMD)
+upgrade: ## Pull latest version, rebuild and apply migrations
+	@echo "\033[36m[1/4]\033[0m Pulling latest changes..."
+	git pull --ff-only
+	@echo "\033[36m[2/4]\033[0m Rebuilding containers..."
+	docker compose up -d --build
+	@echo "\033[36m[3/4]\033[0m Applying database migrations..."
+	docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
+	@echo "\033[36m[4/4]\033[0m Restarting workers..."
+	docker compose restart worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
+	@echo "\033[32mUpgrade complete!\033[0m"

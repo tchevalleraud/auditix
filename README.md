@@ -173,16 +173,11 @@ HTTP_PORT=8080
 ## Useful commands
 
 ```bash
-make up              # Start all services
+make up              # Start all services (build + install on first launch)
 make down            # Stop all services
 make restart         # Restart all services
-make build           # Rebuild Docker images
 make logs            # Show logs for all services
-make logs-php        # Show PHP logs
-make logs-workers    # Show worker logs
-make console         # Open a shell in the PHP container
-make sf CMD="..."    # Run a Symfony command (e.g. make sf CMD="cache:clear")
-make composer CMD="..." # Run a Composer command
+make upgrade         # Pull latest version, rebuild, apply migrations, restart workers
 ```
 
 ## Project structure
