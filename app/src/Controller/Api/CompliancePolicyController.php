@@ -331,14 +331,17 @@ class CompliancePolicyController extends AbstractController
     }
 
     #[Route('/{id}/evaluate', methods: ['POST'])]
-    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus): JsonResponse
+    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em): JsonResponse
     {
         $nodes = $policy->getNodes();
         $nodeIds = [];
         foreach ($nodes as $node) {
             $bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
+            $node->setScore(null);
+            $node->setComplianceEvaluating('pending');
             $nodeIds[] = $node->getId();
         }
+        $em->flush();
 
         return $this->json(['dispatched' => count($nodeIds), 'nodeIds' => $nodeIds]);
     }
@@ -368,6 +371,7 @@ class CompliancePolicyController extends AbstractController
                         'ipAddress' => $n->getIpAddress(),
                         'hostname' => $n->getHostname(),
                         'score' => $n->getScore(),
+                        'complianceEvaluating' => $n->getComplianceEvaluating(),
                         'tags' => $tags,
                     ],
                     'results' => [],

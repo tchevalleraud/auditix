@@ -22,6 +22,7 @@ interface NodeDetail {
   policy: string;
   discoveredModel: string | null;
   discoveredVersion: string | null;
+  complianceEvaluating: string | null;
   isReachable: boolean | null;
   lastPingAt: string | null;
   monitoringEnabled: boolean;
@@ -175,6 +176,7 @@ export default function NodeDetailPage() {
       setProfileId(found.profile ? String(found.profile.id) : "");
       setPolicy(found.policy);
       setSelectedTagIds(found.tags ? found.tags.map((t) => t.id) : []);
+      if (found.complianceEvaluating) setComplianceEvaluating(true);
 
       const mfId = found.manufacturer ? String(found.manufacturer.id) : "";
       setFilteredModels(mfId ? loadedModels.filter((m) => m.manufacturer && m.manufacturer.id === Number(mfId)) : loadedModels);
@@ -253,8 +255,11 @@ export default function NodeDetailPage() {
           return [col, ...prev];
         });
       }
+      if (data.event === "compliance.progress" && data.nodeId === Number(nodeId)) {
+        setComplianceEvaluating(true);
+      }
       if (data.event === "compliance.evaluated" && data.nodeId === Number(nodeId)) {
-        setNode((prev) => prev ? { ...prev, score: data.score } : prev);
+        setNode((prev) => prev ? { ...prev, score: data.score, complianceEvaluating: false } : prev);
         setComplianceEvaluating(false);
         loadCompliance();
       }

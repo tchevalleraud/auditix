@@ -48,6 +48,7 @@ class NodeController extends AbstractController
             'policy' => $n->getPolicy(),
             'discoveredModel' => $n->getDiscoveredModel(),
             'discoveredVersion' => $n->getDiscoveredVersion(),
+            'complianceEvaluating' => $n->getComplianceEvaluating(),
             'isReachable' => $n->getIsReachable(),
             'lastPingAt' => $n->getLastPingAt()?->format('c'),
             'monitoringEnabled' => $context?->isMonitoringEnabled() ?? false,
@@ -298,6 +299,38 @@ class NodeController extends AbstractController
         return $this->json($result);
     }
 
+    #[Route('/evaluate-compliance', methods: ['POST'])]
+    public function evaluateComplianceBulk(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $nodeIds = $data['nodeIds'] ?? [];
+
+        if (empty($nodeIds)) {
+            return $this->json(['error' => 'No nodes specified'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $nodes = $em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
+        $dispatched = 0;
+
+        foreach ($nodes as $node) {
+            $policies = $em->createQuery(
+                'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
+            )->setParameter('node', $node)->getResult();
+
+            foreach ($policies as $policy) {
+                $this->bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
+                $dispatched++;
+            }
+
+            $node->setScore(null);
+            $node->setComplianceEvaluating('pending');
+        }
+
+        $em->flush();
+
+        return $this->json(['dispatched' => $dispatched]);
+    }
+
     #[Route('/{id}/evaluate-compliance', methods: ['POST'])]
     public function evaluateCompliance(Node $node, EntityManagerInterface $em): JsonResponse
     {
@@ -313,9 +346,40 @@ class NodeController extends AbstractController
 
         // Set score to null to indicate evaluation in progress
         $node->setScore(null);
+        $node->setComplianceEvaluating('pending');
         $em->flush();
 
         return $this->json(['dispatched' => $dispatched]);
+    }
+
+    #[Route('/compliance-stats', methods: ['GET'])]
+    public function complianceStats(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        if (!$contextId) return $this->json([]);
+
+        $nodes = $em->getRepository(Node::class)->findBy(['context' => $contextId]);
+        $nodeIds = array_map(fn(Node $n) => $n->getId(), $nodes);
+
+        if (empty($nodeIds)) return $this->json(new \stdClass());
+
+        $results = $em->getRepository(ComplianceResult::class)->findBy(['node' => $nodeIds]);
+
+        $stats = [];
+        foreach ($results as $r) {
+            $nId = $r->getNode()->getId();
+            $status = $r->getStatus();
+            if ($status === 'skipped') continue;
+
+            if (!isset($stats[$nId])) {
+                $stats[$nId] = ['compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0];
+            }
+            if (isset($stats[$nId][$status])) {
+                $stats[$nId][$status]++;
+            }
+        }
+
+        return $this->json($stats);
     }
 
     #[Route('/{id}/compliance', methods: ['GET'])]

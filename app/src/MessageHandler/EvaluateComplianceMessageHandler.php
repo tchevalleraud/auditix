@@ -29,7 +29,9 @@ class EvaluateComplianceMessageHandler
         $node = $this->em->getRepository(Node::class)->find($message->getNodeId());
         if (!$policy || !$node) return;
 
-        // Publish "evaluating" status
+        // Mark as running and publish status
+        $node->setComplianceEvaluating('running');
+        $this->em->flush();
         $this->publishProgress($policy, $node, 'running', 0, 0);
 
         // Collect all rules for this policy
@@ -77,10 +79,34 @@ class EvaluateComplianceMessageHandler
             }
         }
 
-        // Calculate score
-        $scorableRules = count($rules) - $stats['skipped'] - $stats['not_applicable'];
-        $grade = ComplianceEvaluator::calculateGrade($scorableRules, $penaltySum);
+        $this->em->flush();
+
+        // Recalculate global score from ALL compliance results for this node (all policies)
+        // Use a direct SQL query to avoid ORM cache issues with concurrent workers
+        $conn = $this->em->getConnection();
+        $rows = $conn->fetchAllAssociative(
+            'SELECT status, severity, COUNT(*) as cnt FROM compliance_result WHERE node_id = :nodeId GROUP BY status, severity',
+            ['nodeId' => $node->getId()]
+        );
+
+        $globalPenalty = 0;
+        $globalScorable = 0;
+
+        foreach ($rows as $row) {
+            $st = $row['status'];
+            $cnt = (int) $row['cnt'];
+            if ($st === 'skipped' || $st === 'not_applicable') continue;
+            $globalScorable += $cnt;
+            if ($st === 'non_compliant') {
+                $globalPenalty += (ComplianceEvaluator::SEVERITY_WEIGHTS[$row['severity'] ?? 'info'] ?? 0) * $cnt;
+            } elseif ($st === 'error') {
+                $globalPenalty += (ComplianceEvaluator::SEVERITY_WEIGHTS['critical'] ?? 10) * $cnt;
+            }
+        }
+
+        $grade = ComplianceEvaluator::calculateGrade($globalScorable, $globalPenalty);
         $node->setScore($grade);
+        $node->setComplianceEvaluating(null);
 
         $this->em->flush();
 

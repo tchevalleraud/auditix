@@ -9,7 +9,6 @@
     "noResult": "Aucun resultat",
     "confirm_delete": "Supprimer le contexte \"{name}\" ?",
     "default": "Defaut",
-    "version": "Auditix v0.1.0",
     "underConstruction": "En construction",
     "underConstructionDesc": "Cette fonctionnalite sera bientot disponible.",
     "close": "Fermer"
@@ -349,6 +348,7 @@
     "compliancePlaceholder": "Les donnees de conformite apparaitront ici apres le premier audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Collecter ({count})",
+    "evaluateSelected": "Conformité ({count})",
     "collect": "Collecter",
     "collectTitle": "Lancer une collecte",
     "collectDescription": "Executer toutes les commandes de collecte associees au modele de ce noeud et stocker les resultats.",

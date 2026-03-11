@@ -9,7 +9,6 @@
     "noResult": "No results",
     "confirm_delete": "Delete context \"{name}\"?",
     "default": "Default",
-    "version": "Auditix v0.1.0",
     "underConstruction": "Under construction",
     "underConstructionDesc": "This feature is coming soon.",
     "close": "Close"
@@ -349,6 +348,7 @@
     "compliancePlaceholder": "Compliance data will appear here after the first audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Collect ({count})",
+    "evaluateSelected": "Compliance ({count})",
     "collect": "Collect",
     "collectTitle": "Start collection",
     "collectDescription": "Execute all collection commands associated with this node's model and store the results.",

@@ -9,7 +9,6 @@
     "noResult": "Sin resultados",
     "confirm_delete": "Eliminar el contexto \"{name}\"?",
     "default": "Predeterminado",
-    "version": "Auditix v0.1.0",
     "underConstruction": "En construccion",
     "underConstructionDesc": "Esta funcionalidad estara disponible pronto.",
     "close": "Cerrar"
@@ -349,6 +348,7 @@
     "compliancePlaceholder": "Los datos de cumplimiento apareceran aqui despues de la primera auditoria",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Recopilar ({count})",
+    "evaluateSelected": "Conformidad ({count})",
     "collect": "Recopilar",
     "collectTitle": "Iniciar recopilacion",
     "collectDescription": "Ejecutar todos los comandos de recopilacion asociados al modelo de este nodo y almacenar los resultados.",

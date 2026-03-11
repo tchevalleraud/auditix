@@ -9,7 +9,6 @@
     "noResult": "結果なし",
     "confirm_delete": "コンテキスト「{name}」を削除しますか？",
     "default": "デフォルト",
-    "version": "Auditix v0.1.0",
     "underConstruction": "準備中",
     "underConstructionDesc": "この機能は近日公開予定です。",
     "close": "閉じる"
@@ -349,6 +348,7 @@
     "compliancePlaceholder": "コンプライアンスデータは最初の監査後にここに表示されます",
     "pingSelected": "Ping ({count})",
     "collectSelected": "収集 ({count})",
+    "evaluateSelected": "コンプライアンス ({count})",
     "collect": "収集",
     "collectTitle": "収集を開始",
     "collectDescription": "このノードのモデルに関連する全ての収集コマンドを実行し、結果を保存します。",

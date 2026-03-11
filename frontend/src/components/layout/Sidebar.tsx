@@ -187,7 +187,7 @@ export default function Sidebar() {
           </Link>
         )}
         <div className="border-t border-slate-200 dark:border-slate-800 mt-3 pt-3">
-          <p className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("common.version")}</p>
+          <p className="text-xs text-slate-400 dark:text-slate-500 text-center">Auditix v{process.env.APP_VERSION}</p>
         </div>
       </div>
     </aside>

@@ -95,7 +95,7 @@ interface PolicyResultEntry {
 }
 
 interface PolicyNodeResult {
-  node: { id: number; name: string | null; ipAddress: string; hostname: string | null; score: string | null; tags?: { id: number; name: string; color: string }[] };
+  node: { id: number; name: string | null; ipAddress: string; hostname: string | null; score: string | null; complianceEvaluating?: string | null; tags?: { id: number; name: string; color: string }[] };
   results: PolicyResultEntry[];
   stats: Record<string, number>;
   evaluatedAt: string | null;
@@ -200,7 +200,25 @@ export default function CompliancePolicyEditPage() {
     if (!silent) setLoadingResults(true);
     try {
       const res = await fetch(`/api/compliance-policies/${policyId}/results`);
-      if (res.ok) setPolicyResults(await res.json());
+      if (res.ok) {
+        const data: PolicyNodeResult[] = await res.json();
+        setPolicyResults(data);
+        // Restore evaluating status from persisted state
+        if (!silent) {
+          const status: Record<number, "pending" | "running" | "done"> = {};
+          let hasEvaluating = false;
+          data.forEach((nr) => {
+            if (nr.node.complianceEvaluating) {
+              status[nr.node.id] = nr.node.complianceEvaluating === "running" ? "running" : "pending";
+              hasEvaluating = true;
+            }
+          });
+          if (hasEvaluating) {
+            setNodeEvalStatus((prev) => ({ ...status, ...prev }));
+            setEvaluating(true);
+          }
+        }
+      }
     } finally { if (!silent) setLoadingResults(false); }
   }, [policyId]);
 

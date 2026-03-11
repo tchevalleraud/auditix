@@ -9,7 +9,6 @@
     "noResult": "Keine Ergebnisse",
     "confirm_delete": "Kontext \"{name}\" loschen?",
     "default": "Standard",
-    "version": "Auditix v0.1.0",
     "underConstruction": "In Bearbeitung",
     "underConstructionDesc": "Diese Funktion wird bald verfugbar sein.",
     "close": "Schliessen"
@@ -349,6 +348,7 @@
     "compliancePlaceholder": "Konformitatsdaten erscheinen hier nach dem ersten Audit",
     "pingSelected": "Ping ({count})",
     "collectSelected": "Sammeln ({count})",
+    "evaluateSelected": "Konformität ({count})",
     "collect": "Sammeln",
     "collectTitle": "Sammlung starten",
     "collectDescription": "Alle Sammelbefehle des Modells dieses Knotens ausfuhren und die Ergebnisse speichern.",
