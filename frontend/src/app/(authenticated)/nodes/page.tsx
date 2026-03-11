@@ -170,7 +170,7 @@ export default function NodesPage() {
         if (!nodeId) return;
         setNodes((prev) =>
           prev.map((n) =>
-            n.id === nodeId ? { ...n, score: data.score, complianceEvaluating: false } : n
+            n.id === nodeId ? { ...n, score: data.score, complianceEvaluating: null } : n
           )
         );
         setComplianceStatus((prev) => {

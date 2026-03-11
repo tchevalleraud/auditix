@@ -260,7 +260,7 @@ export default function NodeDetailPage() {
         setComplianceEvaluating(true);
       }
       if (data.event === "compliance.evaluated" && data.nodeId === Number(nodeId)) {
-        setNode((prev) => prev ? { ...prev, score: data.score, complianceEvaluating: false } : prev);
+        setNode((prev) => prev ? { ...prev, score: data.score, complianceEvaluating: null } : prev);
         setComplianceEvaluating(false);
         loadCompliance();
       }
