@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
 
-const version = readFileSync(resolve(__dirname, "../VERSION"), "utf-8").trim();
+const versionFile = resolve(__dirname, "../VERSION");
+const version = existsSync(versionFile)
+  ? readFileSync(versionFile, "utf-8").trim()
+  : require("./package.json").version;
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ["*"],
