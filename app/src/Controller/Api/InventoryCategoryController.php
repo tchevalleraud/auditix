@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\InventoryCategory;
+use App\Entity\NodeInventoryEntry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -92,5 +93,58 @@ class InventoryCategoryController extends AbstractController
         $em->remove($cat);
         $em->flush();
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/structure', methods: ['GET'], priority: 10)]
+    public function structure(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        if (!$contextId) {
+            return $this->json([]);
+        }
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json([]);
+        }
+
+        // Get all unique category/entryKey/colLabel combinations for this context
+        $qb = $em->createQueryBuilder();
+        $rows = $qb->select('e.categoryName, e.entryKey, e.colLabel')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->join('e.node', 'n')
+            ->where('n.context = :context')
+            ->setParameter('context', $context)
+            ->groupBy('e.categoryName, e.entryKey, e.colLabel')
+            ->orderBy('e.categoryName', 'ASC')
+            ->addOrderBy('e.entryKey', 'ASC')
+            ->addOrderBy('e.colLabel', 'ASC')
+            ->getQuery()
+            ->getArrayResult();
+
+        // Group: category → entries[key → columns[]]
+        $categories = [];
+        foreach ($rows as $row) {
+            $cat = $row['categoryName'];
+            $key = $row['entryKey'];
+            $col = $row['colLabel'];
+
+            if (!isset($categories[$cat])) {
+                $categories[$cat] = ['categoryName' => $cat, 'entries' => []];
+            }
+            if (!isset($categories[$cat]['entries'][$key])) {
+                $categories[$cat]['entries'][$key] = ['key' => $key, 'columns' => []];
+            }
+            $categories[$cat]['entries'][$key]['columns'][] = $col;
+        }
+
+        // Convert to indexed arrays
+        $result = [];
+        foreach ($categories as $cat) {
+            $cat['entries'] = array_values($cat['entries']);
+            $result[] = $cat;
+        }
+
+        return $this->json($result);
     }
 }

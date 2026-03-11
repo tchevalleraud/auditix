@@ -8,8 +8,12 @@ RUN apt-get update && apt-get install -y \
     libicu-dev \
     libssh2-1-dev \
     librabbitmq-dev \
+    libpng-dev \
+    libjpeg62-turbo-dev \
+    libfreetype6-dev \
     openssh-client \
     iputils-ping \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
     pdo_pgsql \
     pgsql \
@@ -17,6 +21,7 @@ RUN apt-get update && apt-get install -y \
     intl \
     opcache \
     sockets \
+    gd \
     && pecl install amqp \
     && docker-php-ext-enable amqp \
     && apt-get clean \

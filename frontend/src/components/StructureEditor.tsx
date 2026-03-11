@@ -1,0 +1,2508 @@
+"use client";
+
+import { useState, useCallback, useRef, useEffect } from "react";
+import {
+  Plus,
+  Trash2,
+  GripVertical,
+  ChevronUp,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronDown as ChevronDownIcon,
+  Type,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignJustify,
+  Bold,
+  Italic,
+  List,
+  ListOrdered,
+  FileText,
+  FileDown,
+  ImageIcon,
+  Upload,
+  X,
+  ToggleLeft,
+  ToggleRight,
+  Loader2,
+  Table2,
+  Server,
+  Search,
+  Pencil,
+} from "lucide-react";
+import { useAppContext } from "@/components/ContextProvider";
+import { useEditor, EditorContent } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import TextAlign from "@tiptap/extension-text-align";
+
+// --- Block types ---
+
+export interface HeadingBlock {
+  id: string;
+  type: "heading";
+  level: number;
+  content: string;
+  pageBreakBefore: boolean;
+}
+
+export interface ParagraphBlock {
+  id: string;
+  type: "paragraph";
+  content: string;
+  align: "left" | "center" | "right" | "justify";
+}
+
+export interface ImageBlock {
+  id: string;
+  type: "image";
+  filename: string;
+  url: string;
+  width: number;
+  showCaption: boolean;
+  caption: string;
+}
+
+export interface TableCell {
+  value: string;
+  bold?: boolean;
+  italic?: boolean;
+  size?: number;
+}
+
+export interface TableBlock {
+  id: string;
+  type: "table";
+  headers: (string | TableCell)[];
+  rows: (string | TableCell)[][];
+  showHeader: boolean;
+  columnAligns: ("left" | "center" | "right")[];
+  columnWidths: number[];
+  columnVAligns?: ("top" | "middle" | "bottom")[];
+}
+
+export interface InventoryTableColumn {
+  id: string;
+  category: string;
+  entryKey: string;
+  colLabel: string;
+  label?: string;
+  headerLabel?: string;
+  align?: "left" | "center" | "right";
+  valign?: "top" | "middle" | "bottom";
+}
+
+export interface InventoryStyleRule {
+  id: string;
+  columnId: string; // column id or "__hostname__"
+  operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "contains" | "not_contains";
+  value: string;
+  textColor?: string;
+  bgColor?: string;
+  highlightColor?: string;
+  bold?: boolean;
+  italic?: boolean;
+}
+
+export interface InventoryTableBlock {
+  id: string;
+  type: "inventory_table";
+  columns: InventoryTableColumn[];
+  nodeIds: number[];
+  showHeader: boolean;
+  hostnameHeaderLabel?: string;
+  hostnameAlign?: "left" | "center" | "right";
+  hostnameVAlign?: "top" | "middle" | "bottom";
+  fontSize?: number;
+  styleRules?: InventoryStyleRule[];
+}
+
+export interface CliStyleRule {
+  id: string;
+  pattern: string; // regex pattern
+  operator: "matches" | "not_matches" | "contains" | "not_contains" | "eq" | "neq";
+  textColor?: string;
+  bgColor?: string;
+  highlightColor?: string;
+  highlightMode?: "line" | "match"; // "line" = whole line, "match" = only matched text
+  bold?: boolean;
+  italic?: boolean;
+}
+
+export interface CliCommandBlock {
+  id: string;
+  type: "cli_command";
+  command: string;
+  lineFilter?: string; // e.g. "1-5,8,10-12"
+  showEllipsis: boolean; // show [...] for hidden lines
+  fontSize?: number;
+  styleRules?: CliStyleRule[];
+}
+
+function normalizeCell(cell: string | TableCell): TableCell {
+  if (typeof cell === "string") return { value: cell };
+  return cell;
+}
+
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock;
+
+interface Props {
+  blocks: ReportBlock[];
+  onChange: (blocks: ReportBlock[]) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+// Compute visual depth for each block based on heading hierarchy
+function computeDepths(blocks: ReportBlock[]): number[] {
+  const depths: number[] = [];
+  let lastHeadingLevel = 0;
+  for (const block of blocks) {
+    if (block.type === "heading") {
+      lastHeadingLevel = block.level;
+      depths.push(block.level - 1);
+    } else {
+      depths.push(lastHeadingLevel);
+    }
+  }
+  return depths;
+}
+
+const DEPTH_COLORS = [
+  "border-slate-300 dark:border-slate-600",
+  "border-blue-400 dark:border-blue-600",
+  "border-indigo-400 dark:border-indigo-600",
+  "border-violet-400 dark:border-violet-600",
+  "border-purple-400 dark:border-purple-600",
+  "border-fuchsia-400 dark:border-fuchsia-600",
+];
+
+const inputClass =
+  "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+
+const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
+
+export default function StructureEditor({ blocks, onChange, t }: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const [insertMenuIdx, setInsertMenuIdx] = useState<number | null>(null);
+
+  const depths = computeDepths(blocks);
+
+  const updateBlock = useCallback(
+    (id: string, patch: Partial<ReportBlock>) => {
+      onChange(blocks.map((b) => (b.id === id ? { ...b, ...patch } as ReportBlock : b)));
+    },
+    [blocks, onChange]
+  );
+
+  const insertBlock = (type: ReportBlock["type"], atIndex: number) => {
+    const id = uid();
+    let block: ReportBlock;
+    if (type === "heading") {
+      block = { id, type: "heading", level: 1, content: "", pageBreakBefore: false };
+    } else if (type === "image") {
+      block = { id, type: "image", filename: "", url: "", width: 100, showCaption: false, caption: "" };
+    } else if (type === "table") {
+      block = { id, type: "table", headers: [{ value: "" }, { value: "" }], rows: [[{ value: "" }, { value: "" }]], showHeader: true, columnAligns: ["left", "left"], columnWidths: [50, 50] };
+    } else if (type === "inventory_table") {
+      block = { id, type: "inventory_table", columns: [], nodeIds: [], showHeader: true };
+    } else if (type === "cli_command") {
+      block = { id, type: "cli_command", command: "", showEllipsis: true };
+    } else {
+      block = { id, type: "paragraph", content: "", align: "left" };
+    }
+    const arr = [...blocks];
+    arr.splice(atIndex, 0, block);
+    onChange(arr);
+    setEditingId(id);
+    setInsertMenuIdx(null);
+  };
+
+  const addBlock = (type: ReportBlock["type"]) => {
+    insertBlock(type, blocks.length);
+  };
+
+  const deleteBlock = (id: string) => {
+    const block = blocks.find((b) => b.id === id);
+    if (block?.type === "image" && block.filename) {
+      fetch(`/api/block-images/${block.filename}`, { method: "DELETE" }).catch(() => {});
+    }
+    onChange(blocks.filter((b) => b.id !== id));
+    if (editingId === id) setEditingId(null);
+  };
+
+  const moveBlock = (idx: number, dir: -1 | 1) => {
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= blocks.length) return;
+    const arr = [...blocks];
+    [arr[idx], arr[newIdx]] = [arr[newIdx], arr[idx]];
+    onChange(arr);
+  };
+
+  // Drag & drop
+  const handleDragStart = (idx: number) => setDragIdx(idx);
+  const handleDragOver = (e: React.DragEvent, idx: number) => { e.preventDefault(); setDragOverIdx(idx); };
+  const handleDrop = (idx: number) => {
+    if (dragIdx !== null && dragIdx !== idx) {
+      const arr = [...blocks];
+      const [moved] = arr.splice(dragIdx, 1);
+      arr.splice(idx, 0, moved);
+      onChange(arr);
+    }
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+  const handleDragEnd = () => { setDragIdx(null); setDragOverIdx(null); };
+
+  // Close modal on Escape
+  useEffect(() => {
+    if (!editingId) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setEditingId(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [editingId]);
+
+  const editingBlock = editingId ? blocks.find((b) => b.id === editingId) : null;
+
+  const getBlockPreview = (block: ReportBlock) => {
+    if (block.type === "heading") {
+      return block.content || <span className="italic text-slate-400">{t("structure.untitledHeading")}</span>;
+    }
+    if (block.type === "image") {
+      if (block.filename) {
+        return block.caption || <span className="italic text-slate-400">{t("structure.imageUploaded")}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.noImage")}</span>;
+    }
+    if (block.type === "table") {
+      const cols = block.headers.length;
+      const rows = block.rows.length;
+      return <span className="text-slate-500">{t("structure.tableSize", { cols: String(cols), rows: String(rows) })}</span>;
+    }
+    if (block.type === "inventory_table") {
+      const cols = block.columns.length;
+      const nodes = block.nodeIds.length;
+      return <span className="text-slate-500">{t("structure.inventorySize", { cols: String(cols + 1), nodes: String(nodes) })}</span>;
+    }
+    if (block.type === "cli_command") {
+      if (block.command) {
+        const preview = block.command.split("\n")[0].substring(0, 60);
+        return <span className="text-slate-500 font-mono text-xs">{preview}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyCliCommand")}</span>;
+    }
+    // paragraph
+    return block.content
+      ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
+      : <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>;
+  };
+
+  const getBlockBadge = (block: ReportBlock) => {
+    if (block.type === "heading") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-indigo-100 dark:bg-indigo-500/15 px-2 py-0.5 text-[11px] font-bold text-indigo-600 dark:text-indigo-400">
+          H{block.level}
+        </span>
+      );
+    }
+    if (block.type === "image") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+          <ImageIcon className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "table") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-cyan-100 dark:bg-cyan-500/15 px-2 py-0.5 text-[11px] font-bold text-cyan-600 dark:text-cyan-400">
+          <Table2 className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "inventory_table") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-600 dark:text-violet-400">
+          <Server className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "cli_command") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-slate-800 dark:bg-slate-200/10 px-2 py-0.5 text-[11px] font-bold text-green-400 dark:text-green-400 font-mono">
+          &gt;_
+        </span>
+      );
+    }
+    return (
+      <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+        P
+      </span>
+    );
+  };
+
+  return (
+    <>
+      <div className="flex flex-col h-full min-h-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
+          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+            {t("structure.blocks")}
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => addBlock("heading")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addHeading")}
+            </button>
+            <button
+              onClick={() => addBlock("paragraph")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addParagraph")}
+            </button>
+            <button
+              onClick={() => addBlock("image")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addImage")}
+            </button>
+            <button
+              onClick={() => addBlock("table")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addTable")}
+            </button>
+            <button
+              onClick={() => addBlock("inventory_table")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addInventoryTable")}
+            </button>
+            <button
+              onClick={() => addBlock("cli_command")}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.addCliCommand")}
+            </button>
+          </div>
+        </div>
+
+        {/* Block list */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {blocks.length === 0 && (
+            <div className="p-12 flex flex-col items-center justify-center gap-3 text-slate-400 dark:text-slate-500">
+              <FileText className="h-10 w-10" />
+              <p className="text-sm">{t("structure.empty")}</p>
+            </div>
+          )}
+
+          {blocks.length > 0 && (
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/50">
+              {blocks.map((block, idx) => {
+                const depth = depths[idx];
+                const isDragOver = dragOverIdx === idx && dragIdx !== idx;
+                const borderColor = DEPTH_COLORS[Math.min(depth, DEPTH_COLORS.length - 1)];
+
+                return (
+                  <div key={block.id}>
+                    {/* Insert line before block */}
+                    <InsertLine
+                      index={idx}
+                      activeIndex={insertMenuIdx}
+                      onToggle={setInsertMenuIdx}
+                      onInsert={insertBlock}
+                      t={t}
+                    />
+
+                    <div className={`${dragIdx === idx ? "opacity-40" : ""}`}>
+                      <div
+                        style={{ marginLeft: depth * 16 }}
+                        className={`border-l-2 ${depth > 0 ? borderColor : "border-transparent"}`}
+                      >
+                        {/* Block row */}
+                        <div
+                          draggable
+                          onDragStart={() => handleDragStart(idx)}
+                          onDragOver={(e) => handleDragOver(e, idx)}
+                          onDrop={() => handleDrop(idx)}
+                          onDragEnd={handleDragEnd}
+                          className={`group flex items-center gap-2 py-2.5 px-4 hover:bg-slate-50/80 dark:hover:bg-slate-800/30 transition-colors ${isDragOver ? "ring-1 ring-inset ring-blue-400" : ""}`}
+                        >
+                          {/* Drag handle */}
+                          <div className="shrink-0 cursor-grab text-slate-300 dark:text-slate-600 hover:text-slate-400">
+                            <GripVertical className="h-4 w-4" />
+                          </div>
+
+                          {/* Badge */}
+                          {getBlockBadge(block)}
+
+                          {/* Page break indicator */}
+                          {block.type === "heading" && block.pageBreakBefore && (
+                            <FileDown className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          )}
+
+                          {/* Content preview */}
+                          <span className="flex-1 min-w-0 truncate text-sm text-slate-700 dark:text-slate-300">
+                            {getBlockPreview(block)}
+                          </span>
+
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <button
+                              onClick={() => setEditingId(block.id)}
+                              className="p-1 rounded-md text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors"
+                              title={t("structure.edit")}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => moveBlock(idx, -1)}
+                              disabled={idx === 0}
+                              className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 disabled:opacity-30 transition-colors"
+                            >
+                              <ChevronUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => moveBlock(idx, 1)}
+                              disabled={idx === blocks.length - 1}
+                              className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 disabled:opacity-30 transition-colors"
+                            >
+                              <ChevronDown className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => deleteBlock(block.id)}
+                              className="p-1 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Insert line after last block */}
+              <InsertLine
+                index={blocks.length}
+                activeIndex={insertMenuIdx}
+                onToggle={setInsertMenuIdx}
+                onInsert={insertBlock}
+                t={t}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Block edit modal */}
+      {editingBlock && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) setEditingId(null); }}
+        >
+          <div
+            className="relative flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+            style={{ width: "80vw", height: "90vh" }}
+          >
+            {/* Modal header */}
+            <div className="flex items-center gap-3 px-6 py-4 border-b border-slate-200 dark:border-slate-700 shrink-0">
+              {getBlockBadge(editingBlock)}
+              <span className="flex-1 min-w-0 truncate text-sm font-medium text-slate-700 dark:text-slate-300">
+                {getBlockPreview(editingBlock)}
+              </span>
+              <button
+                onClick={() => setEditingId(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal body */}
+            <div className={`flex-1 min-h-0 px-6 py-5 ${editingBlock.type === "paragraph" ? "flex flex-col" : "overflow-y-auto"}`}>
+              {editingBlock.type === "heading" && (
+                <HeadingProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "paragraph" && (
+                <ParagraphProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "image" && (
+                <ImageProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "table" && (
+                <TableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "inventory_table" && (
+                <InventoryTableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "cli_command" && (
+                <CliCommandProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// --- Insert line between blocks ---
+function InsertLine({
+  index,
+  activeIndex,
+  onToggle,
+  onInsert,
+  t,
+}: {
+  index: number;
+  activeIndex: number | null;
+  onToggle: (idx: number | null) => void;
+  onInsert: (type: ReportBlock["type"], atIndex: number) => void;
+  t: (key: string) => string;
+}) {
+  const isActive = activeIndex === index;
+
+  return (
+    <div className="group/insert relative flex items-center py-0.5 px-4">
+      {/* Line */}
+      <div className="flex-1 border-t border-dashed border-transparent group-hover/insert:border-slate-300 dark:group-hover/insert:border-slate-600 transition-colors" />
+
+      {/* + button */}
+      <button
+        onClick={() => onToggle(isActive ? null : index)}
+        className={`absolute left-1/2 -translate-x-1/2 flex items-center justify-center h-5 w-5 rounded-full border text-[10px] font-bold transition-all ${
+          isActive
+            ? "bg-blue-500 border-blue-500 text-white scale-100 opacity-100"
+            : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500 scale-0 opacity-0 group-hover/insert:scale-100 group-hover/insert:opacity-100"
+        }`}
+      >
+        <Plus className="h-3 w-3" />
+      </button>
+
+      {/* Dropdown menu */}
+      {isActive && (
+        <div className="absolute left-1/2 -translate-x-1/2 top-6 z-20 flex items-center gap-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg px-1.5 py-1">
+          <button
+            onClick={() => onInsert("heading", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <Type className="h-3.5 w-3.5" />
+            {t("structure.addHeading")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("paragraph", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <AlignLeft className="h-3.5 w-3.5" />
+            {t("structure.addParagraph")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("image", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <ImageIcon className="h-3.5 w-3.5" />
+            {t("structure.addImage")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("table", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <Table2 className="h-3.5 w-3.5" />
+            {t("structure.addTable")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("inventory_table", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <Server className="h-3.5 w-3.5" />
+            {t("structure.addInventoryTable")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("cli_command", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <span className="font-mono text-[10px] font-bold">&gt;_</span>
+            {t("structure.addCliCommand")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Heading inline properties ---
+function HeadingProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: HeadingBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-end gap-3">
+        <div className="flex-1 space-y-1.5">
+          <label className={labelClass}>{t("structure.headingPlaceholder")}</label>
+          <input
+            type="text"
+            value={block.content}
+            onChange={(e) => updateBlock(block.id, { content: e.target.value })}
+            placeholder={t("structure.headingPlaceholder")}
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.headingLevel")}</label>
+          <select
+            value={block.level}
+            onChange={(e) => updateBlock(block.id, { level: Number(e.target.value) })}
+            className={`${inputClass} w-20`}
+          >
+            {[1, 2, 3, 4, 5, 6].map((l) => (
+              <option key={l} value={l}>H{l}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={block.pageBreakBefore}
+          onChange={() => updateBlock(block.id, { pageBreakBefore: !block.pageBreakBefore })}
+          className="rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500/20 h-4 w-4"
+        />
+        <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.pageBreakBefore")}</span>
+      </label>
+    </div>
+  );
+}
+
+// --- Paragraph inline properties (TipTap WYSIWYG) ---
+function ParagraphProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ParagraphBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        heading: false,
+        codeBlock: false,
+        code: false,
+        blockquote: false,
+        horizontalRule: false,
+      }),
+      TextAlign.configure({ types: ["paragraph"] }),
+    ],
+    content: block.content || "<p></p>",
+    onUpdate: ({ editor: ed }) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        updateBlock(block.id, { content: ed.getHTML() });
+      }, 400);
+    },
+    editorProps: {
+      attributes: {
+        class:
+          "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[80px] px-3.5 py-2.5 text-sm",
+      },
+    },
+  });
+
+  if (!editor) return null;
+
+  const btnClass = (active: boolean) =>
+    `p-1.5 rounded-md transition-colors ${
+      active
+        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+        : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+    }`;
+
+  return (
+    <div className="flex flex-col flex-1 min-h-0 gap-1.5">
+      <label className={labelClass}>{t("structure.content")}</label>
+      <div className="flex flex-col flex-1 min-h-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+        {/* Toolbar */}
+        <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0">
+          {([
+            { val: "left" as const, Icon: AlignLeft },
+            { val: "center" as const, Icon: AlignCenter },
+            { val: "right" as const, Icon: AlignRight },
+            { val: "justify" as const, Icon: AlignJustify },
+          ]).map(({ val, Icon }) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => {
+                editor.chain().focus().setTextAlign(val).run();
+                updateBlock(block.id, { align: val });
+              }}
+              className={btnClass(editor.isActive({ textAlign: val }))}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            className={btnClass(editor.isActive("bold"))}
+            title={t("structure.bold")}
+          >
+            <Bold className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            className={btnClass(editor.isActive("italic"))}
+            title={t("structure.italic")}
+          >
+            <Italic className="h-3.5 w-3.5" />
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            className={btnClass(editor.isActive("bulletList"))}
+            title={t("structure.bulletList")}
+          >
+            <List className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            className={btnClass(editor.isActive("orderedList"))}
+            title={t("structure.numberedList")}
+          >
+            <ListOrdered className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        {/* Editor — fills remaining height */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <EditorContent editor={editor} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Image inline properties ---
+function ImageProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ImageBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/block-images", { method: "POST", body: formData });
+      if (res.ok) {
+        const data = await res.json();
+        updateBlock(block.id, { filename: data.filename, url: data.url });
+      }
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemove = async () => {
+    if (block.filename) {
+      await fetch(`/api/block-images/${block.filename}`, { method: "DELETE" }).catch(() => {});
+    }
+    updateBlock(block.id, { filename: "", url: "" });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Upload / Preview */}
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.image")}</label>
+        {block.url ? (
+          <div className="relative rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3">
+            <img
+              src={block.url}
+              alt={block.caption || ""}
+              className="max-h-[160px] mx-auto rounded object-contain"
+            />
+            <button
+              onClick={handleRemove}
+              className="absolute top-2 right-2 p-1 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-400 hover:text-red-500 hover:border-red-300 dark:hover:border-red-500/30 transition-colors shadow-sm"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="w-full flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 py-8 text-slate-400 dark:text-slate-500 hover:border-slate-400 dark:hover:border-slate-500 hover:text-slate-500 dark:hover:text-slate-400 transition-colors"
+          >
+            {uploading ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <Upload className="h-6 w-6" />
+            )}
+            <span className="text-sm">{uploading ? t("structure.uploading") : t("structure.uploadImage")}</span>
+          </button>
+        )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp,.svg"
+          onChange={handleUpload}
+          className="hidden"
+        />
+      </div>
+
+      {/* Width */}
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.imageWidth")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={10}
+            max={100}
+            step={5}
+            value={block.width}
+            onChange={(e) => updateBlock(block.id, { width: Number(e.target.value) })}
+            className="flex-1 accent-slate-900 dark:accent-white"
+          />
+          <span className="text-sm font-medium text-slate-700 dark:text-slate-300 w-12 text-right">{block.width}%</span>
+        </div>
+      </div>
+
+      {/* Caption toggle + input */}
+      <div className="space-y-3">
+        <label className="flex items-center gap-2.5 cursor-pointer">
+          <button type="button" onClick={() => updateBlock(block.id, { showCaption: !block.showCaption })}>
+            {block.showCaption ? (
+              <ToggleRight className="h-5 w-5 text-emerald-500" />
+            ) : (
+              <ToggleLeft className="h-5 w-5 text-slate-400" />
+            )}
+          </button>
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.showCaption")}</span>
+        </label>
+        {block.showCaption && (
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.caption")}</label>
+            <input
+              type="text"
+              value={block.caption}
+              onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
+              placeholder={t("structure.captionPlaceholder")}
+              className={inputClass}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- ContentEditable cell editor ---
+function CellEditor({
+  html,
+  onChange,
+  className,
+  style,
+  placeholder,
+  onFocusCb,
+  onBlurCb,
+  onSelectionChange,
+  editorRef,
+}: {
+  html: string;
+  onChange: (html: string) => void;
+  className: string;
+  style?: React.CSSProperties;
+  placeholder?: string;
+  onFocusCb: () => void;
+  onBlurCb: () => void;
+  onSelectionChange?: () => void;
+  editorRef?: (el: HTMLDivElement | null) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const lastHtml = useRef("");
+
+  useEffect(() => {
+    if (ref.current && html !== lastHtml.current) {
+      // Safely set content: use textContent for plain text, innerHTML for HTML
+      if (/<[a-z/][\s\S]*>/i.test(html)) {
+        ref.current.innerHTML = html;
+      } else {
+        ref.current.textContent = html;
+      }
+      lastHtml.current = html;
+    }
+  }, [html]);
+
+  return (
+    <div
+      ref={(el) => { ref.current = el; editorRef?.(el); }}
+      contentEditable
+      suppressContentEditableWarning
+      className={className}
+      style={style}
+      data-placeholder={placeholder}
+      onInput={() => {
+        if (ref.current) {
+          const h = ref.current.innerHTML;
+          lastHtml.current = h;
+          onChange(h);
+        }
+      }}
+      onFocus={onFocusCb}
+      onBlur={onBlurCb}
+      onKeyUp={onSelectionChange}
+      onMouseUp={onSelectionChange}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          document.execCommand("insertLineBreak");
+        }
+      }}
+      onPaste={(e) => {
+        e.preventDefault();
+        const text = e.clipboardData.getData("text/plain");
+        document.execCommand("insertText", false, text);
+      }}
+    />
+  );
+}
+
+// --- Vertical alignment icon indicator ---
+function VAlignIcon({ type }: { type: "top" | "middle" | "bottom" }) {
+  return (
+    <span className="flex flex-col justify-between w-2.5 h-3">
+      <span className={`h-[2px] rounded-full ${type === "top" ? "bg-current" : "bg-current/25"}`} />
+      <span className={`h-[2px] rounded-full ${type === "middle" ? "bg-current" : "bg-current/25"}`} />
+      <span className={`h-[2px] rounded-full ${type === "bottom" ? "bg-current" : "bg-current/25"}`} />
+    </span>
+  );
+}
+
+// --- Table inline properties ---
+function TableProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: TableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const colCount = block.headers.length;
+  const [activeCell, setActiveCell] = useState<{ row: number; col: number } | null>(null);
+  const [, setFormatTick] = useState(0);
+  const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const popoverInputFocused = useRef(false);
+
+  const aligns: ("left" | "center" | "right")[] = block.columnAligns?.length === colCount
+    ? block.columnAligns
+    : Array(colCount).fill("left");
+  const widths: number[] = block.columnWidths?.length === colCount
+    ? block.columnWidths
+    : Array(colCount).fill(Math.round(100 / colCount));
+  const vAligns: ("top" | "middle" | "bottom")[] = block.columnVAligns?.length === colCount
+    ? block.columnVAligns
+    : Array(colCount).fill("middle");
+  const totalWidth = widths.reduce((a, b) => a + b, 0);
+
+  // Migrate legacy cell-level bold/italic to inline HTML on mount
+  useEffect(() => {
+    let needsUpdate = false;
+    const migrate = (cell: string | TableCell): TableCell => {
+      const c = normalizeCell(cell);
+      if (c.bold || c.italic) {
+        needsUpdate = true;
+        let v = c.value;
+        if (c.italic) v = `<i>${v}</i>`;
+        if (c.bold) v = `<b>${v}</b>`;
+        return { value: v, size: c.size };
+      }
+      return c;
+    };
+    const migratedHeaders = block.headers.map(migrate);
+    const migratedRows = block.rows.map((r) => r.map(migrate));
+    if (needsUpdate) {
+      updateBlock(block.id, { headers: migratedHeaders, rows: migratedRows });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const getCellKey = (row: number, col: number) => `${row}-${col}`;
+
+  const handleCellRef = (row: number, col: number) => (el: HTMLDivElement | null) => {
+    const key = getCellKey(row, col);
+    if (el) cellRefs.current.set(key, el);
+    else cellRefs.current.delete(key);
+  };
+
+  const getCellData = (row: number, col: number): TableCell => {
+    const raw = row === -1 ? block.headers[col] : block.rows[row]?.[col];
+    return normalizeCell(raw ?? "");
+  };
+
+  const updateCellData = (row: number, col: number, patch: Partial<TableCell>) => {
+    if (row === -1) {
+      const headers = block.headers.map((h, i) => i === col ? { ...normalizeCell(h), ...patch } : h);
+      updateBlock(block.id, { headers });
+    } else {
+      const rows = block.rows.map((r, ri) =>
+        ri === row ? r.map((c, ci) => ci === col ? { ...normalizeCell(c), ...patch } : c) : r
+      );
+      updateBlock(block.id, { rows });
+    }
+  };
+
+  const updateAlign = (colIdx: number, align: "left" | "center" | "right") => {
+    const newAligns = [...aligns];
+    newAligns[colIdx] = align;
+    updateBlock(block.id, { columnAligns: newAligns });
+  };
+
+  const updateVAlign = (colIdx: number, valign: "top" | "middle" | "bottom") => {
+    const newVAligns = [...vAligns];
+    newVAligns[colIdx] = valign;
+    updateBlock(block.id, { columnVAligns: newVAligns });
+  };
+
+  const updateWidth = (colIdx: number, value: number) => {
+    const newWidths = [...widths];
+    newWidths[colIdx] = value;
+    updateBlock(block.id, { columnWidths: newWidths });
+  };
+
+  const applyFormat = (command: string) => {
+    document.execCommand(command, false);
+    // Sync HTML back from the focused contentEditable
+    if (activeCell) {
+      const el = cellRefs.current.get(getCellKey(activeCell.row, activeCell.col));
+      if (el) updateCellData(activeCell.row, activeCell.col, { value: el.innerHTML });
+    }
+    setFormatTick((n) => n + 1);
+  };
+
+  const handleSelectionChange = () => setFormatTick((n) => n + 1);
+
+  const addRow = () => {
+    updateBlock(block.id, { rows: [...block.rows, Array(colCount).fill({ value: "" })] });
+  };
+
+  const removeRow = (rowIdx: number) => {
+    if (block.rows.length <= 1) return;
+    updateBlock(block.id, { rows: block.rows.filter((_, i) => i !== rowIdx) });
+  };
+
+  const addColumn = () => {
+    const newCount = colCount + 1;
+    const equalW = Math.round(100 / newCount);
+    updateBlock(block.id, {
+      headers: [...block.headers, { value: "" }],
+      rows: block.rows.map((r) => [...r, { value: "" }]),
+      columnAligns: [...aligns, "left"],
+      columnWidths: Array(newCount).fill(equalW),
+      columnVAligns: [...vAligns, "middle"],
+    });
+  };
+
+  const removeColumn = (colIdx: number) => {
+    if (colCount <= 1) return;
+    const removedW = widths[colIdx];
+    const newWidths = widths.filter((_, i) => i !== colIdx);
+    const share = Math.round(removedW / newWidths.length);
+    const redistributed = newWidths.map((w, i) => i === 0 ? w + removedW - share * (newWidths.length - 1) : w + share);
+    updateBlock(block.id, {
+      headers: block.headers.filter((_, i) => i !== colIdx),
+      rows: block.rows.map((r) => r.filter((_, i) => i !== colIdx)),
+      columnAligns: aligns.filter((_, i) => i !== colIdx),
+      columnWidths: redistributed,
+      columnVAligns: vAligns.filter((_, i) => i !== colIdx),
+    });
+    if (activeCell?.col === colIdx) setActiveCell(null);
+  };
+
+  const moveColumn = (colIdx: number, dir: -1 | 1) => {
+    const target = colIdx + dir;
+    if (target < 0 || target >= colCount) return;
+    const swap = <T,>(arr: T[]): T[] => { const a = [...arr]; [a[colIdx], a[target]] = [a[target], a[colIdx]]; return a; };
+    updateBlock(block.id, {
+      headers: swap(block.headers),
+      rows: block.rows.map((r) => swap(r)),
+      columnAligns: swap(aligns),
+      columnWidths: swap(widths),
+      columnVAligns: swap(vAligns),
+    });
+    setActiveCell((prev) => prev ? { ...prev, col: target } : null);
+  };
+
+  const moveRow = (rowIdx: number, dir: -1 | 1) => {
+    const target = rowIdx + dir;
+    if (target < 0 || target >= block.rows.length) return;
+    const newRows = [...block.rows];
+    [newRows[rowIdx], newRows[target]] = [newRows[target], newRows[rowIdx]];
+    updateBlock(block.id, { rows: newRows });
+  };
+
+  const baseCellClass =
+    "w-full h-full min-h-[32px] px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-blue-400/40";
+  const baseHeaderCellClass =
+    "w-full h-full min-h-[32px] px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-inset focus:ring-blue-400/40";
+  const tdClass = "border-r border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900";
+  const thClass = "border-r border-b border-slate-300 dark:border-slate-600 bg-slate-100 dark:bg-slate-800";
+
+  const popoverBtnClass = (active: boolean) =>
+    `p-1 rounded transition-colors ${
+      active
+        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+        : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+    }`;
+
+  // Popover content for a cell
+  const renderPopover = (row: number, col: number) => {
+    const cell = getCellData(row, col);
+    const isHeader = row === -1;
+    const isBold = typeof document !== "undefined" && document.queryCommandState("bold");
+    const isItalic = typeof document !== "undefined" && document.queryCommandState("italic");
+
+    return (
+      <div
+        className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-30 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg p-2 flex items-center gap-1"
+        onMouseDown={(e) => { if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); }}
+      >
+        {/* Column settings (header only) */}
+        {isHeader && (
+          <>
+            {colCount > 1 && (
+              <>
+                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => moveColumn(col, -1)} disabled={col === 0} className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 transition-colors">
+                  <ChevronLeft className="h-3 w-3" />
+                </button>
+                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => moveColumn(col, 1)} disabled={col === colCount - 1} className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-30 transition-colors">
+                  <ChevronRight className="h-3 w-3" />
+                </button>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+              </>
+            )}
+            <div className="flex items-center gap-0.5 pr-1">
+              <input
+                type="number"
+                min={5}
+                max={95}
+                value={widths[col]}
+                onChange={(e) => updateWidth(col, Math.max(5, Math.min(95, Number(e.target.value) || 5)))}
+                onFocus={() => { popoverInputFocused.current = true; }}
+                onBlur={() => { popoverInputFocused.current = false; setTimeout(() => { if (!popoverInputFocused.current) setActiveCell(null); }, 150); }}
+                className="w-11 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-1 py-0.5 text-[11px] text-center text-slate-900 dark:text-slate-100 focus:outline-none"
+              />
+              <span className="text-[10px] text-slate-400">%</span>
+            </div>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+            {/* Horizontal alignment */}
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateAlign(col, "left")} className={popoverBtnClass(aligns[col] === "left")}>
+              <AlignLeft className="h-3 w-3" />
+            </button>
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateAlign(col, "center")} className={popoverBtnClass(aligns[col] === "center")}>
+              <AlignCenter className="h-3 w-3" />
+            </button>
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateAlign(col, "right")} className={popoverBtnClass(aligns[col] === "right")}>
+              <AlignRight className="h-3 w-3" />
+            </button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+            {/* Vertical alignment */}
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateVAlign(col, "top")} className={popoverBtnClass(vAligns[col] === "top")} title={t("structure.alignTop")}>
+              <VAlignIcon type="top" />
+            </button>
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateVAlign(col, "middle")} className={popoverBtnClass(vAligns[col] === "middle")} title={t("structure.alignMiddle")}>
+              <VAlignIcon type="middle" />
+            </button>
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => updateVAlign(col, "bottom")} className={popoverBtnClass(vAligns[col] === "bottom")} title={t("structure.alignBottom")}>
+              <VAlignIcon type="bottom" />
+            </button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+          </>
+        )}
+        {/* Inline formatting */}
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("bold")} className={popoverBtnClass(isBold)}>
+          <Bold className="h-3 w-3" />
+        </button>
+        <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => applyFormat("italic")} className={popoverBtnClass(isItalic)}>
+          <Italic className="h-3 w-3" />
+        </button>
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+        <input
+          type="number"
+          min={6}
+          max={24}
+          value={cell.size || ""}
+          placeholder="—"
+          onChange={(e) => updateCellData(row, col, { size: e.target.value ? Number(e.target.value) : undefined })}
+          onFocus={() => { popoverInputFocused.current = true; }}
+          onBlur={() => { popoverInputFocused.current = false; setTimeout(() => { if (!popoverInputFocused.current) setActiveCell(null); }, 150); }}
+          className="w-10 rounded border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-1 py-0.5 text-[11px] text-center text-slate-900 dark:text-slate-100 focus:outline-none"
+          title={t("structure.fontSize")}
+        />
+        <span className="text-[10px] text-slate-400">pt</span>
+
+        {/* Remove column button on header */}
+        {isHeader && colCount > 1 && (
+          <>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => removeColumn(col)}
+              className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+              title={t("structure.removeColumn")}
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const cellStyle = (cell: TableCell, col: number): React.CSSProperties => ({
+    textAlign: aligns[col],
+    fontSize: cell.size ? `${cell.size}px` : undefined,
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Show header toggle */}
+      <label className="flex items-center gap-2.5 cursor-pointer">
+        <button type="button" onClick={() => updateBlock(block.id, { showHeader: !block.showHeader })}>
+          {block.showHeader ? (
+            <ToggleRight className="h-5 w-5 text-emerald-500" />
+          ) : (
+            <ToggleLeft className="h-5 w-5 text-slate-400" />
+          )}
+        </button>
+        <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.showTableHeader")}</span>
+      </label>
+
+      {totalWidth !== 100 && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          {t("structure.widthTotal", { total: String(totalWidth) })}
+        </p>
+      )}
+
+      {/* Table editor */}
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.tableData")}</label>
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-visible">
+          <table className="w-full border-collapse" style={{ tableLayout: "fixed" }}>
+            <colgroup>
+              <col style={{ width: "28px" }} />
+              {widths.map((w, ci) => (
+                <col key={ci} style={{ width: `${(w / totalWidth) * 100}%` }} />
+              ))}
+              <col style={{ width: "32px" }} />
+            </colgroup>
+            {/* Header row */}
+            {block.showHeader && (
+              <thead>
+                <tr>
+                  <th className="p-0" />
+                  {block.headers.map((h, ci) => {
+                    const cell = normalizeCell(h);
+                    const isActive = activeCell?.row === -1 && activeCell?.col === ci;
+                    return (
+                      <th key={ci} className={`relative p-0 ${thClass}`} style={{ verticalAlign: vAligns[ci] }}>
+                        <CellEditor
+                          html={cell.value}
+                          onChange={(html) => updateCellData(-1, ci, { value: html })}
+                          className={baseHeaderCellClass}
+                          style={cellStyle(cell, ci)}
+                          placeholder={t("structure.headerPlaceholder")}
+                          onFocusCb={() => setActiveCell({ row: -1, col: ci })}
+                          onBlurCb={() => setTimeout(() => { if (popoverInputFocused.current) return; setActiveCell((prev) => prev?.row === -1 && prev?.col === ci ? null : prev); }, 150)}
+                          onSelectionChange={handleSelectionChange}
+                          editorRef={handleCellRef(-1, ci)}
+                        />
+                        {isActive && renderPopover(-1, ci)}
+                      </th>
+                    );
+                  })}
+                  <th className="p-0" />
+                </tr>
+              </thead>
+            )}
+            <tbody>
+              {block.rows.map((row, ri) => (
+                <tr key={ri} className="group/row">
+                  <td className="p-0 align-middle">
+                    {block.rows.length > 1 && (
+                      <div className="flex flex-col items-center opacity-0 group-hover/row:opacity-100 transition-opacity">
+                        <button
+                          onClick={() => moveRow(ri, -1)}
+                          disabled={ri === 0}
+                          className="p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-30 transition-colors"
+                        >
+                          <ChevronUp className="h-3 w-3" />
+                        </button>
+                        <button
+                          onClick={() => moveRow(ri, 1)}
+                          disabled={ri === block.rows.length - 1}
+                          className="p-0.5 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 disabled:opacity-30 transition-colors"
+                        >
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                  {row.map((rawCell, ci) => {
+                    const cell = normalizeCell(rawCell);
+                    const isActive = activeCell?.row === ri && activeCell?.col === ci;
+                    return (
+                      <td key={ci} className={`relative p-0 ${tdClass}`} style={{ verticalAlign: vAligns[ci] }}>
+                        <CellEditor
+                          html={cell.value}
+                          onChange={(html) => updateCellData(ri, ci, { value: html })}
+                          className={baseCellClass}
+                          style={cellStyle(cell, ci)}
+                          onFocusCb={() => setActiveCell({ row: ri, col: ci })}
+                          onBlurCb={() => setTimeout(() => { if (popoverInputFocused.current) return; setActiveCell((prev) => prev?.row === ri && prev?.col === ci ? null : prev); }, 150)}
+                          onSelectionChange={handleSelectionChange}
+                          editorRef={handleCellRef(ri, ci)}
+                        />
+                        {isActive && renderPopover(ri, ci)}
+                      </td>
+                    );
+                  })}
+                  <td className="p-0 align-middle">
+                    {block.rows.length > 1 && (
+                      <button
+                        onClick={() => removeRow(ri)}
+                        className="p-1 text-slate-400 hover:text-red-500 transition-colors"
+                        title={t("structure.removeRow")}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Add row / column buttons */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={addRow}
+          className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("structure.addRow")}
+        </button>
+        <button
+          type="button"
+          onClick={addColumn}
+          className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("structure.addColumn")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// --- Inventory Table inline properties ---
+
+interface InvStructureCategory {
+  categoryName: string;
+  entries: { key: string; columns: string[] }[];
+}
+
+interface NodeItem {
+  id: number;
+  hostname: string | null;
+  name: string | null;
+  ipAddress: string;
+}
+
+function InventoryTableProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: InventoryTableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [tab, setTab] = useState<"columns" | "equipment" | "style" | "preview">("columns");
+
+  // Inventory structure for multi-level dropdown
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [structureLoaded, setStructureLoaded] = useState(false);
+
+  // Nodes
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState("");
+
+  // Column picker state
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerCat, setPickerCat] = useState<string | null>(null);
+  const [pickerKey, setPickerKey] = useState<string | null>(null);
+
+  // Load inventory structure
+  useEffect(() => {
+    if (!current || structureLoaded) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: InvStructureCategory[]) => { setStructure(data); setStructureLoaded(true); })
+      .catch(() => setStructureLoaded(true));
+  }, [current, structureLoaded]);
+
+  // Load nodes
+  useEffect(() => {
+    if (!current || nodesLoaded) return;
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: NodeItem[]) => { setAllNodes(data); setNodesLoaded(true); })
+      .catch(() => setNodesLoaded(true));
+  }, [current, nodesLoaded]);
+
+  const selectedNodes = allNodes.filter((n) => block.nodeIds.includes(n.id));
+  const availableNodes = allNodes.filter(
+    (n) =>
+      !block.nodeIds.includes(n.id) &&
+      (nodeSearch === "" ||
+        (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        n.ipAddress.includes(nodeSearch))
+  );
+
+  const addNode = (id: number) => {
+    updateBlock(block.id, { nodeIds: [...block.nodeIds, id] });
+  };
+  const removeNode = (id: number) => {
+    updateBlock(block.id, { nodeIds: block.nodeIds.filter((n) => n !== id) });
+  };
+
+  const addColumn = (category: string, entryKey: string, colLabel: string) => {
+    const col: InventoryTableColumn = {
+      id: uid(),
+      category,
+      entryKey,
+      colLabel,
+      label: `${category} > ${entryKey} > ${colLabel}`,
+    };
+    updateBlock(block.id, { columns: [...block.columns, col] });
+    setPickerOpen(false);
+    setPickerCat(null);
+    setPickerKey(null);
+  };
+
+  const removeColumn = (colId: string) => {
+    updateBlock(block.id, { columns: block.columns.filter((c) => c.id !== colId) });
+  };
+
+  const updateColumnLabel = (colId: string, label: string) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => (c.id === colId ? { ...c, label } : c)),
+    });
+  };
+
+  const updateColumnHeaderLabel = (colId: string, headerLabel: string) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => (c.id === colId ? { ...c, headerLabel } : c)),
+    });
+  };
+
+  const updateColumnProp = (colId: string, patch: Partial<InventoryTableColumn>) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => (c.id === colId ? { ...c, ...patch } : c)),
+    });
+  };
+
+  const moveColumn = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= block.columns.length) return;
+    const cols = [...block.columns];
+    [cols[idx], cols[target]] = [cols[target], cols[idx]];
+    updateBlock(block.id, { columns: cols });
+  };
+
+  const tabBtnClass = (active: boolean) =>
+    `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      active
+        ? "border-violet-500 text-violet-600 dark:text-violet-400"
+        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+    }`;
+
+  const alignBtnClass = (active: boolean) =>
+    `p-1 rounded transition-colors ${
+      active
+        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+        : "text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+    }`;
+
+  // Current picker category data
+  const pickerCatData = pickerCat ? structure.find((c) => c.categoryName === pickerCat) : null;
+  const pickerKeyData = pickerCatData && pickerKey ? pickerCatData.entries.find((e) => e.key === pickerKey) : null;
+
+  const rules = block.styleRules ?? [];
+
+  const addRule = () => {
+    const rule: InventoryStyleRule = {
+      id: uid(),
+      columnId: block.columns[0]?.id ?? "__hostname__",
+      operator: "gte",
+      value: "",
+    };
+    updateBlock(block.id, { styleRules: [...rules, rule] });
+  };
+
+  const updateRule = (ruleId: string, patch: Partial<InventoryStyleRule>) => {
+    updateBlock(block.id, {
+      styleRules: rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)),
+    });
+  };
+
+  const removeRule = (ruleId: string) => {
+    updateBlock(block.id, { styleRules: rules.filter((r) => r.id !== ruleId) });
+  };
+
+  const moveRule = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= rules.length) return;
+    const arr = [...rules];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    updateBlock(block.id, { styleRules: arr });
+  };
+
+  const operatorLabels: Record<InventoryStyleRule["operator"], string> = {
+    eq: "=",
+    neq: "!=",
+    gt: ">",
+    gte: ">=",
+    lt: "<",
+    lte: "<=",
+    contains: t("structure.ruleContains"),
+    not_contains: t("structure.ruleNotContains"),
+  };
+
+  // Column options for rule dropdown
+  const ruleColumnOptions: { id: string; label: string }[] = [
+    { id: "__hostname__", label: block.hostnameHeaderLabel || "Hostname" },
+    ...block.columns.map((c) => ({
+      id: c.id,
+      label: c.headerLabel || c.label || `${c.category} > ${c.entryKey} > ${c.colLabel}`,
+    })),
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={tabBtnClass(tab === "columns")} onClick={() => setTab("columns")}>
+          {t("structure.inventoryColumns")}
+        </button>
+        <button type="button" className={tabBtnClass(tab === "equipment")} onClick={() => setTab("equipment")}>
+          {t("structure.inventoryEquipment")}
+          {block.nodeIds.length > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {block.nodeIds.length}
+            </span>
+          )}
+        </button>
+        <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>
+          {t("structure.inventoryStyle")}
+        </button>
+        <button type="button" className={tabBtnClass(tab === "preview")} onClick={() => setTab("preview")}>
+          {t("structure.inventoryPreview")}
+        </button>
+      </div>
+
+      {/* Columns tab */}
+      {tab === "columns" && (
+        <div className="space-y-3">
+          {/* Hostname column (always first, not removable) */}
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wide">1</span>
+              <span className="flex-1 text-sm font-medium text-slate-700 dark:text-slate-300">Hostname</span>
+              <span className="text-[10px] text-slate-400 italic">{t("structure.inventoryFixed")}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={block.hostnameHeaderLabel ?? ""}
+                onChange={(e) => updateBlock(block.id, { hostnameHeaderLabel: e.target.value })}
+                placeholder={t("structure.inventoryHeaderLabel")}
+                className="flex-1 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              />
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameAlign: "left" })} className={alignBtnClass((block.hostnameAlign ?? "left") === "left")}><AlignLeft className="h-3 w-3" /></button>
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameAlign: "center" })} className={alignBtnClass(block.hostnameAlign === "center")}><AlignCenter className="h-3 w-3" /></button>
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameAlign: "right" })} className={alignBtnClass(block.hostnameAlign === "right")}><AlignRight className="h-3 w-3" /></button>
+              </div>
+              <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameVAlign: "top" })} className={alignBtnClass(block.hostnameVAlign === "top")} title={t("structure.alignTop")}><VAlignIcon type="top" /></button>
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameVAlign: "middle" })} className={alignBtnClass((block.hostnameVAlign ?? "middle") === "middle")} title={t("structure.alignMiddle")}><VAlignIcon type="middle" /></button>
+                <button type="button" onClick={() => updateBlock(block.id, { hostnameVAlign: "bottom" })} className={alignBtnClass(block.hostnameVAlign === "bottom")} title={t("structure.alignBottom")}><VAlignIcon type="bottom" /></button>
+              </div>
+            </div>
+          </div>
+
+          {/* Defined columns */}
+          {block.columns.map((col, idx) => (
+            <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">{idx + 2}</span>
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={`${col.category} > ${col.entryKey} > ${col.colLabel}`}>
+                  {col.category} &gt; {col.entryKey} &gt; {col.colLabel}
+                </span>
+                <div className="flex items-center gap-0.5">
+                  <button onClick={() => moveColumn(idx, -1)} disabled={idx === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                    <ChevronUp className="h-3 w-3" />
+                  </button>
+                  <button onClick={() => moveColumn(idx, 1)} disabled={idx === block.columns.length - 1} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                </div>
+                <button onClick={() => removeColumn(col.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={col.headerLabel ?? ""}
+                  onChange={(e) => updateColumnHeaderLabel(col.id, e.target.value)}
+                  placeholder={col.label || `${col.category} > ${col.entryKey} > ${col.colLabel}`}
+                  className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  title={t("structure.inventoryHeaderLabel")}
+                />
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button type="button" onClick={() => updateColumnProp(col.id, { align: "left" })} className={alignBtnClass((col.align ?? "left") === "left")}><AlignLeft className="h-3 w-3" /></button>
+                  <button type="button" onClick={() => updateColumnProp(col.id, { align: "center" })} className={alignBtnClass(col.align === "center")}><AlignCenter className="h-3 w-3" /></button>
+                  <button type="button" onClick={() => updateColumnProp(col.id, { align: "right" })} className={alignBtnClass(col.align === "right")}><AlignRight className="h-3 w-3" /></button>
+                </div>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button type="button" onClick={() => updateColumnProp(col.id, { valign: "top" })} className={alignBtnClass(col.valign === "top")} title={t("structure.alignTop")}><VAlignIcon type="top" /></button>
+                  <button type="button" onClick={() => updateColumnProp(col.id, { valign: "middle" })} className={alignBtnClass((col.valign ?? "middle") === "middle")} title={t("structure.alignMiddle")}><VAlignIcon type="middle" /></button>
+                  <button type="button" onClick={() => updateColumnProp(col.id, { valign: "bottom" })} className={alignBtnClass(col.valign === "bottom")} title={t("structure.alignBottom")}><VAlignIcon type="bottom" /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {/* Add column button / picker */}
+          {!pickerOpen ? (
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {t("structure.inventoryAddColumn")}
+            </button>
+          ) : (
+            <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+                  {!pickerCat
+                    ? t("structure.inventoryPickCategory")
+                    : !pickerKey
+                      ? t("structure.inventoryPickKey")
+                      : t("structure.inventoryPickValue")}
+                </span>
+                <button
+                  onClick={() => { setPickerOpen(false); setPickerCat(null); setPickerKey(null); }}
+                  className="p-0.5 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Breadcrumb */}
+              {pickerCat && (
+                <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                  <button onClick={() => { setPickerCat(null); setPickerKey(null); }} className="hover:text-violet-600 underline">
+                    {t("structure.inventoryCategories")}
+                  </button>
+                  <ChevronRight className="h-3 w-3" />
+                  {pickerKey ? (
+                    <>
+                      <button onClick={() => setPickerKey(null)} className="hover:text-violet-600 underline">{pickerCat}</button>
+                      <ChevronRight className="h-3 w-3" />
+                      <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerKey}</span>
+                    </>
+                  ) : (
+                    <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerCat}</span>
+                  )}
+                </div>
+              )}
+
+              {/* Level 1: Categories */}
+              {!pickerCat && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {structure.length === 0 && (
+                    <p className="text-xs text-slate-400 italic py-2">{t("structure.inventoryNoData")}</p>
+                  )}
+                  {structure.map((cat) => (
+                    <button
+                      key={cat.categoryName}
+                      onClick={() => setPickerCat(cat.categoryName)}
+                      className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30 transition-colors"
+                    >
+                      {cat.categoryName}
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Level 2: Entry keys */}
+              {pickerCat && !pickerKey && pickerCatData && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {pickerCatData.entries.map((entry) => (
+                    <button
+                      key={entry.key}
+                      onClick={() => setPickerKey(entry.key)}
+                      className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30 transition-colors"
+                    >
+                      {entry.key}
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Level 3: Column labels (values) */}
+              {pickerCat && pickerKey && pickerKeyData && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {pickerKeyData.columns.map((col) => (
+                    <button
+                      key={col}
+                      onClick={() => addColumn(pickerCat, pickerKey, col)}
+                      className="w-full flex items-center rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30 transition-colors"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-2 text-violet-500" />
+                      {col}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Equipment tab */}
+      {tab === "equipment" && (
+        <div className="space-y-3">
+          {/* Selected equipment */}
+          {selectedNodes.length > 0 && (
+            <div className="space-y-1">
+              <label className={labelClass}>{t("structure.inventorySelected")}</label>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {selectedNodes.map((node) => (
+                  <div
+                    key={node.id}
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5"
+                  >
+                    <Server className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+                      {node.hostname || node.name || node.ipAddress}
+                    </span>
+                    <span className="text-[10px] text-slate-400">{node.ipAddress}</span>
+                    <button onClick={() => removeNode(node.id)} className="p-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Search + available nodes */}
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.inventoryAddEquipment")}</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                value={nodeSearch}
+                onChange={(e) => setNodeSearch(e.target.value)}
+                placeholder={t("common.search")}
+                className={`${inputClass} pl-8`}
+              />
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto space-y-1 rounded-lg border border-slate-200 dark:border-slate-700 p-1.5">
+            {!nodesLoaded && (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              </div>
+            )}
+            {nodesLoaded && availableNodes.length === 0 && (
+              <p className="text-xs text-slate-400 italic text-center py-3">{t("common.noResult")}</p>
+            )}
+            {availableNodes.map((node) => (
+              <button
+                key={node.id}
+                onClick={() => addNode(node.id)}
+                className="w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+                  {node.hostname || node.name || node.ipAddress}
+                </span>
+                <span className="text-[10px] text-slate-400 shrink-0">{node.ipAddress}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Style tab */}
+      {tab === "style" && (
+        <div className="space-y-5">
+          {/* Show header toggle */}
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <button type="button" onClick={() => updateBlock(block.id, { showHeader: !block.showHeader })}>
+              {block.showHeader ? (
+                <ToggleRight className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <ToggleLeft className="h-5 w-5 text-slate-400" />
+              )}
+            </button>
+            <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.showTableHeader")}</span>
+          </label>
+
+          {/* Font size */}
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.inventoryFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={6}
+                max={24}
+                value={block.fontSize ?? ""}
+                placeholder={t("structure.inventoryFontSizeInherited")}
+                onChange={(e) => updateBlock(block.id, { fontSize: e.target.value ? Number(e.target.value) : undefined })}
+                className={`${inputClass} w-28`}
+              />
+              <span className="text-xs text-slate-400">pt</span>
+              {block.fontSize && (
+                <button
+                  type="button"
+                  onClick={() => updateBlock(block.id, { fontSize: undefined })}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  {t("structure.inventoryFontSizeReset")}
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">{t("structure.inventoryFontSizeHint")}</p>
+          </div>
+
+          {/* Style rules */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className={labelClass}>{t("structure.ruleTitle")}</label>
+              <button
+                type="button"
+                onClick={addRule}
+                className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                {t("structure.ruleAdd")}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">{t("structure.ruleHint")}</p>
+
+            {rules.length === 0 && (
+              <p className="text-xs text-slate-400 italic text-center py-4">{t("structure.ruleEmpty")}</p>
+            )}
+
+            {rules.map((rule, ri) => (
+              <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-2">
+                {/* Rule header with order */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">#{ri + 1}</span>
+                  <div className="flex-1" />
+                  <div className="flex items-center gap-0.5">
+                    <button type="button" onClick={() => moveRule(ri, -1)} disabled={ri === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button type="button" onClick={() => moveRule(ri, 1)} disabled={ri === rules.length - 1} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => removeRule(rule.id)} className="p-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Condition row: column + operator + value */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleIf")}</span>
+                  <select
+                    value={rule.columnId}
+                    onChange={(e) => updateRule(rule.id, { columnId: e.target.value })}
+                    className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                  >
+                    {ruleColumnOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>{opt.label}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={rule.operator}
+                    onChange={(e) => updateRule(rule.id, { operator: e.target.value as InventoryStyleRule["operator"] })}
+                    className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                  >
+                    {(Object.keys(operatorLabels) as InventoryStyleRule["operator"][]).map((op) => (
+                      <option key={op} value={op}>{operatorLabels[op]}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={rule.value}
+                    onChange={(e) => updateRule(rule.id, { value: e.target.value })}
+                    placeholder={t("structure.ruleValue")}
+                    className="w-28 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                  />
+                </div>
+
+                {/* Style actions row */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleThen")}</span>
+                  {/* Bold */}
+                  <button
+                    type="button"
+                    onClick={() => updateRule(rule.id, { bold: !rule.bold })}
+                    className={`p-1.5 rounded transition-colors ${rule.bold ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`}
+                    title="Bold"
+                  >
+                    <Bold className="h-3.5 w-3.5" />
+                  </button>
+                  {/* Italic */}
+                  <button
+                    type="button"
+                    onClick={() => updateRule(rule.id, { italic: !rule.italic })}
+                    className={`p-1.5 rounded transition-colors ${rule.italic ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`}
+                    title="Italic"
+                  >
+                    <Italic className="h-3.5 w-3.5" />
+                  </button>
+                  {/* Text color */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleTextColor")}</span>
+                    <input
+                      type="color"
+                      value={rule.textColor || "#000000"}
+                      onChange={(e) => updateRule(rule.id, { textColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.textColor && (
+                      <button type="button" onClick={() => updateRule(rule.id, { textColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  {/* Highlight color */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleHighlight")}</span>
+                    <input
+                      type="color"
+                      value={rule.highlightColor || "#ffff00"}
+                      onChange={(e) => updateRule(rule.id, { highlightColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.highlightColor && (
+                      <button type="button" onClick={() => updateRule(rule.id, { highlightColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  {/* Background color */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleBgColor")}</span>
+                    <input
+                      type="color"
+                      value={rule.bgColor || "#ffffff"}
+                      onChange={(e) => updateRule(rule.id, { bgColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.bgColor && (
+                      <button type="button" onClick={() => updateRule(rule.id, { bgColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Preview tab */}
+      {tab === "preview" && (
+        <div className="space-y-3">
+          {block.columns.length === 0 || block.nodeIds.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400 dark:text-slate-500">
+              <Table2 className="h-8 w-8" />
+              <p className="text-sm">{t("structure.inventoryPreviewEmpty")}</p>
+            </div>
+          ) : (
+            <>
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-auto">
+                <table className="w-full border-collapse text-sm" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
+                  {block.showHeader && (
+                    <thead>
+                      <tr className="bg-slate-100 dark:bg-slate-800">
+                        <th className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap" style={{ textAlign: block.hostnameAlign ?? "left", verticalAlign: block.hostnameVAlign ?? "middle" }}>
+                          {block.hostnameHeaderLabel || "Hostname"}
+                        </th>
+                        {block.columns.map((col) => (
+                          <th key={col.id} className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap" style={{ textAlign: col.align ?? "left", verticalAlign: col.valign ?? "middle" }}>
+                            {col.headerLabel || col.label || `${col.category} > ${col.entryKey} > ${col.colLabel}`}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                  )}
+                  <tbody>
+                    {selectedNodes.map((node, ni) => (
+                      <tr key={node.id} className={ni % 2 === 1 ? "bg-slate-50 dark:bg-slate-800/30" : ""}>
+                        <td className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap" style={{ textAlign: block.hostnameAlign ?? "left", verticalAlign: block.hostnameVAlign ?? "middle" }}>
+                          {node.hostname || node.name || node.ipAddress}
+                        </td>
+                        {block.columns.map((col) => (
+                          <td key={col.id} className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-400 italic whitespace-nowrap" style={{ textAlign: col.align ?? "left", verticalAlign: col.valign ?? "middle" }}>
+                            —
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-slate-400 italic">{t("structure.inventoryPreviewNote")}</p>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- CLI Command properties ---
+function CliCommandProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: CliCommandBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [tab, setTab] = useState<"params" | "style">("params");
+
+  const rules = block.styleRules ?? [];
+
+  const addRule = () => {
+    const rule: CliStyleRule = {
+      id: uid(),
+      pattern: "",
+      operator: "matches",
+    };
+    updateBlock(block.id, { styleRules: [...rules, rule] });
+  };
+
+  const updateRule = (ruleId: string, patch: Partial<CliStyleRule>) => {
+    updateBlock(block.id, {
+      styleRules: rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)),
+    });
+  };
+
+  const removeRule = (ruleId: string) => {
+    updateBlock(block.id, { styleRules: rules.filter((r) => r.id !== ruleId) });
+  };
+
+  const moveRule = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= rules.length) return;
+    const arr = [...rules];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    updateBlock(block.id, { styleRules: arr });
+  };
+
+  const operatorLabels: Record<CliStyleRule["operator"], string> = {
+    matches: t("structure.cliRuleMatches"),
+    not_matches: t("structure.cliRuleNotMatches"),
+    contains: t("structure.ruleContains"),
+    not_contains: t("structure.ruleNotContains"),
+    eq: "=",
+    neq: "!=",
+  };
+
+  const tabBtnClass = (active: boolean) =>
+    `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      active
+        ? "border-slate-700 dark:border-slate-300 text-slate-700 dark:text-slate-300"
+        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+    }`;
+
+  const alignBtnClass = (active: boolean) =>
+    `p-1 rounded transition-colors ${
+      active
+        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+        : "text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
+    }`;
+
+  // Parse line filter and generate preview
+  const parseLineFilter = (filter: string): Set<number> => {
+    const lines = new Set<number>();
+    if (!filter.trim()) return lines;
+    for (const part of filter.split(",")) {
+      const trimmed = part.trim();
+      if (trimmed.includes("-")) {
+        const [start, end] = trimmed.split("-").map(Number);
+        if (!isNaN(start) && !isNaN(end)) {
+          for (let i = start; i <= end; i++) lines.add(i);
+        }
+      } else {
+        const n = Number(trimmed);
+        if (!isNaN(n)) lines.add(n);
+      }
+    }
+    return lines;
+  };
+
+  const commandLines = block.command.split("\n");
+  const visibleLines = block.lineFilter ? parseLineFilter(block.lineFilter) : null;
+
+  return (
+    <div className="space-y-4">
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={tabBtnClass(tab === "params")} onClick={() => setTab("params")}>
+          {t("structure.cliParams")}
+        </button>
+        <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>
+          {t("structure.inventoryStyle")}
+        </button>
+      </div>
+
+      {/* Params tab */}
+      {tab === "params" && (
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliCommandLabel")}</label>
+            <textarea
+              value={block.command}
+              onChange={(e) => updateBlock(block.id, { command: e.target.value })}
+              placeholder={t("structure.cliCommandPlaceholder")}
+              rows={10}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-900 text-green-400 font-mono text-sm px-4 py-3 focus:outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-400/20 transition-colors resize-y placeholder:text-slate-600"
+              spellCheck={false}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliLineFilter")}</label>
+              <input
+                type="text"
+                value={block.lineFilter ?? ""}
+                onChange={(e) => updateBlock(block.id, { lineFilter: e.target.value || undefined })}
+                placeholder="ex: 1-5,8,10-12"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 font-mono placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+              />
+              <p className="text-[10px] text-slate-400">{t("structure.cliLineFilterHint")}</p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliEllipsis")}</label>
+              <label className="flex items-center gap-2.5 cursor-pointer mt-1">
+                <button type="button" onClick={() => updateBlock(block.id, { showEllipsis: !block.showEllipsis })}>
+                  {block.showEllipsis ? (
+                    <ToggleRight className="h-5 w-5 text-emerald-500" />
+                  ) : (
+                    <ToggleLeft className="h-5 w-5 text-slate-400" />
+                  )}
+                </button>
+                <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cliShowEllipsis")}</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Preview */}
+          {block.command && (
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliPreview")}</label>
+              <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 font-mono text-sm overflow-x-auto" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
+                {(() => {
+                  const result: React.ReactNode[] = [];
+                  let prevVisible = true;
+                  commandLines.forEach((line, i) => {
+                    const lineNum = i + 1;
+                    const isVisible = !visibleLines || visibleLines.has(lineNum);
+                    if (isVisible) {
+                      result.push(
+                        <div key={lineNum} className="flex">
+                          <span className="w-8 text-right pr-3 text-slate-600 select-none shrink-0">{lineNum}</span>
+                          <span className="text-green-400 whitespace-pre">{line || " "}</span>
+                        </div>
+                      );
+                      prevVisible = true;
+                    } else if (prevVisible && block.showEllipsis) {
+                      result.push(
+                        <div key={`ellipsis-${lineNum}`} className="flex">
+                          <span className="w-8 text-right pr-3 text-slate-600 select-none shrink-0"></span>
+                          <span className="text-slate-500 italic">[...]</span>
+                        </div>
+                      );
+                      prevVisible = false;
+                    }
+                  });
+                  return result;
+                })()}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Style tab */}
+      {tab === "style" && (
+        <div className="space-y-5">
+          {/* Font size */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.inventoryFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={6}
+                max={24}
+                value={block.fontSize ?? ""}
+                placeholder={t("structure.inventoryFontSizeInherited")}
+                onChange={(e) => updateBlock(block.id, { fontSize: e.target.value ? Number(e.target.value) : undefined })}
+                className="w-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+              />
+              <span className="text-xs text-slate-400">pt</span>
+              {block.fontSize && (
+                <button
+                  type="button"
+                  onClick={() => updateBlock(block.id, { fontSize: undefined })}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  {t("structure.inventoryFontSizeReset")}
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">{t("structure.cliFontSizeHint")}</p>
+          </div>
+
+          {/* Style rules */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.ruleTitle")}</label>
+              <button
+                type="button"
+                onClick={addRule}
+                className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                {t("structure.ruleAdd")}
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">{t("structure.cliRuleHint")}</p>
+
+            {rules.length === 0 && (
+              <p className="text-xs text-slate-400 italic text-center py-4">{t("structure.ruleEmpty")}</p>
+            )}
+
+            {rules.map((rule, ri) => (
+              <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-2">
+                {/* Rule header */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">#{ri + 1}</span>
+                  <div className="flex-1" />
+                  <div className="flex items-center gap-0.5">
+                    <button type="button" onClick={() => moveRule(ri, -1)} disabled={ri === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button type="button" onClick={() => moveRule(ri, 1)} disabled={ri === rules.length - 1} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <button type="button" onClick={() => removeRule(rule.id)} className="p-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Condition: operator + regex pattern */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleIf")}</span>
+                  <select
+                    value={rule.operator}
+                    onChange={(e) => updateRule(rule.id, { operator: e.target.value as CliStyleRule["operator"] })}
+                    className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                  >
+                    {(Object.keys(operatorLabels) as CliStyleRule["operator"][]).map((op) => (
+                      <option key={op} value={op}>{operatorLabels[op]}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={rule.pattern}
+                    onChange={(e) => updateRule(rule.id, { pattern: e.target.value })}
+                    placeholder={t("structure.cliRulePattern")}
+                    className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 font-mono focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                  />
+                </div>
+
+                {/* Style actions */}
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleThen")}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateRule(rule.id, { bold: !rule.bold })}
+                    className={`p-1.5 rounded transition-colors ${rule.bold ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`}
+                    title="Bold"
+                  >
+                    <Bold className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateRule(rule.id, { italic: !rule.italic })}
+                    className={`p-1.5 rounded transition-colors ${rule.italic ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`}
+                    title="Italic"
+                  >
+                    <Italic className="h-3.5 w-3.5" />
+                  </button>
+                  {/* Text color */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleTextColor")}</span>
+                    <input
+                      type="color"
+                      value={rule.textColor || "#22c55e"}
+                      onChange={(e) => updateRule(rule.id, { textColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.textColor && (
+                      <button type="button" onClick={() => updateRule(rule.id, { textColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  {/* Highlight */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleHighlight")}</span>
+                    <input
+                      type="color"
+                      value={rule.highlightColor || "#ffff00"}
+                      onChange={(e) => updateRule(rule.id, { highlightColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.highlightColor && (
+                      <>
+                        <button type="button" onClick={() => updateRule(rule.id, { highlightColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                          <X className="h-3 w-3" />
+                        </button>
+                        {/* Highlight mode toggle: line or match */}
+                        <div className="flex items-center gap-0.5 ml-1">
+                          <button
+                            type="button"
+                            onClick={() => updateRule(rule.id, { highlightMode: "line" })}
+                            className={alignBtnClass((rule.highlightMode ?? "match") === "line")}
+                            title={t("structure.cliHighlightLine")}
+                          >
+                            <span className="text-[9px] font-bold px-0.5">LINE</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updateRule(rule.id, { highlightMode: "match" })}
+                            className={alignBtnClass((rule.highlightMode ?? "match") === "match")}
+                            title={t("structure.cliHighlightMatch")}
+                          >
+                            <span className="text-[9px] font-bold px-0.5">MATCH</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Background */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-400">{t("structure.ruleBgColor")}</span>
+                    <input
+                      type="color"
+                      value={rule.bgColor || "#1e293b"}
+                      onChange={(e) => updateRule(rule.id, { bgColor: e.target.value })}
+                      className="w-6 h-6 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0"
+                    />
+                    {rule.bgColor && (
+                      <button type="button" onClick={() => updateRule(rule.id, { bgColor: undefined })} className="text-[10px] text-slate-400 hover:text-slate-600">
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
