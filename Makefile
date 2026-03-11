@@ -23,6 +23,6 @@ upgrade: ## Pull latest version, rebuild and apply migrations
 	docker compose up -d --build
 	@echo "\033[36m[3/4]\033[0m Applying database migrations..."
 	docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
-	@echo "\033[36m[4/4]\033[0m Restarting workers..."
-	docker compose restart worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
+	@echo "\033[36m[4/4]\033[0m Restarting services..."
+	docker compose restart node worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
 	@echo "\033[32mUpgrade complete!\033[0m"
