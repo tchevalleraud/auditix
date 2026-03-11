@@ -5,6 +5,8 @@ const CACHE_TTL = 3600; // 1 hour
 
 let cache: { latest: string; checkedAt: number } | null = null;
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const current = process.env.APP_VERSION ?? "0.0.0";
 
@@ -22,7 +24,7 @@ export async function GET() {
       `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
       {
         headers: { Accept: "application/vnd.github.v3+json" },
-        next: { revalidate: CACHE_TTL },
+        cache: "no-store",
       }
     );
 
