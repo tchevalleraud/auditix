@@ -1254,8 +1254,8 @@ class GenerateReportMessageHandler
                         $part = trim($part);
                         if (str_contains($part, '-')) {
                             [$start, $end] = array_map('intval', explode('-', $part, 2));
-                            for ($i = $start; $i <= $end; $i++) {
-                                $visibleLines[$i] = true;
+                            for ($ln = $start; $ln <= $end; $ln++) {
+                                $visibleLines[$ln] = true;
                             }
                         } else {
                             $n = (int) $part;
@@ -1283,8 +1283,8 @@ class GenerateReportMessageHandler
                 $allLines = explode("\n", $command);
                 $outputLines = [];
                 $prevVisible = true;
-                foreach ($allLines as $i => $line) {
-                    $lineNum = $i + 1;
+                foreach ($allLines as $li => $line) {
+                    $lineNum = $li + 1;
                     $isVisible = $visibleLines === null || isset($visibleLines[$lineNum]);
                     if ($isVisible) {
                         $outputLines[] = ['type' => 'line', 'num' => $lineNum, 'text' => $line];
