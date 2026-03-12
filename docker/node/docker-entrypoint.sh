@@ -1,10 +1,8 @@
 #!/bin/sh
 set -e
 
-if [ ! -d /app/node_modules ]; then
-    echo ">> Installing dependencies..."
-    npm install
-fi
+echo ">> Installing/updating dependencies..."
+npm install
 
 if [ "$APP_ENV" = "prod" ]; then
     echo ">> Building Next.js for production..."
