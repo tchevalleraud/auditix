@@ -20,8 +20,8 @@ final class Version20260307010436 extends AbstractMigration
     public function up(Schema $schema): void
     {
         // this up() migration is auto-generated, please modify it to your needs
-        $this->addSql('ALTER TABLE node ADD is_reachable BOOLEAN DEFAULT NULL');
-        $this->addSql('ALTER TABLE node ADD last_ping_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL');
+        $this->addSql('ALTER TABLE node ADD COLUMN IF NOT EXISTS is_reachable BOOLEAN DEFAULT NULL');
+        $this->addSql('ALTER TABLE node ADD COLUMN IF NOT EXISTS last_ping_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL');
     }
 
     public function down(Schema $schema): void
