@@ -58,9 +58,18 @@ final class Version20260311010000 extends AbstractMigration
         $this->addSql('COMMENT ON COLUMN report.updated_at IS \'(DC2Type:datetime_immutable)\'');
 
         // Insert default theme (only if not already present)
-        $this->addSql("INSERT INTO report_theme (name, description, is_default, primary_color, secondary_color, font_family, heading_font_family, font_size, context_id, created_at)
-            SELECT 'Classic', 'Default classic theme with clean typography', TRUE, '#1e293b', '#3b82f6', 'Inter', NULL, 11, NULL, NOW()
-            WHERE NOT EXISTS (SELECT 1 FROM report_theme WHERE name = 'Classic' AND is_default = TRUE)");
+        // Use column-agnostic approach: check if styles column exists (post-020000) or use old columns
+        $this->addSql("DO \$\$ BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'report_theme' AND column_name = 'styles') THEN
+                INSERT INTO report_theme (name, description, is_default, styles, context_id, created_at)
+                SELECT 'Classic', 'Default classic theme with clean typography', TRUE, '{}', NULL, NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM report_theme WHERE name = 'Classic' AND is_default = TRUE);
+            ELSE
+                INSERT INTO report_theme (name, description, is_default, primary_color, secondary_color, font_family, heading_font_family, font_size, context_id, created_at)
+                SELECT 'Classic', 'Default classic theme with clean typography', TRUE, '#1e293b', '#3b82f6', 'Inter', NULL, 11, NULL, NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM report_theme WHERE name = 'Classic' AND is_default = TRUE);
+            END IF;
+        END \$\$;");
     }
 
     public function down(Schema $schema): void
