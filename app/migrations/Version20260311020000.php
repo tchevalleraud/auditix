@@ -33,7 +33,7 @@ final class Version20260311020000 extends AbstractMigration
         ]);
 
         $this->addSql("ALTER TABLE report_theme ADD COLUMN IF NOT EXISTS styles JSON NOT NULL DEFAULT '{}'");
-        $this->addSql('UPDATE report_theme SET styles = :styles WHERE styles = \'{}\'', ['styles' => $defaultStyles]);
+        $this->addSql('UPDATE report_theme SET styles = :styles WHERE styles::text = \'{}\'', ['styles' => $defaultStyles]);
 
         $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS primary_color');
         $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS secondary_color');
