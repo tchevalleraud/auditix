@@ -19,8 +19,8 @@ class Report
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
-    #[ORM\Column(length: 20)]
-    private string $type = 'word';
+    #[ORM\Column(length: 10)]
+    private string $locale = 'fr';
 
     #[ORM\Column(length: 255)]
     private string $title = '';
@@ -42,6 +42,15 @@ class Report
 
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $tags = null;
+
+    #[ORM\Column(type: 'json')]
+    private array $authors = [];
+
+    #[ORM\Column(type: 'json')]
+    private array $recipients = [];
+
+    #[ORM\Column(type: 'json')]
+    private array $revisions = [];
 
     #[ORM\Column(type: 'json')]
     private array $blocks = [];
@@ -79,8 +88,8 @@ class Report
     public function setName(string $v): static { $this->name = $v; return $this; }
     public function getDescription(): ?string { return $this->description; }
     public function setDescription(?string $v): static { $this->description = $v; return $this; }
-    public function getType(): string { return $this->type; }
-    public function setType(string $v): static { $this->type = $v; return $this; }
+    public function getLocale(): string { return $this->locale; }
+    public function setLocale(string $v): static { $this->locale = $v; return $this; }
     public function getTitle(): string { return $this->title; }
     public function setTitle(string $v): static { $this->title = $v; return $this; }
     public function getSubtitle(): ?string { return $this->subtitle; }
@@ -95,6 +104,12 @@ class Report
     public function setShowIllustrationsPage(bool $v): static { $this->showIllustrationsPage = $v; return $this; }
     public function getTags(): ?array { return $this->tags; }
     public function setTags(?array $v): static { $this->tags = $v; return $this; }
+    public function getAuthors(): array { return $this->authors; }
+    public function setAuthors(array $v): static { $this->authors = $v; return $this; }
+    public function getRecipients(): array { return $this->recipients; }
+    public function setRecipients(array $v): static { $this->recipients = $v; return $this; }
+    public function getRevisions(): array { return $this->revisions; }
+    public function setRevisions(array $v): static { $this->revisions = $v; return $this; }
     public function getBlocks(): array { return $this->blocks; }
     public function setBlocks(array $v): static { $this->blocks = $v; return $this; }
     public function getContext(): Context { return $this->context; }

@@ -130,14 +130,26 @@ export interface CliStyleRule {
   italic?: boolean;
 }
 
+export interface CliConditionalRule {
+  id: string;
+  pattern: string;
+  operator: "matches" | "not_matches" | "contains" | "not_contains";
+  action: "show" | "hide";
+}
+
 export interface CliCommandBlock {
   id: string;
   type: "cli_command";
-  command: string;
-  lineFilter?: string; // e.g. "1-5,8,10-12"
-  showEllipsis: boolean; // show [...] for hidden lines
+  commandName: string; // the command to display/run, e.g. "show sys-info"
+  command: string; // the output content (static mode) or resolved output
+  dataSource: "none" | "local" | "remote";
+  nodeIds: number[];
+  tagIds: number[];
+  lineFilter?: string;
+  showEllipsis: boolean;
   fontSize?: number;
   styleRules?: CliStyleRule[];
+  conditionalRules?: CliConditionalRule[];
 }
 
 function normalizeCell(cell: string | TableCell): TableCell {
@@ -191,6 +203,8 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   const [insertMenuIdx, setInsertMenuIdx] = useState<number | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
 
   const depths = computeDepths(blocks);
 
@@ -213,7 +227,7 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
     } else if (type === "inventory_table") {
       block = { id, type: "inventory_table", columns: [], nodeIds: [], showHeader: true };
     } else if (type === "cli_command") {
-      block = { id, type: "cli_command", command: "", showEllipsis: true };
+      block = { id, type: "cli_command", commandName: "", command: "", dataSource: "none", nodeIds: [], tagIds: [], showEllipsis: true };
     } else {
       block = { id, type: "paragraph", content: "", align: "left" };
     }
@@ -268,6 +282,16 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [editingId]);
 
+  // Close add menu on outside click
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [addMenuOpen]);
+
   const editingBlock = editingId ? blocks.find((b) => b.id === editingId) : null;
 
   const getBlockPreview = (block: ReportBlock) => {
@@ -291,9 +315,12 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
       return <span className="text-slate-500">{t("structure.inventorySize", { cols: String(cols + 1), nodes: String(nodes) })}</span>;
     }
     if (block.type === "cli_command") {
-      if (block.command) {
-        const preview = block.command.split("\n")[0].substring(0, 60);
-        return <span className="text-slate-500 font-mono text-xs">{preview}</span>;
+      const source = block.dataSource || "none";
+      const sourceLabel = source === "none" ? t("structure.cliSourceNone") : source === "local" ? t("structure.cliSourceLocal") : t("structure.cliSourceRemote");
+      const cmdName = block.commandName || block.command?.split("\n")[0]?.substring(0, 40);
+      if (cmdName) {
+        const nodeCount = (block.nodeIds || []).length + (block.tagIds || []).length;
+        return <span className="text-slate-500 font-mono text-xs">{sourceLabel}{source !== "none" ? ` (${nodeCount})` : ""} &mdash; {cmdName}</span>;
       }
       return <span className="italic text-slate-400">{t("structure.emptyCliCommand")}</span>;
     }
@@ -354,49 +381,43 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
             {t("structure.blocks")}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="relative" ref={addMenuRef}>
             <button
-              onClick={() => addBlock("heading")}
+              onClick={() => setAddMenuOpen(!addMenuOpen)}
               className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
-              {t("structure.addHeading")}
+              {t("structure.addBlock")}
+              <ChevronDownIcon className="h-3.5 w-3.5" />
             </button>
-            <button
-              onClick={() => addBlock("paragraph")}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("structure.addParagraph")}
-            </button>
-            <button
-              onClick={() => addBlock("image")}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("structure.addImage")}
-            </button>
-            <button
-              onClick={() => addBlock("table")}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("structure.addTable")}
-            </button>
-            <button
-              onClick={() => addBlock("inventory_table")}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("structure.addInventoryTable")}
-            </button>
-            <button
-              onClick={() => addBlock("cli_command")}
-              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t("structure.addCliCommand")}
-            </button>
+            {addMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-30 w-52 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
+                <button onClick={() => { addBlock("heading"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Type className="h-4 w-4 text-indigo-500" />
+                  {t("structure.addHeading")}
+                </button>
+                <button onClick={() => { addBlock("paragraph"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <AlignLeft className="h-4 w-4 text-emerald-500" />
+                  {t("structure.addParagraph")}
+                </button>
+                <button onClick={() => { addBlock("image"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ImageIcon className="h-4 w-4 text-amber-500" />
+                  {t("structure.addImage")}
+                </button>
+                <button onClick={() => { addBlock("table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Table2 className="h-4 w-4 text-cyan-500" />
+                  {t("structure.addTable")}
+                </button>
+                <button onClick={() => { addBlock("inventory_table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Server className="h-4 w-4 text-violet-500" />
+                  {t("structure.addInventoryTable")}
+                </button>
+                <button onClick={() => { addBlock("cli_command"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span>
+                  {t("structure.addCliCommand")}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -455,9 +476,12 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
                           )}
 
                           {/* Content preview */}
-                          <span className="flex-1 min-w-0 truncate text-sm text-slate-700 dark:text-slate-300">
+                          <button
+                            onClick={() => setEditingId(block.id)}
+                            className="flex-1 min-w-0 truncate text-sm text-slate-700 dark:text-slate-300 text-left hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer"
+                          >
                             {getBlockPreview(block)}
-                          </span>
+                          </button>
 
                           {/* Actions */}
                           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -2147,6 +2171,8 @@ function InventoryTableProperties({
 }
 
 // --- CLI Command properties ---
+interface TagItem { id: number; name: string; color: string; }
+
 function CliCommandProperties({
   block,
   updateBlock,
@@ -2156,23 +2182,78 @@ function CliCommandProperties({
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
 }) {
-  const [tab, setTab] = useState<"params" | "style">("params");
+  const { current } = useAppContext();
+  type CliTab = "params" | "data" | "devices" | "style" | "conditional";
+  const dataSource = block.dataSource || "none";
+  const nodeIds = block.nodeIds || [];
+  const tagIds = block.tagIds || [];
+  const conditionalRules = block.conditionalRules ?? [];
+
+  const defaultTab: CliTab = "params";
+  const [tab, setTab] = useState<CliTab>(defaultTab);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [allTags, setAllTags] = useState<TagItem[]>([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [tagsLoaded, setTagsLoaded] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [nodePickerOpen, setNodePickerOpen] = useState(false);
+
+  // Load nodes
+  useEffect(() => {
+    if (!current || nodesLoaded) return;
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: NodeItem[]) => { setAllNodes(data); setNodesLoaded(true); })
+      .catch(() => setNodesLoaded(true));
+  }, [current, nodesLoaded]);
+
+  // Load tags
+  useEffect(() => {
+    if (!current || tagsLoaded) return;
+    fetch(`/api/node-tags?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: TagItem[]) => { setAllTags(data); setTagsLoaded(true); })
+      .catch(() => setTagsLoaded(true));
+  }, [current, tagsLoaded]);
+
+  const selectedNodes = allNodes.filter((n) => nodeIds.includes(n.id));
+  const availableNodes = allNodes.filter(
+    (n) =>
+      !nodeIds.includes(n.id) &&
+      (nodeSearch === "" ||
+        (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        n.ipAddress.includes(nodeSearch))
+  );
+  const selectedTags = allTags.filter((tg) => tagIds.includes(tg.id));
+  const availableTags = allTags.filter((tg) => !tagIds.includes(tg.id));
+
+  const addNode = (id: number) => updateBlock(block.id, { nodeIds: [...nodeIds, id] });
+  const removeNode = (id: number) => updateBlock(block.id, { nodeIds: nodeIds.filter((n) => n !== id) });
+  const addTagId = (id: number) => updateBlock(block.id, { tagIds: [...tagIds, id] });
+  const removeTagId = (id: number) => updateBlock(block.id, { tagIds: tagIds.filter((t2) => t2 !== id) });
+
+  // Conditional rules
+  const addConditional = () => {
+    const rule: CliConditionalRule = { id: uid(), pattern: "", operator: "contains", action: "show" };
+    updateBlock(block.id, { conditionalRules: [...conditionalRules, rule] });
+  };
+  const updateConditional = (ruleId: string, patch: Partial<CliConditionalRule>) => {
+    updateBlock(block.id, { conditionalRules: conditionalRules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)) });
+  };
+  const removeConditional = (ruleId: string) => {
+    updateBlock(block.id, { conditionalRules: conditionalRules.filter((r) => r.id !== ruleId) });
+  };
 
   const rules = block.styleRules ?? [];
 
   const addRule = () => {
-    const rule: CliStyleRule = {
-      id: uid(),
-      pattern: "",
-      operator: "matches",
-    };
+    const rule: CliStyleRule = { id: uid(), pattern: "", operator: "matches" };
     updateBlock(block.id, { styleRules: [...rules, rule] });
   };
 
   const updateRule = (ruleId: string, patch: Partial<CliStyleRule>) => {
-    updateBlock(block.id, {
-      styleRules: rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)),
-    });
+    updateBlock(block.id, { styleRules: rules.map((r) => (r.id === ruleId ? { ...r, ...patch } : r)) });
   };
 
   const removeRule = (ruleId: string) => {
@@ -2196,6 +2277,13 @@ function CliCommandProperties({
     neq: "!=",
   };
 
+  const condOperatorLabels: Record<CliConditionalRule["operator"], string> = {
+    matches: t("structure.cliRuleMatches"),
+    not_matches: t("structure.cliRuleNotMatches"),
+    contains: t("structure.ruleContains"),
+    not_contains: t("structure.ruleNotContains"),
+  };
+
   const tabBtnClass = (active: boolean) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
       active
@@ -2210,7 +2298,6 @@ function CliCommandProperties({
         : "text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"
     }`;
 
-  // Parse line filter and generate preview
   const parseLineFilter = (filter: string): Set<number> => {
     const lines = new Set<number>();
     if (!filter.trim()) return lines;
@@ -2235,62 +2322,84 @@ function CliCommandProperties({
   return (
     <div className="space-y-4">
       {/* Tabs */}
-      <div className="flex border-b border-slate-200 dark:border-slate-700">
-        <button type="button" className={tabBtnClass(tab === "params")} onClick={() => setTab("params")}>
-          {t("structure.cliParams")}
-        </button>
-        <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>
-          {t("structure.inventoryStyle")}
-        </button>
+      <div className="flex border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
+        <button type="button" className={tabBtnClass(tab === "params")} onClick={() => setTab("params")}>{t("structure.cliParams")}</button>
+        {dataSource === "none" && (
+          <button type="button" className={tabBtnClass(tab === "data")} onClick={() => setTab("data")}>{t("structure.cliTabData")}</button>
+        )}
+        {dataSource !== "none" && (
+          <button type="button" className={tabBtnClass(tab === "devices")} onClick={() => setTab("devices")}>
+            {t("structure.cliTabDevices")}
+            {(nodeIds.length > 0 || tagIds.length > 0) && <span className="ml-1 inline-flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold w-4 h-4">{nodeIds.length + tagIds.length}</span>}
+          </button>
+        )}
+        <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>{t("structure.inventoryStyle")}</button>
+        <button type="button" className={tabBtnClass(tab === "conditional")} onClick={() => setTab("conditional")}>{t("structure.cliTabConditional")}</button>
       </div>
 
-      {/* Params tab */}
+      {/* ===== PARAMS TAB ===== */}
       {tab === "params" && (
         <div className="space-y-4">
+          {/* Data source selector */}
           <div className="space-y-1.5">
-            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliCommandLabel")}</label>
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliDataSource")}</label>
+            <div className="flex gap-2">
+              {(["none", "local", "remote"] as const).map((src) => (
+                <button
+                  key={src}
+                  type="button"
+                  onClick={() => updateBlock(block.id, { dataSource: src })}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                    dataSource === src
+                      ? "border-slate-700 dark:border-slate-300 bg-slate-900 dark:bg-white text-white dark:text-slate-900"
+                      : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  {src === "none" ? t("structure.cliSourceNone") : src === "local" ? t("structure.cliSourceLocal") : t("structure.cliSourceRemote")}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-slate-400">
+              {dataSource === "none" && t("structure.cliSourceNoneDesc")}
+              {dataSource === "local" && t("structure.cliSourceLocalDesc")}
+              {dataSource === "remote" && t("structure.cliSourceRemoteDesc")}
+            </p>
+          </div>
+
+          {/* Command name */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliCommandNameLabel")}</label>
+            <input
+              type="text"
+              value={block.commandName || ""}
+              onChange={(e) => updateBlock(block.id, { commandName: e.target.value })}
+              placeholder={t("structure.cliCommandNamePlaceholder")}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 font-mono placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ===== DATA TAB (static only) ===== */}
+      {tab === "data" && dataSource === "none" && (
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliCommandOutput")}</label>
             <textarea
               value={block.command}
               onChange={(e) => updateBlock(block.id, { command: e.target.value })}
               placeholder={t("structure.cliCommandPlaceholder")}
-              rows={10}
+              rows={14}
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-900 text-green-400 font-mono text-sm px-4 py-3 focus:outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-400/20 transition-colors resize-y placeholder:text-slate-600"
               spellCheck={false}
             />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliLineFilter")}</label>
-              <input
-                type="text"
-                value={block.lineFilter ?? ""}
-                onChange={(e) => updateBlock(block.id, { lineFilter: e.target.value || undefined })}
-                placeholder="ex: 1-5,8,10-12"
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 font-mono placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
-              />
-              <p className="text-[10px] text-slate-400">{t("structure.cliLineFilterHint")}</p>
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliEllipsis")}</label>
-              <label className="flex items-center gap-2.5 cursor-pointer mt-1">
-                <button type="button" onClick={() => updateBlock(block.id, { showEllipsis: !block.showEllipsis })}>
-                  {block.showEllipsis ? (
-                    <ToggleRight className="h-5 w-5 text-emerald-500" />
-                  ) : (
-                    <ToggleLeft className="h-5 w-5 text-slate-400" />
-                  )}
-                </button>
-                <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cliShowEllipsis")}</span>
-              </label>
-            </div>
           </div>
 
           {/* Preview */}
           {block.command && (
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliPreview")}</label>
-              <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 font-mono text-sm overflow-x-auto" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
+              <div className="rounded-lg border border-slate-700 bg-slate-900 p-4 font-mono text-sm overflow-x-auto max-h-60 overflow-y-auto" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
                 {(() => {
                   const result: React.ReactNode[] = [];
                   let prevVisible = true;
@@ -2323,9 +2432,106 @@ function CliCommandProperties({
         </div>
       )}
 
-      {/* Style tab */}
+      {/* ===== DEVICES TAB (local/remote) ===== */}
+      {tab === "devices" && dataSource !== "none" && (
+        <div className="space-y-5">
+          {/* By tag */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliByTag")}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedTags.map((tg) => (
+                <span key={tg.id} className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium" style={{ backgroundColor: tg.color + "20", color: tg.color }}>
+                  {tg.name}
+                  <button onClick={() => removeTagId(tg.id)} className="ml-0.5 hover:opacity-70 transition-opacity"><X className="h-3 w-3" /></button>
+                </span>
+              ))}
+              {availableTags.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) addTagId(Number(e.target.value)); }}
+                  className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 cursor-pointer focus:outline-none"
+                >
+                  <option value="">{t("structure.cliAddTag")}</option>
+                  {availableTags.map((tg) => (
+                    <option key={tg.id} value={tg.id}>{tg.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* By device */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliByDevice")}</label>
+            {selectedNodes.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedNodes.map((node) => (
+                  <span key={node.id} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300">
+                    <Server className="h-3 w-3 text-slate-400" />
+                    {node.hostname || node.name || node.ipAddress}
+                    <button onClick={() => removeNode(node.id)} className="ml-0.5 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={nodeSearch}
+                onChange={(e) => { setNodeSearch(e.target.value); setNodePickerOpen(true); }}
+                onFocus={() => setNodePickerOpen(true)}
+                placeholder={t("structure.cliSearchDevices")}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 pl-9 pr-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+              />
+              {nodePickerOpen && availableNodes.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-20 max-h-48 overflow-y-auto rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
+                  {availableNodes.slice(0, 30).map((node) => (
+                    <button
+                      key={node.id}
+                      onClick={() => { addNode(node.id); setNodeSearch(""); setNodePickerOpen(false); }}
+                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      <Server className="h-3.5 w-3.5 text-slate-400" />
+                      <span className="font-medium">{node.hostname || node.name || node.ipAddress}</span>
+                      {node.hostname && <span className="text-xs text-slate-400">{node.ipAddress}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== STYLE TAB ===== */}
       {tab === "style" && (
         <div className="space-y-5">
+          {/* Line filter */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliLineFilter")}</label>
+            <input
+              type="text"
+              value={block.lineFilter ?? ""}
+              onChange={(e) => updateBlock(block.id, { lineFilter: e.target.value || undefined })}
+              placeholder={t("structure.cliLineFilterPlaceholder")}
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 font-mono placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+            />
+            <p className="text-[10px] text-slate-400">{t("structure.cliLineFilterHint")}</p>
+          </div>
+
+          {/* Show ellipsis toggle */}
+          <label className="flex items-center gap-2.5 cursor-pointer">
+            <button type="button" onClick={() => updateBlock(block.id, { showEllipsis: !block.showEllipsis })}>
+              {block.showEllipsis ? (
+                <ToggleRight className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <ToggleLeft className="h-5 w-5 text-slate-400" />
+              )}
+            </button>
+            <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cliShowEllipsis")}</span>
+          </label>
+
           {/* Font size */}
           <div className="space-y-1.5">
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.inventoryFontSize")}</label>
@@ -2501,6 +2707,92 @@ function CliCommandProperties({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ===== CONDITIONAL TAB ===== */}
+      {tab === "conditional" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliConditionalTitle")}</label>
+              <p className="text-[10px] text-slate-400">{t("structure.cliConditionalHint")}</p>
+            </div>
+            <button
+              type="button"
+              onClick={addConditional}
+              className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+              {t("structure.cliConditionalAdd")}
+            </button>
+          </div>
+
+          {conditionalRules.length === 0 && (
+            <p className="text-xs text-slate-400 italic text-center py-6">{t("structure.cliConditionalEmpty")}</p>
+          )}
+
+          {conditionalRules.map((rule, ri) => (
+            <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">#{ri + 1}</span>
+                <div className="flex-1" />
+                <button type="button" onClick={() => removeConditional(rule.id)} className="p-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Condition row: operator + pattern */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleIf")}</span>
+                <select
+                  value={rule.operator}
+                  onChange={(e) => updateConditional(rule.id, { operator: e.target.value as CliConditionalRule["operator"] })}
+                  className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  {(Object.keys(condOperatorLabels) as CliConditionalRule["operator"][]).map((op) => (
+                    <option key={op} value={op}>{condOperatorLabels[op]}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  value={rule.pattern}
+                  onChange={(e) => updateConditional(rule.id, { pattern: e.target.value })}
+                  placeholder={t("structure.cliConditionalPattern")}
+                  className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 font-mono focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Action row */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 shrink-0">{t("structure.ruleThen")}</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => updateConditional(rule.id, { action: "show" })}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rule.action === "show"
+                        ? "bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30"
+                        : "bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {t("structure.cliConditionalShow")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateConditional(rule.id, { action: "hide" })}
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                      rule.action === "hide"
+                        ? "bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-400 border border-red-300 dark:border-red-500/30"
+                        : "bg-slate-50 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {t("structure.cliConditionalHide")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -16,23 +16,42 @@ import {
   Trash2,
   ToggleLeft,
   ToggleRight,
-  FileSpreadsheet,
-  Presentation,
+  Globe,
   X,
   Plus,
   Tag,
   Play,
   Eye,
   FileText,
+  Users,
+  History,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 
 import StructureEditor, { type ReportBlock } from "@/components/StructureEditor";
+
+interface Author {
+  id: string;
+  lastName: string;
+  firstName: string;
+  position: string;
+  email: string;
+  phone: string;
+}
+
+interface Revision {
+  id: string;
+  version: string;
+  date: string;
+  description: string;
+}
 
 interface ReportDetail {
   id: number;
   name: string;
   description: string | null;
-  type: string;
+  locale: string;
   title: string;
   subtitle: string | null;
   showTableOfContents: boolean;
@@ -40,6 +59,9 @@ interface ReportDetail {
   showRevisionPage: boolean;
   showIllustrationsPage: boolean;
   tags: string[] | null;
+  authors: Author[];
+  recipients: Author[];
+  revisions: Revision[];
   blocks: ReportBlock[];
   theme: { id: number; name: string } | null;
   generatingStatus: string | null;
@@ -55,7 +77,7 @@ interface ThemeOption {
   isDefault: boolean;
 }
 
-const tabKeys = ["general", "structure", "live", "settings"] as const;
+const tabKeys = ["general", "authors", "revisions", "structure", "live", "settings"] as const;
 type TabKey = (typeof tabKeys)[number];
 
 export default function ReportDetailPage() {
@@ -74,7 +96,7 @@ export default function ReportDetailPage() {
   // General tab fields
   const [title, setTitle] = useState("");
   const [subtitle, setSubtitle] = useState("");
-  const [docType, setDocType] = useState<"word" | "powerpoint">("word");
+  const [reportLocale, setReportLocale] = useState("fr");
   const [showToc, setShowToc] = useState(true);
   const [showAuthors, setShowAuthors] = useState(true);
   const [showRevision, setShowRevision] = useState(false);
@@ -86,6 +108,14 @@ export default function ReportDetailPage() {
   const [reportDescription, setReportDescription] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+
+  // Authors & Revisions
+  const [authors, setAuthors] = useState<Author[]>([]);
+  const [recipients, setRecipients] = useState<Author[]>([]);
+  const [expandedAuthors, setExpandedAuthors] = useState<Set<string>>(new Set());
+  const [expandedRecipients, setExpandedRecipients] = useState<Set<string>>(new Set());
+  const [expandedRevisions, setExpandedRevisions] = useState<Set<string>>(new Set());
+  const [revisions, setRevisions] = useState<Revision[]>([]);
 
   // Structure blocks
   const [blocks, setBlocks] = useState<ReportBlock[]>([]);
@@ -124,7 +154,7 @@ export default function ReportDetailPage() {
     setReport(data);
     setTitle(data.title || "");
     setSubtitle(data.subtitle || "");
-    setDocType(data.type as "word" | "powerpoint");
+    setReportLocale(data.locale || "fr");
     setShowToc(data.showTableOfContents);
     setShowAuthors(data.showAuthorsPage);
     setShowRevision(data.showRevisionPage);
@@ -133,6 +163,9 @@ export default function ReportDetailPage() {
     setReportName(data.name);
     setReportDescription(data.description || "");
     setTags(data.tags || []);
+    setAuthors(data.authors || []);
+    setRecipients(data.recipients || []);
+    setRevisions(data.revisions || []);
     setBlocks(data.blocks || []);
     setGenerating(!!data.generatingStatus);
     setLoading(false);
@@ -230,6 +263,60 @@ export default function ReportDetailPage() {
     }
   };
 
+  const handleSaveAuthors = async (newAuthors: Author[]) => {
+    setAuthors(newAuthors);
+    try {
+      const res = await fetch(`/api/reports/${reportId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authors: newAuthors }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReport(data);
+        showToast(t("reports.saved"));
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleSaveRecipients = async (newRecipients: Author[]) => {
+    setRecipients(newRecipients);
+    try {
+      const res = await fetch(`/api/reports/${reportId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients: newRecipients }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReport(data);
+        showToast(t("reports.saved"));
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
+  const handleSaveRevisions = async (newRevisions: Revision[]) => {
+    setRevisions(newRevisions);
+    try {
+      const res = await fetch(`/api/reports/${reportId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revisions: newRevisions }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setReport(data);
+        showToast(t("reports.saved"));
+      }
+    } catch {
+      // silently fail
+    }
+  };
+
   const handleSaveSettings = async () => {
     setSaving(true);
     try {
@@ -240,7 +327,7 @@ export default function ReportDetailPage() {
           name: reportName.trim(),
           description: reportDescription.trim() || null,
           tags: tags.length > 0 ? tags : null,
-          type: docType,
+          locale: reportLocale,
         }),
       });
       if (res.ok) {
@@ -302,6 +389,8 @@ export default function ReportDetailPage() {
 
   const leftTabs = [
     { key: "general" as TabKey, label: t("reports.tabGeneral"), icon: <BookOpen className="h-4 w-4" /> },
+    { key: "authors" as TabKey, label: t("reports.tabAuthors"), icon: <Users className="h-4 w-4" /> },
+    { key: "revisions" as TabKey, label: t("reports.tabRevisions"), icon: <History className="h-4 w-4" /> },
     { key: "structure" as TabKey, label: t("reports.tabStructure"), icon: <LayoutList className="h-4 w-4" /> },
   ];
 
@@ -326,11 +415,7 @@ export default function ReportDetailPage() {
           </Link>
           <div>
             <div className="flex items-center gap-2">
-              {report.type === "powerpoint" ? (
-                <Presentation className="h-5 w-5 text-orange-500" />
-              ) : (
-                <FileSpreadsheet className="h-5 w-5 text-blue-500" />
-              )}
+              <FileText className="h-5 w-5 text-blue-500" />
               <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{report.name}</h1>
             </div>
             {report.description && (
@@ -475,6 +560,295 @@ export default function ReportDetailPage() {
             </div>
           )}
 
+          {activeTab === "authors" && (
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-6">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.authorsTitle")}</h2>
+                  <button
+                    onClick={() => {
+                      const newId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+                      const newAuthors = [...authors, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "" }];
+                      handleSaveAuthors(newAuthors);
+                      setExpandedAuthors((prev) => new Set([...prev, newId]));
+                    }}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    {t("reports.addAuthor")}
+                  </button>
+                </div>
+                {authors.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noAuthors")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {authors.map((author, idx) => {
+                      const isExpanded = expandedAuthors.has(author.id);
+                      const summary = [author.lastName, author.firstName].filter(Boolean).join(" ") || t("reports.authorLastNamePlaceholder");
+                      const detail = [author.position, author.email].filter(Boolean).join(" - ");
+                      return (
+                        <div key={author.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                          <div
+                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors select-none"
+                            onClick={() => setExpandedAuthors((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(author.id)) next.delete(author.id); else next.add(author.id);
+                              return next;
+                            })}
+                          >
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`} />
+                            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 w-6">#{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-sm font-medium ${author.lastName || author.firstName ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500 italic"}`}>{summary}</span>
+                              {detail && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{detail}</span>}
+                            </div>
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => { if (idx === 0) return; const arr = [...authors]; [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]]; handleSaveAuthors(arr); }}
+                                disabled={idx === 0}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => { if (idx === authors.length - 1) return; const arr = [...authors]; [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]]; handleSaveAuthors(arr); }}
+                                disabled={idx === authors.length - 1}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => handleSaveAuthors(authors.filter((a) => a.id !== author.id))}
+                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                              </button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorLastName")}</label>
+                                  <input type="text" value={author.lastName} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, lastName: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorLastNamePlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorFirstName")}</label>
+                                  <input type="text" value={author.firstName} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, firstName: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorFirstNamePlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorPosition")}</label>
+                                  <input type="text" value={author.position} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, position: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorPositionPlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorEmail")}</label>
+                                  <input type="email" value={author.email} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, email: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorEmailPlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1 col-span-2">
+                                  <label className={labelClass}>{t("reports.authorPhone")}</label>
+                                  <input type="tel" value={author.phone} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, phone: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorPhonePlaceholder")} className={inputClass} />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Distribution */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.recipientsTitle")}</h2>
+                  <button
+                    onClick={() => {
+                      const newId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+                      const newRecipients = [...recipients, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "" }];
+                      handleSaveRecipients(newRecipients);
+                      setExpandedRecipients((prev) => new Set([...prev, newId]));
+                    }}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    {t("reports.addRecipient")}
+                  </button>
+                </div>
+                {recipients.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noRecipients")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {recipients.map((recipient, idx) => {
+                      const isExpanded = expandedRecipients.has(recipient.id);
+                      const summary = [recipient.lastName, recipient.firstName].filter(Boolean).join(" ") || t("reports.authorLastNamePlaceholder");
+                      const detail = [recipient.position, recipient.email].filter(Boolean).join(" - ");
+                      return (
+                        <div key={recipient.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                          <div
+                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors select-none"
+                            onClick={() => setExpandedRecipients((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(recipient.id)) next.delete(recipient.id); else next.add(recipient.id);
+                              return next;
+                            })}
+                          >
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`} />
+                            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 w-6">#{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-sm font-medium ${recipient.lastName || recipient.firstName ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500 italic"}`}>{summary}</span>
+                              {detail && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{detail}</span>}
+                            </div>
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => { if (idx === 0) return; const arr = [...recipients]; [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]]; handleSaveRecipients(arr); }}
+                                disabled={idx === 0}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => { if (idx === recipients.length - 1) return; const arr = [...recipients]; [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]]; handleSaveRecipients(arr); }}
+                                disabled={idx === recipients.length - 1}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => handleSaveRecipients(recipients.filter((r) => r.id !== recipient.id))}
+                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                              </button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorLastName")}</label>
+                                  <input type="text" value={recipient.lastName} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, lastName: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorLastNamePlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorFirstName")}</label>
+                                  <input type="text" value={recipient.firstName} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, firstName: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorFirstNamePlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorPosition")}</label>
+                                  <input type="text" value={recipient.position} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, position: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorPositionPlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.authorEmail")}</label>
+                                  <input type="email" value={recipient.email} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, email: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorEmailPlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1 col-span-2">
+                                  <label className={labelClass}>{t("reports.authorPhone")}</label>
+                                  <input type="tel" value={recipient.phone} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, phone: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorPhonePlaceholder")} className={inputClass} />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === "revisions" && (
+            <div className="flex-1 overflow-y-auto min-h-0 space-y-6">
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.revisionsTitle")}</h2>
+                  <button
+                    onClick={() => {
+                      const newId = Math.random().toString(36).slice(2) + Date.now().toString(36);
+                      const newRevisions = [...revisions, { id: newId, version: "", date: new Date().toISOString().slice(0, 10), description: "" }];
+                      handleSaveRevisions(newRevisions);
+                      setExpandedRevisions((prev) => new Set([...prev, newId]));
+                    }}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    {t("reports.addRevision")}
+                  </button>
+                </div>
+                {revisions.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noRevisions")}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {revisions.map((rev, idx) => {
+                      const isExpanded = expandedRevisions.has(rev.id);
+                      const summary = rev.version ? `v${rev.version}` : t("reports.revisionVersionPlaceholder");
+                      const detail = [rev.date, rev.description].filter(Boolean).join(" - ");
+                      return (
+                        <div key={rev.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                          <div
+                            className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors select-none"
+                            onClick={() => setExpandedRevisions((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(rev.id)) next.delete(rev.id); else next.add(rev.id);
+                              return next;
+                            })}
+                          >
+                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${isExpanded ? "rotate-0" : "-rotate-90"}`} />
+                            <span className="text-xs font-medium text-slate-400 dark:text-slate-500 w-6">#{idx + 1}</span>
+                            <div className="flex-1 min-w-0">
+                              <span className={`text-sm font-medium ${rev.version ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500 italic"}`}>{summary}</span>
+                              {detail && <span className="ml-2 text-xs text-slate-400 dark:text-slate-500 truncate">{detail}</span>}
+                            </div>
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                onClick={() => { if (idx === 0) return; const arr = [...revisions]; [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]]; handleSaveRevisions(arr); }}
+                                disabled={idx === 0}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronUp className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => { if (idx === revisions.length - 1) return; const arr = [...revisions]; [arr[idx], arr[idx + 1]] = [arr[idx + 1], arr[idx]]; handleSaveRevisions(arr); }}
+                                disabled={idx === revisions.length - 1}
+                                className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 transition-colors"
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                              </button>
+                              <button
+                                onClick={() => handleSaveRevisions(revisions.filter((r) => r.id !== rev.id))}
+                                className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                              </button>
+                            </div>
+                          </div>
+                          {isExpanded && (
+                            <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800">
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.revisionVersion")}</label>
+                                  <input type="text" value={rev.version} onChange={(e) => { setRevisions(revisions.map((r) => r.id === rev.id ? { ...r, version: e.target.value } : r)); }} onBlur={() => handleSaveRevisions(revisions)} placeholder={t("reports.revisionVersionPlaceholder")} className={inputClass} />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={labelClass}>{t("reports.revisionDate")}</label>
+                                  <input type="date" value={rev.date} onChange={(e) => { setRevisions(revisions.map((r) => r.id === rev.id ? { ...r, date: e.target.value } : r)); }} onBlur={() => handleSaveRevisions(revisions)} className={inputClass} />
+                                </div>
+                                <div className="space-y-1 col-span-2">
+                                  <label className={labelClass}>{t("reports.revisionDescription")}</label>
+                                  <textarea value={rev.description} onChange={(e) => { setRevisions(revisions.map((r) => r.id === rev.id ? { ...r, description: e.target.value } : r)); }} onBlur={() => handleSaveRevisions(revisions)} rows={2} placeholder={t("reports.revisionDescriptionPlaceholder")} className={`${inputClass} resize-none`} />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === "structure" && (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 min-h-0">
@@ -552,35 +926,21 @@ export default function ReportDetailPage() {
                 </div>
               </div>
 
-              {/* Document type */}
+              {/* Language */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
-                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.documentType")}</h2>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDocType("word")}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                      docType === "word"
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                        : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    }`}
-                  >
-                    <FileSpreadsheet className="h-5 w-5" />
-                    Word / PDF
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDocType("powerpoint")}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors ${
-                      docType === "powerpoint"
-                        ? "border-orange-500 bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-400"
-                        : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    }`}
-                  >
-                    <Presentation className="h-5 w-5" />
-                    PowerPoint / PDF
-                  </button>
-                </div>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.reportLocale")}</h2>
+                <select
+                  value={reportLocale}
+                  onChange={(e) => setReportLocale(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="fr">Francais</option>
+                  <option value="en">English</option>
+                  <option value="de">Deutsch</option>
+                  <option value="es">Espanol</option>
+                  <option value="it">Italiano</option>
+                  <option value="ja">日本語</option>
+                </select>
               </div>
 
               {/* Tags */}

@@ -40,6 +40,7 @@ class ReportTheme
             'borderColor' => '#e2e8f0',
             'alternateRows' => true,
             'alternateBg' => '#f8fafc',
+            'fontSize' => 0,
         ],
         'cliCommand' => [
             'font' => 'Consolas',
@@ -50,6 +51,11 @@ class ReportTheme
             'borderRadius' => 2,
             'lineNumberColor' => '#94a3b8',
             'showLineNumbers' => true,
+            'padding' => 3,
+            'lineSpacing' => 1.4,
+            'showHeader' => true,
+            'headerBgColor' => '#1e293b',
+            'headerTextColor' => '#ffffff',
         ],
         'header' => [
             'enabled' => true,

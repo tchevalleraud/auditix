@@ -167,6 +167,7 @@ interface ThemeStyles {
     borderColor: string;
     alternateRows: boolean;
     alternateBg: string;
+    fontSize: number;
   };
   cliCommand: {
     font: string;
@@ -177,6 +178,11 @@ interface ThemeStyles {
     borderRadius: number;
     lineNumberColor: string;
     showLineNumbers: boolean;
+    padding: number;
+    lineSpacing: number;
+    showHeader: boolean;
+    headerBgColor: string;
+    headerTextColor: string;
   };
   header: HeaderFooterConfig;
   footer: HeaderFooterConfig;
@@ -243,7 +249,14 @@ export default function ThemeDetailPage() {
       if (parsed.paragraph.lineBefore === undefined) parsed.paragraph.lineBefore = 0;
       if (parsed.paragraph.lineAfter === undefined) parsed.paragraph.lineAfter = 0;
     }
-    if (!parsed.cliCommand) parsed.cliCommand = { font: 'Consolas', size: 9, bgColor: '#f1f5f9', textColor: '#1e293b', borderColor: '#e2e8f0', borderRadius: 2, lineNumberColor: '#94a3b8', showLineNumbers: true };
+    if (!parsed.table) parsed.table = { headerBg: '#1e293b', headerColor: '#ffffff', borderColor: '#e2e8f0', alternateRows: true, alternateBg: '#f8fafc', fontSize: 0 };
+    if (parsed.table && parsed.table.fontSize === undefined) parsed.table.fontSize = 0;
+    if (!parsed.cliCommand) parsed.cliCommand = { font: 'Consolas', size: 9, bgColor: '#f1f5f9', textColor: '#1e293b', borderColor: '#e2e8f0', borderRadius: 2, lineNumberColor: '#94a3b8', showLineNumbers: true, padding: 3, lineSpacing: 1.4, showHeader: true, headerBgColor: '#1e293b', headerTextColor: '#ffffff' };
+    if (parsed.cliCommand.padding === undefined) parsed.cliCommand.padding = 3;
+    if (parsed.cliCommand.lineSpacing === undefined) parsed.cliCommand.lineSpacing = 1.4;
+    if (parsed.cliCommand.showHeader === undefined) parsed.cliCommand.showHeader = true;
+    if (parsed.cliCommand.headerBgColor === undefined) parsed.cliCommand.headerBgColor = '#1e293b';
+    if (parsed.cliCommand.headerTextColor === undefined) parsed.cliCommand.headerTextColor = '#ffffff';
     // Migrate old header format to slot-based
     if (parsed.header && !parsed.header.left) {
       const oldColor = parsed.header.color || "#64748b";
@@ -913,6 +926,13 @@ export default function ThemeDetailPage() {
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.tableStyles")}</h2>
+              <div>
+                <label className={labelClass}>{t("report_themes.tableFontSize")}</label>
+                <div className="flex items-center gap-2">
+                  <input type="number" value={styles.table.fontSize} onChange={(e) => updateStyle("table", { ...styles.table, fontSize: Number(e.target.value) })} min={0} max={24} className={inputClass} />
+                  <span className="text-xs text-slate-400 shrink-0">{t("report_themes.tableFontSizeHint")}</span>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>{t("report_themes.tableHeaderBg")}</label>
@@ -1255,7 +1275,8 @@ export default function ThemeDetailPage() {
                   </div>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
+
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>{t("report_themes.cliBorderRadius")}</label>
                   <div className="flex items-center gap-2">
@@ -1263,7 +1284,19 @@ export default function ThemeDetailPage() {
                     <span className="text-xs text-slate-400 shrink-0">mm</span>
                   </div>
                 </div>
+                <div>
+                  <label className={labelClass}>{t("report_themes.cliPadding")}</label>
+                  <div className="flex items-center gap-2">
+                    <input type="number" value={styles.cliCommand.padding} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, padding: Number(e.target.value) })} min={0} max={20} step={0.5} className={inputClass} />
+                    <span className="text-xs text-slate-400 shrink-0">mm</span>
+                  </div>
+                </div>
+                <div>
+                  <label className={labelClass}>{t("report_themes.cliLineSpacing")}</label>
+                  <input type="number" value={styles.cliCommand.lineSpacing} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, lineSpacing: Number(e.target.value) })} min={1} max={3} step={0.1} className={inputClass} />
+                </div>
               </div>
+
               <label className="flex items-center gap-3 cursor-pointer">
                 <button type="button" onClick={() => updateStyle("cliCommand", { ...styles.cliCommand, showLineNumbers: !styles.cliCommand.showLineNumbers })}>
                   {styles.cliCommand.showLineNumbers ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
@@ -1272,36 +1305,84 @@ export default function ThemeDetailPage() {
               </label>
             </div>
 
+            {/* Header section */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.cliHeaderSection")}</h2>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <button type="button" onClick={() => updateStyle("cliCommand", { ...styles.cliCommand, showHeader: !styles.cliCommand.showHeader })}>
+                  {styles.cliCommand.showHeader ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
+                </button>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{t("report_themes.cliShowHeader")}</span>
+              </label>
+              {styles.cliCommand.showHeader && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>{t("report_themes.cliHeaderBgColor")}</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={styles.cliCommand.headerBgColor} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, headerBgColor: e.target.value })} className="h-9 w-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer" />
+                      <input type="text" value={styles.cliCommand.headerBgColor} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, headerBgColor: e.target.value })} className={`${inputClass} font-mono`} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className={labelClass}>{t("report_themes.cliHeaderTextColor")}</label>
+                    <div className="flex items-center gap-2">
+                      <input type="color" value={styles.cliCommand.headerTextColor} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, headerTextColor: e.target.value })} className="h-9 w-9 rounded-lg border border-slate-200 dark:border-slate-700 cursor-pointer" />
+                      <input type="text" value={styles.cliCommand.headerTextColor} onChange={(e) => updateStyle("cliCommand", { ...styles.cliCommand, headerTextColor: e.target.value })} className={`${inputClass} font-mono`} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Preview */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-3">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.preview")}</h2>
               <div
                 className="overflow-hidden"
                 style={{
-                  backgroundColor: styles.cliCommand.bgColor,
                   border: `1px solid ${styles.cliCommand.borderColor}`,
                   borderRadius: `${styles.cliCommand.borderRadius * 2}px`,
-                  fontFamily: styles.cliCommand.font,
-                  fontSize: `${styles.cliCommand.size + 2}px`,
-                  color: styles.cliCommand.textColor,
-                  padding: "12px 16px",
                 }}
               >
-                {styles.cliCommand.showLineNumbers ? (
-                  <>
-                    <div className="flex"><span style={{ color: styles.cliCommand.lineNumberColor, width: 24, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0, display: "inline-block" }}>1</span><span>show interfaces status</span></div>
-                    <div className="flex"><span style={{ color: styles.cliCommand.lineNumberColor, width: 24, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0, display: "inline-block" }}>2</span><span>Port      Name    Status    Vlan</span></div>
-                    <div className="flex"><span style={{ color: styles.cliCommand.lineNumberColor, width: 24, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0, display: "inline-block" }}>3</span><span>Gi1/0/1   UPLINK  connected trunk</span></div>
-                    <div className="flex"><span style={{ color: styles.cliCommand.lineNumberColor, width: 24, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0, display: "inline-block" }}>4</span><span>Gi1/0/2   PC-01   connected 10</span></div>
-                  </>
-                ) : (
-                  <>
-                    <div>show interfaces status</div>
-                    <div>Port      Name    Status    Vlan</div>
-                    <div>Gi1/0/1   UPLINK  connected trunk</div>
-                    <div>Gi1/0/2   PC-01   connected 10</div>
-                  </>
+                {/* Header bar */}
+                {styles.cliCommand.showHeader && (
+                  <div
+                    style={{
+                      backgroundColor: styles.cliCommand.headerBgColor,
+                      color: styles.cliCommand.headerTextColor,
+                      fontFamily: styles.cliCommand.font,
+                      fontSize: `${styles.cliCommand.size + 1}px`,
+                      padding: `${Math.max(styles.cliCommand.padding * 1.5, 6)}px ${styles.cliCommand.padding * 4}px`,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      borderBottom: `1px solid ${styles.cliCommand.borderColor}`,
+                    }}
+                  >
+                    <span style={{ fontWeight: 600 }}>show interfaces status</span>
+                    <span style={{ opacity: 0.7, fontSize: `${styles.cliCommand.size}px` }}>SW-CORE-01</span>
+                  </div>
                 )}
+                {/* Body */}
+                <div
+                  style={{
+                    backgroundColor: styles.cliCommand.bgColor,
+                    fontFamily: styles.cliCommand.font,
+                    fontSize: `${styles.cliCommand.size + 2}px`,
+                    color: styles.cliCommand.textColor,
+                    padding: `${styles.cliCommand.padding * 3}px ${styles.cliCommand.padding * 4}px`,
+                    lineHeight: styles.cliCommand.lineSpacing,
+                  }}
+                >
+                  {["Port      Name    Status    Vlan", "Gi1/0/1   UPLINK  connected trunk", "Gi1/0/2   PC-01   connected 10", "Gi1/0/3   SRV-01  connected 20"].map((line, i) => (
+                    <div key={i} className="flex whitespace-pre">
+                      {styles.cliCommand.showLineNumbers && (
+                        <span style={{ color: styles.cliCommand.lineNumberColor, width: 28, textAlign: "right", paddingRight: 12, userSelect: "none", flexShrink: 0, display: "inline-block" }}>{i + 1}</span>
+                      )}
+                      <span>{line}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -1718,6 +1799,54 @@ function PagePreview({ styles }: { styles: ThemeStyles }) {
                 ))}
               </tbody>
             </table>
+
+            {/* CLI command preview */}
+            <div
+              style={{
+                border: `${Math.max(0.5 * scale, 0.5)}px solid ${styles.cliCommand.borderColor}`,
+                borderRadius: styles.cliCommand.borderRadius * scale,
+                overflow: "hidden",
+                marginBottom: ptToPx(3),
+              }}
+            >
+              {styles.cliCommand.showHeader && (
+                <div
+                  style={{
+                    backgroundColor: styles.cliCommand.headerBgColor,
+                    color: styles.cliCommand.headerTextColor,
+                    fontFamily: styles.cliCommand.font,
+                    fontSize: ptToPx(styles.cliCommand.size * 0.9),
+                    padding: `${styles.cliCommand.padding * scale * 0.4}px ${styles.cliCommand.padding * scale * 0.6}px`,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    lineHeight: 1.3,
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>show version</span>
+                  <span style={{ opacity: 0.7, fontSize: ptToPx(styles.cliCommand.size * 0.75) }}>SW-01</span>
+                </div>
+              )}
+              <div
+                style={{
+                  backgroundColor: styles.cliCommand.bgColor,
+                  fontFamily: styles.cliCommand.font,
+                  fontSize: ptToPx(styles.cliCommand.size * 0.85),
+                  color: styles.cliCommand.textColor,
+                  padding: `${styles.cliCommand.padding * scale * 0.5}px ${styles.cliCommand.padding * scale * 0.6}px`,
+                  lineHeight: styles.cliCommand.lineSpacing,
+                }}
+              >
+                {["Version: 8.10.2", "Uptime: 42 days"].map((line, i) => (
+                  <div key={i} className="flex whitespace-pre">
+                    {styles.cliCommand.showLineNumbers && (
+                      <span style={{ color: styles.cliCommand.lineNumberColor, width: ptToPx(styles.cliCommand.size * 2.5), textAlign: "right", paddingRight: ptToPx(2), userSelect: "none", flexShrink: 0, display: "inline-block" }}>{i + 1}</span>
+                    )}
+                    <span>{line}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
 
             {/* Decorative secondary color bar */}
             <div

@@ -26,7 +26,7 @@ class ReportController extends AbstractController
             'id' => $r->getId(),
             'name' => $r->getName(),
             'description' => $r->getDescription(),
-            'type' => $r->getType(),
+            'locale' => $r->getLocale(),
             'title' => $r->getTitle(),
             'subtitle' => $r->getSubtitle(),
             'showTableOfContents' => $r->getShowTableOfContents(),
@@ -34,6 +34,9 @@ class ReportController extends AbstractController
             'showRevisionPage' => $r->getShowRevisionPage(),
             'showIllustrationsPage' => $r->getShowIllustrationsPage(),
             'tags' => $r->getTags(),
+            'authors' => $r->getAuthors(),
+            'recipients' => $r->getRecipients(),
+            'revisions' => $r->getRevisions(),
             'blocks' => $r->getBlocks(),
             'theme' => $theme ? ['id' => $theme->getId(), 'name' => $theme->getName()] : null,
             'generatingStatus' => $r->getGeneratingStatus(),
@@ -87,8 +90,8 @@ class ReportController extends AbstractController
         if (array_key_exists('description', $data)) {
             $report->setDescription($data['description']);
         }
-        if (isset($data['type']) && in_array($data['type'], ['word', 'powerpoint'])) {
-            $report->setType($data['type']);
+        if (isset($data['locale'])) {
+            $report->setLocale($data['locale']);
         }
 
         $em->persist($report);
@@ -114,8 +117,8 @@ class ReportController extends AbstractController
         if (array_key_exists('description', $data)) {
             $report->setDescription($data['description']);
         }
-        if (isset($data['type']) && in_array($data['type'], ['word', 'powerpoint'])) {
-            $report->setType($data['type']);
+        if (isset($data['locale'])) {
+            $report->setLocale($data['locale']);
         }
         if (isset($data['title'])) {
             $report->setTitle($data['title']);
@@ -137,6 +140,15 @@ class ReportController extends AbstractController
         }
         if (array_key_exists('tags', $data)) {
             $report->setTags($data['tags']);
+        }
+        if (array_key_exists('authors', $data)) {
+            $report->setAuthors($data['authors']);
+        }
+        if (array_key_exists('recipients', $data)) {
+            $report->setRecipients($data['recipients']);
+        }
+        if (array_key_exists('revisions', $data)) {
+            $report->setRevisions($data['revisions']);
         }
         if (array_key_exists('blocks', $data)) {
             $report->setBlocks($data['blocks']);

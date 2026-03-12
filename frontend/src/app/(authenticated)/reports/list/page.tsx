@@ -12,17 +12,25 @@ import {
   Pencil,
   Trash2,
   X,
-  FileSpreadsheet,
-  Presentation,
+  Globe,
 } from "lucide-react";
 
 interface ReportItem {
   id: number;
   name: string;
   description: string | null;
-  type: string;
+  locale: string;
   createdAt: string;
 }
+
+const LOCALE_LABELS: Record<string, string> = {
+  fr: "Français",
+  en: "English",
+  de: "Deutsch",
+  es: "Español",
+  it: "Italiano",
+  ja: "日本語",
+};
 
 export default function ReportsListPage() {
   const { t, locale } = useI18n();
@@ -35,7 +43,7 @@ export default function ReportsListPage() {
   const [modal, setModal] = useState(false);
   const [reportName, setReportName] = useState("");
   const [reportDescription, setReportDescription] = useState("");
-  const [reportType, setReportType] = useState<"word" | "powerpoint">("word");
+  const [reportLocale, setReportLocale] = useState("fr");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ReportItem | null>(null);
 
@@ -62,7 +70,7 @@ export default function ReportsListPage() {
   const openCreate = () => {
     setReportName("");
     setReportDescription("");
-    setReportType("word");
+    setReportLocale("fr");
     setModal(true);
   };
 
@@ -76,7 +84,7 @@ export default function ReportsListPage() {
         body: JSON.stringify({
           name: reportName.trim(),
           description: reportDescription.trim() || null,
-          type: reportType,
+          locale: reportLocale,
         }),
       });
       if (res.ok) {
@@ -146,7 +154,7 @@ export default function ReportsListPage() {
                   {t("reports.colDescription")}
                 </th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("reports.colType")}
+                  {t("reports.colLanguage")}
                 </th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   {t("reports.colCreatedAt")}
@@ -174,11 +182,7 @@ export default function ReportsListPage() {
                         onClick={() => router.push(`/reports/list/${report.id}`)}
                         className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:underline flex items-center gap-2"
                       >
-                        {report.type === "powerpoint" ? (
-                          <Presentation className="h-4 w-4 text-orange-500" />
-                        ) : (
-                          <FileSpreadsheet className="h-4 w-4 text-blue-500" />
-                        )}
+                        <FileText className="h-4 w-4 text-blue-500" />
                         {report.name}
                       </button>
                     </td>
@@ -186,14 +190,9 @@ export default function ReportsListPage() {
                       {report.description || "\u2014"}
                     </td>
                     <td className="px-5 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          report.type === "powerpoint"
-                            ? "bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-400"
-                            : "bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                        }`}
-                      >
-                        {report.type === "powerpoint" ? "PowerPoint" : "Word"}
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
+                        <Globe className="h-3 w-3" />
+                        {LOCALE_LABELS[report.locale] || report.locale}
                       </span>
                     </td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400">
@@ -260,33 +259,16 @@ export default function ReportsListPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className={labelClass}>{t("reports.colType")}</label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setReportType("word")}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
-                      reportType === "word"
-                        ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-400"
-                        : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    }`}
-                  >
-                    <FileSpreadsheet className="h-4 w-4" />
-                    Word
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setReportType("powerpoint")}
-                    className={`flex-1 flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
-                      reportType === "powerpoint"
-                        ? "border-orange-500 bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-400"
-                        : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    }`}
-                  >
-                    <Presentation className="h-4 w-4" />
-                    PowerPoint
-                  </button>
-                </div>
+                <label className={labelClass}>{t("reports.reportLocale")}</label>
+                <select
+                  value={reportLocale}
+                  onChange={(e) => setReportLocale(e.target.value)}
+                  className={inputClass}
+                >
+                  {Object.entries(LOCALE_LABELS).map(([code, label]) => (
+                    <option key={code} value={code}>{label}</option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
