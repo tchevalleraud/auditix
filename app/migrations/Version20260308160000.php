@@ -16,7 +16,7 @@ final class Version20260308160000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE device_model ADD send_ctrl_y BOOLEAN NOT NULL DEFAULT false');
+        $this->addSql('ALTER TABLE device_model ADD COLUMN IF NOT EXISTS send_ctrl_y BOOLEAN NOT NULL DEFAULT false');
     }
 
     public function down(Schema $schema): void

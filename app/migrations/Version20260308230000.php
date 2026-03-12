@@ -16,11 +16,11 @@ final class Version20260308230000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('CREATE TABLE compliance_policy_extra_rules (compliance_policy_id INT NOT NULL, compliance_rule_id INT NOT NULL, PRIMARY KEY(compliance_policy_id, compliance_rule_id))');
-        $this->addSql('CREATE INDEX IDX_policy_extra ON compliance_policy_extra_rules (compliance_policy_id)');
-        $this->addSql('CREATE INDEX IDX_rule_extra ON compliance_policy_extra_rules (compliance_rule_id)');
-        $this->addSql('ALTER TABLE compliance_policy_extra_rules ADD CONSTRAINT FK_policy_extra FOREIGN KEY (compliance_policy_id) REFERENCES compliance_policy (id) ON DELETE CASCADE');
-        $this->addSql('ALTER TABLE compliance_policy_extra_rules ADD CONSTRAINT FK_rule_extra FOREIGN KEY (compliance_rule_id) REFERENCES compliance_rule (id) ON DELETE CASCADE');
+        $this->addSql('CREATE TABLE IF NOT EXISTS compliance_policy_extra_rules (compliance_policy_id INT NOT NULL, compliance_rule_id INT NOT NULL, PRIMARY KEY(compliance_policy_id, compliance_rule_id))');
+        $this->addSql('CREATE INDEX IF NOT EXISTS IDX_policy_extra ON compliance_policy_extra_rules (compliance_policy_id)');
+        $this->addSql('CREATE INDEX IF NOT EXISTS IDX_rule_extra ON compliance_policy_extra_rules (compliance_rule_id)');
+        $this->addSql('DO $$ BEGIN ALTER TABLE compliance_policy_extra_rules ADD CONSTRAINT FK_policy_extra FOREIGN KEY (compliance_policy_id) REFERENCES compliance_policy (id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;');
+        $this->addSql('DO $$ BEGIN ALTER TABLE compliance_policy_extra_rules ADD CONSTRAINT FK_rule_extra FOREIGN KEY (compliance_rule_id) REFERENCES compliance_rule (id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;');
     }
 
     public function down(Schema $schema): void

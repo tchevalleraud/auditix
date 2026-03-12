@@ -16,7 +16,7 @@ final class Version20260311010000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('CREATE TABLE report_theme (
+        $this->addSql('CREATE TABLE IF NOT EXISTS report_theme (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             description TEXT DEFAULT NULL,
@@ -27,13 +27,13 @@ final class Version20260311010000 extends AbstractMigration
             heading_font_family VARCHAR(100) DEFAULT NULL,
             font_size INT NOT NULL DEFAULT 11,
             context_id INT DEFAULT NULL,
-            created_at TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL,
-            CONSTRAINT fk_report_theme_context FOREIGN KEY (context_id) REFERENCES context (id) ON DELETE CASCADE
+            created_at TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL
         )');
-        $this->addSql('CREATE INDEX idx_report_theme_context ON report_theme (context_id)');
+        $this->addSql('DO $$ BEGIN ALTER TABLE report_theme ADD CONSTRAINT fk_report_theme_context FOREIGN KEY (context_id) REFERENCES context (id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;');
+        $this->addSql('CREATE INDEX IF NOT EXISTS idx_report_theme_context ON report_theme (context_id)');
         $this->addSql('COMMENT ON COLUMN report_theme.created_at IS \'(DC2Type:datetime_immutable)\'');
 
-        $this->addSql('CREATE TABLE report (
+        $this->addSql('CREATE TABLE IF NOT EXISTS report (
             id SERIAL PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             description TEXT DEFAULT NULL,
@@ -48,18 +48,19 @@ final class Version20260311010000 extends AbstractMigration
             context_id INT NOT NULL,
             theme_id INT DEFAULT NULL,
             created_at TIMESTAMP(0) WITHOUT TIME ZONE NOT NULL,
-            updated_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL,
-            CONSTRAINT fk_report_context FOREIGN KEY (context_id) REFERENCES context (id) ON DELETE CASCADE,
-            CONSTRAINT fk_report_theme FOREIGN KEY (theme_id) REFERENCES report_theme (id) ON DELETE SET NULL
+            updated_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL
         )');
-        $this->addSql('CREATE INDEX idx_report_context ON report (context_id)');
-        $this->addSql('CREATE INDEX idx_report_theme ON report (theme_id)');
+        $this->addSql('DO $$ BEGIN ALTER TABLE report ADD CONSTRAINT fk_report_context FOREIGN KEY (context_id) REFERENCES context (id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$;');
+        $this->addSql('DO $$ BEGIN ALTER TABLE report ADD CONSTRAINT fk_report_theme FOREIGN KEY (theme_id) REFERENCES report_theme (id) ON DELETE SET NULL; EXCEPTION WHEN duplicate_object THEN NULL; END $$;');
+        $this->addSql('CREATE INDEX IF NOT EXISTS idx_report_context ON report (context_id)');
+        $this->addSql('CREATE INDEX IF NOT EXISTS idx_report_theme ON report (theme_id)');
         $this->addSql('COMMENT ON COLUMN report.created_at IS \'(DC2Type:datetime_immutable)\'');
         $this->addSql('COMMENT ON COLUMN report.updated_at IS \'(DC2Type:datetime_immutable)\'');
 
-        // Insert default theme
+        // Insert default theme (only if not already present)
         $this->addSql("INSERT INTO report_theme (name, description, is_default, primary_color, secondary_color, font_family, heading_font_family, font_size, context_id, created_at)
-            VALUES ('Classic', 'Default classic theme with clean typography', TRUE, '#1e293b', '#3b82f6', 'Inter', NULL, 11, NULL, NOW())");
+            SELECT 'Classic', 'Default classic theme with clean typography', TRUE, '#1e293b', '#3b82f6', 'Inter', NULL, 11, NULL, NOW()
+            WHERE NOT EXISTS (SELECT 1 FROM report_theme WHERE name = 'Classic' AND is_default = TRUE)");
     }
 
     public function down(Schema $schema): void

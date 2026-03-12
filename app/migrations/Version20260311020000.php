@@ -32,14 +32,14 @@ final class Version20260311020000 extends AbstractMigration
             'footer' => ['enabled' => true, 'color' => '#64748b', 'separator' => true, 'separatorColor' => '#e2e8f0', 'showPageNumbers' => true],
         ]);
 
-        $this->addSql("ALTER TABLE report_theme ADD styles JSON NOT NULL DEFAULT '{}'");
-        $this->addSql('UPDATE report_theme SET styles = :styles', ['styles' => $defaultStyles]);
+        $this->addSql("ALTER TABLE report_theme ADD COLUMN IF NOT EXISTS styles JSON NOT NULL DEFAULT '{}'");
+        $this->addSql('UPDATE report_theme SET styles = :styles WHERE styles = \'{}\'', ['styles' => $defaultStyles]);
 
-        $this->addSql('ALTER TABLE report_theme DROP COLUMN primary_color');
-        $this->addSql('ALTER TABLE report_theme DROP COLUMN secondary_color');
-        $this->addSql('ALTER TABLE report_theme DROP COLUMN font_family');
-        $this->addSql('ALTER TABLE report_theme DROP COLUMN heading_font_family');
-        $this->addSql('ALTER TABLE report_theme DROP COLUMN font_size');
+        $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS primary_color');
+        $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS secondary_color');
+        $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS font_family');
+        $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS heading_font_family');
+        $this->addSql('ALTER TABLE report_theme DROP COLUMN IF EXISTS font_size');
     }
 
     public function down(Schema $schema): void

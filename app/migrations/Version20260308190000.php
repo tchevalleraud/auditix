@@ -16,7 +16,7 @@ final class Version20260308190000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE compliance_rule ADD condition_tree JSONB DEFAULT NULL');
+        $this->addSql('ALTER TABLE compliance_rule ADD COLUMN IF NOT EXISTS condition_tree JSONB DEFAULT NULL');
     }
 
     public function down(Schema $schema): void

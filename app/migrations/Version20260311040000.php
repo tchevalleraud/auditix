@@ -16,7 +16,7 @@ final class Version20260311040000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql("ALTER TABLE report ADD blocks JSON NOT NULL DEFAULT '[]'");
+        $this->addSql("ALTER TABLE report ADD COLUMN IF NOT EXISTS blocks JSON NOT NULL DEFAULT '[]'");
     }
 
     public function down(Schema $schema): void

@@ -16,9 +16,9 @@ final class Version20260311030000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE report ADD generating_status VARCHAR(20) DEFAULT NULL');
-        $this->addSql('ALTER TABLE report ADD generated_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL');
-        $this->addSql('ALTER TABLE report ADD generated_file VARCHAR(500) DEFAULT NULL');
+        $this->addSql('ALTER TABLE report ADD COLUMN IF NOT EXISTS generating_status VARCHAR(20) DEFAULT NULL');
+        $this->addSql('ALTER TABLE report ADD COLUMN IF NOT EXISTS generated_at TIMESTAMP(0) WITHOUT TIME ZONE DEFAULT NULL');
+        $this->addSql('ALTER TABLE report ADD COLUMN IF NOT EXISTS generated_file VARCHAR(500) DEFAULT NULL');
         $this->addSql("COMMENT ON COLUMN report.generated_at IS '(DC2Type:datetime_immutable)'");
     }
 

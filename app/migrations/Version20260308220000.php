@@ -16,7 +16,7 @@ final class Version20260308220000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE compliance_rule ADD multi_row_messages JSONB DEFAULT NULL');
+        $this->addSql('ALTER TABLE compliance_rule ADD COLUMN IF NOT EXISTS multi_row_messages JSONB DEFAULT NULL');
     }
 
     public function down(Schema $schema): void
