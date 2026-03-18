@@ -8,9 +8,11 @@ use App\Entity\Node;
 use App\Message\CollectNodeMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\ResponseHeaderBag;
 use Symfony\Component\Messenger\MessageBusInterface;
 use Symfony\Component\Routing\Attribute\Route;
 
@@ -190,6 +192,42 @@ class CollectionController extends AbstractController
         $data['rules'] = $rules;
 
         return $this->json($data);
+    }
+
+    #[Route('/{id}/download', methods: ['GET'])]
+    public function download(Collection $collection): Response
+    {
+        $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
+
+        if (!is_dir($storageDir)) {
+            return $this->json(['error' => 'No files found for this collection'], Response::HTTP_NOT_FOUND);
+        }
+
+        $node = $collection->getNode();
+        $nodeName = $node->getName() ?: $node->getHostname() ?: $node->getIpAddress();
+        $safeName = preg_replace('/[^a-zA-Z0-9_\-.]/', '_', $nodeName);
+        $filename = sprintf('collection_%d_%s.tar.gz', $collection->getId(), $safeName);
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'col_') . '.tar.gz';
+
+        $command = sprintf(
+            'tar -czf %s -C %s .',
+            escapeshellarg($tmpFile),
+            escapeshellarg($storageDir)
+        );
+        exec($command, $output, $exitCode);
+
+        if ($exitCode !== 0) {
+            @unlink($tmpFile);
+            return $this->json(['error' => 'Failed to create archive'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $response = new BinaryFileResponse($tmpFile);
+        $response->setContentDisposition(ResponseHeaderBag::DISPOSITION_ATTACHMENT, $filename);
+        $response->headers->set('Content-Type', 'application/gzip');
+        $response->deleteFileAfterSend(true);
+
+        return $response;
     }
 
     #[Route('/{id}/files/{path}', methods: ['GET'], requirements: ['path' => '.+'])]

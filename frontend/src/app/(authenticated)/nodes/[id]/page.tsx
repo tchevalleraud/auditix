@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -139,6 +139,7 @@ export default function NodeDetailPage() {
   const [newTag, setNewTag] = useState("");
   const [selectedCollections, setSelectedCollections] = useState<Set<number>>(new Set());
   const [deletingSelected, setDeletingSelected] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   // Inventory state
   const [inventoryData, setInventoryData] = useState<InventoryCatData[]>([]);
@@ -1217,6 +1218,36 @@ export default function NodeDetailPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
+                    <button
+                      disabled={downloading}
+                      onClick={async () => {
+                        setDownloading(true);
+                        try {
+                          const res = await fetch(`/api/collections/${viewCollection.id}/download`);
+                          if (!res.ok) throw new Error("Download failed");
+                          const blob = await res.blob();
+                          const disposition = res.headers.get("Content-Disposition") || "";
+                          const match = disposition.match(/filename="?([^"]+)"?/);
+                          const filename = match?.[1] || `collection_${viewCollection.id}.tar.gz`;
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = filename;
+                          document.body.appendChild(a);
+                          a.click();
+                          a.remove();
+                          URL.revokeObjectURL(url);
+                        } catch (e) {
+                          console.error(e);
+                        } finally {
+                          setDownloading(false);
+                        }
+                      }}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+                      title={t("nodes.downloadCollection")}
+                    >
+                      {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                    </button>
                     <button
                       onClick={() => { if (confirm(t("nodes.confirmDeleteCollection"))) deleteCollection(viewCollection.id); }}
                       className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"

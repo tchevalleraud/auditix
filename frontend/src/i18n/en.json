@@ -371,6 +371,7 @@
     "noCollectionFiles": "No output files",
     "confirmDeleteCollection": "Delete this collection and all its files?",
     "confirmDeleteCollections": "Delete {count} collection(s) and all their files?",
+    "downloadCollection": "Download files",
     "deleteSelected": "Delete ({count})",
     "collectionError": "Error"
   },

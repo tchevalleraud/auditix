@@ -371,6 +371,7 @@
     "noCollectionFiles": "出力ファイルなし",
     "confirmDeleteCollection": "この収集とすべてのファイルを削除しますか？",
     "confirmDeleteCollections": "{count}件の収集とすべてのファイルを削除しますか？",
+    "downloadCollection": "ファイルをダウンロード",
     "deleteSelected": "削除 ({count})",
     "collectionError": "エラー"
   },

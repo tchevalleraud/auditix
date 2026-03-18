@@ -371,6 +371,7 @@
     "noCollectionFiles": "Keine Ausgabedateien",
     "confirmDeleteCollection": "Diese Sammlung und alle zugehorigen Dateien loschen?",
     "confirmDeleteCollections": "{count} Sammlung(en) und alle zugehorigen Dateien loschen?",
+    "downloadCollection": "Dateien herunterladen",
     "deleteSelected": "Loschen ({count})",
     "collectionError": "Fehler"
   },

@@ -371,6 +371,7 @@
     "noCollectionFiles": "Aucun fichier de sortie",
     "confirmDeleteCollection": "Supprimer cette collecte et tous ses fichiers ?",
     "confirmDeleteCollections": "Supprimer {count} collecte(s) et tous leurs fichiers ?",
+    "downloadCollection": "Télécharger les fichiers",
     "deleteSelected": "Supprimer ({count})",
     "collectionError": "Erreur"
   },
