@@ -18,7 +18,7 @@ logs: ## Show logs for all services
 
 upgrade: ## Pull latest version, rebuild and apply migrations
 	@echo "\033[36m[1/4]\033[0m Pulling latest changes..."
-	git checkout -- frontend/package-lock.json frontend/tsconfig.tsbuildinfo 2>/dev/null || true
+	git stash --quiet 2>/dev/null || true
 	git pull --ff-only
 	@echo "\033[36m[2/4]\033[0m Rebuilding containers..."
 	docker compose up -d --build
