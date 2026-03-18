@@ -25,6 +25,15 @@ class Context
     private bool $monitoringEnabled = false;
 
     #[ORM\Column]
+    private int $snmpRetentionMinutes = 120;
+
+    #[ORM\Column]
+    private int $snmpPollIntervalSeconds = 60;
+
+    #[ORM\Column]
+    private int $icmpPollIntervalSeconds = 60;
+
+    #[ORM\Column]
     private bool $isDefault = false;
 
     #[ORM\Column]
@@ -76,6 +85,39 @@ class Context
     public function setMonitoringEnabled(bool $monitoringEnabled): static
     {
         $this->monitoringEnabled = $monitoringEnabled;
+        return $this;
+    }
+
+    public function getSnmpRetentionMinutes(): int
+    {
+        return $this->snmpRetentionMinutes;
+    }
+
+    public function setSnmpRetentionMinutes(int $snmpRetentionMinutes): static
+    {
+        $this->snmpRetentionMinutes = $snmpRetentionMinutes;
+        return $this;
+    }
+
+    public function getSnmpPollIntervalSeconds(): int
+    {
+        return $this->snmpPollIntervalSeconds;
+    }
+
+    public function setSnmpPollIntervalSeconds(int $snmpPollIntervalSeconds): static
+    {
+        $this->snmpPollIntervalSeconds = max(5, $snmpPollIntervalSeconds);
+        return $this;
+    }
+
+    public function getIcmpPollIntervalSeconds(): int
+    {
+        return $this->icmpPollIntervalSeconds;
+    }
+
+    public function setIcmpPollIntervalSeconds(int $icmpPollIntervalSeconds): static
+    {
+        $this->icmpPollIntervalSeconds = max(5, $icmpPollIntervalSeconds);
         return $this;
     }
 

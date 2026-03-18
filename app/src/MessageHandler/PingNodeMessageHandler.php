@@ -3,6 +3,7 @@
 namespace App\MessageHandler;
 
 use App\Entity\Node;
+use App\Entity\SnmpMonitoringData;
 use App\Entity\Task;
 use App\Message\PingNodeMessage;
 use Doctrine\ORM\EntityManagerInterface;
@@ -52,13 +53,34 @@ class PingNodeMessageHandler
 
         $reachable = $process->isSuccessful();
         $now = new \DateTimeImmutable();
+        $output = trim($process->getOutput() . "\n" . $process->getErrorOutput());
 
         $node->setIsReachable($reachable);
         $node->setLastPingAt($now);
 
         $task->setStatus($reachable ? Task::STATUS_COMPLETED : Task::STATUS_FAILED);
         $task->setCompletedAt($now);
-        $task->setOutput(trim($process->getOutput() . "\n" . $process->getErrorOutput()));
+        $task->setOutput($output);
+
+        // Store ping metrics
+        $statusData = new SnmpMonitoringData();
+        $statusData->setNode($node);
+        $statusData->setCategory('ping_status');
+        $statusData->setOid('icmp');
+        $statusData->setRawValue($reachable ? '1' : '0');
+        $statusData->setNumericValue($reachable ? 1.0 : 0.0);
+        $statusData->setRecordedAt($now);
+        $this->em->persist($statusData);
+
+        $latency = $this->parseLatency($output);
+        $latencyData = new SnmpMonitoringData();
+        $latencyData->setNode($node);
+        $latencyData->setCategory('ping_latency');
+        $latencyData->setOid('icmp');
+        $latencyData->setRawValue($latency !== null ? sprintf('%.2f', $latency) : 'timeout');
+        $latencyData->setNumericValue($latency);
+        $latencyData->setRecordedAt($now);
+        $this->em->persist($latencyData);
 
         $this->em->flush();
 
@@ -70,6 +92,16 @@ class PingNodeMessageHandler
                 'nodeId' => $node->getId(),
                 'isReachable' => $reachable,
                 'lastPingAt' => $now->format('c'),
+            ]),
+        ));
+
+        // Notify monitoring tab
+        $this->hub->publish(new Update(
+            'snmp/node/' . $node->getId(),
+            json_encode([
+                'event' => 'snmp.polled',
+                'nodeId' => $node->getId(),
+                'timestamp' => $now->format('c'),
             ]),
         ));
 
@@ -98,5 +130,14 @@ class PingNodeMessageHandler
                 ],
             ]),
         ));
+    }
+
+    private function parseLatency(string $output): ?float
+    {
+        // Linux: "time=1.23 ms"
+        if (preg_match('/time[=<]([\d.]+)\s*ms/i', $output, $m)) {
+            return (float) $m[1];
+        }
+        return null;
     }
 }

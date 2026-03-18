@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -59,7 +59,14 @@ const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-
 const selectClass = inputClass;
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance";
+interface SnmpDataPoint { value: number | null; raw: string; time: string }
+interface SnmpMonitoringResponse {
+  retentionMinutes: number;
+  categories: Record<string, SnmpDataPoint[]>;
+  oidConfig: { category: string; oid: string }[];
+}
+
+type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance" | "monitoring";
 
 interface ComplianceResultEntry {
   ruleId: number;
@@ -146,6 +153,11 @@ export default function NodeDetailPage() {
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [selectedInventoryCat, setSelectedInventoryCat] = useState(0);
 
+  // Monitoring state
+  const [monitoringData, setMonitoringData] = useState<SnmpMonitoringResponse | null>(null);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringModal, setMonitoringModal] = useState<string | null>(null);
+
   // Compliance state
   const [complianceData, setComplianceData] = useState<ComplianceData | null>(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
@@ -208,6 +220,13 @@ export default function NodeDetailPage() {
     setInventoryLoading(false);
   }, [nodeId]);
 
+  const loadMonitoring = useCallback(async (silent = false) => {
+    if (!silent) setMonitoringLoading(true);
+    const res = await fetch(`/api/snmp-monitoring/by-node/${nodeId}`);
+    if (res.ok) setMonitoringData(await res.json());
+    if (!silent) setMonitoringLoading(false);
+  }, [nodeId]);
+
   const loadCompliance = useCallback(async () => {
     setComplianceLoading(true);
     const res = await fetch(`/api/nodes/${nodeId}/compliance`);
@@ -218,10 +237,12 @@ export default function NodeDetailPage() {
   // Always load collections on mount (for tab spinner), then reload when switching to tab
   useEffect(() => { loadCollections(); }, [loadCollections]);
   useEffect(() => {
+    if (tab === "summary") { loadMonitoring(true); loadCompliance(); }
     if (tab === "inventory") loadInventory();
     if (tab === "collections") loadCollections();
     if (tab === "compliance") loadCompliance();
-  }, [tab, loadCollections, loadCompliance]);
+    if (tab === "monitoring") loadMonitoring();
+  }, [tab, loadCollections, loadCompliance, loadMonitoring]);
 
   // Open collection from query params (e.g. from Collections page)
   const [initialCollectionOpened, setInitialCollectionOpened] = useState(false);
@@ -239,6 +260,7 @@ export default function NodeDetailPage() {
     url.searchParams.append("topic", `nodes/context/${current.id}`);
     url.searchParams.append("topic", `collections/node/${nodeId}`);
     url.searchParams.append("topic", `compliance/node/${nodeId}`);
+    url.searchParams.append("topic", `snmp/node/${nodeId}`);
     const es = new EventSource(url);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
@@ -265,9 +287,12 @@ export default function NodeDetailPage() {
         setComplianceEvaluating(false);
         loadCompliance();
       }
+      if (data.event === "snmp.polled" && data.nodeId === Number(nodeId)) {
+        loadMonitoring(true);
+      }
     };
     return () => es.close();
-  }, [current, nodeId, loadCompliance]);
+  }, [current, nodeId, loadCompliance, loadMonitoring]);
 
   const handleManufacturerChange = (value: string) => {
     setManufacturerId(value);
@@ -420,6 +445,7 @@ export default function NodeDetailPage() {
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "summary", label: t("nodes.tabSummary") },
+    { key: "monitoring", label: t("nodes.tabMonitoring") },
     { key: "compliance", label: t("compliance.title") },
     { key: "inventory", label: t("nodes.tabInventory") },
     { key: "collections", label: t("nodes.tabCollections") },
@@ -605,14 +631,352 @@ export default function NodeDetailPage() {
         </nav>
       </div>
 
-      {tab === "summary" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
-          <div className="text-center py-12">
-            <div className="mx-auto h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
-              <div className="h-6 w-6 rounded-full bg-slate-200 dark:bg-slate-700" />
+      {tab === "summary" && (() => {
+        const mCats = monitoringData?.categories ?? {};
+        const lastVal = (cat: string) => { const pts = mCats[cat]; return pts && pts.length > 0 ? pts[pts.length - 1].value : null; };
+        const lastPingStatus = lastVal("ping_status");
+        const lastPingLatency = lastVal("ping_latency");
+        const pingPts = mCats["ping_status"] ?? [];
+        const pingLoss = pingPts.length > 0 ? ((pingPts.filter((p) => p.value === 0).length / pingPts.length) * 100) : null;
+        const tempVal = lastVal("temperature");
+        const diskVal = lastVal("disk");
+        const compScore = complianceData?.score ?? node.score;
+        const compPolicies = complianceData?.policies ?? [];
+        const totalCompliant = compPolicies.reduce((s, p) => s + (p.stats.compliant ?? 0), 0);
+        const totalNonCompliant = compPolicies.reduce((s, p) => s + (p.stats.non_compliant ?? 0), 0);
+        const totalRules = totalCompliant + totalNonCompliant + compPolicies.reduce((s, p) => s + (p.stats.error ?? 0) + (p.stats.not_applicable ?? 0), 0);
+        const compliancePercent = totalRules > 0 ? Math.round((totalCompliant / totalRules) * 100) : 0;
+
+        const grades = ["A", "B", "C", "D", "E", "F"] as const;
+        const gradeColors: Record<string, string> = { A: "#22c55e", B: "#84cc16", C: "#eab308", D: "#f97316", E: "#f87171", F: "#dc2626" };
+
+        return (
+          <div className="space-y-4">
+            {/* Row 1: Score + Sub-scores + Compliance bar + Reachability */}
+            <div className="grid grid-cols-1 lg:grid-cols-[auto_auto_1fr_auto] gap-4">
+
+              {/* 1. Main score badge */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col w-28">
+                {compScore ? (
+                  <>
+                    <div className="flex-1 flex flex-col items-center justify-center py-3" style={{ backgroundColor: gradeColors[compScore] ?? "#94a3b8" }}>
+                      <span className="text-5xl font-black text-white drop-shadow-sm">{compScore}</span>
+                    </div>
+                    <div className="flex">
+                      {grades.map((g) => (
+                        <div key={g} className="flex-1 flex items-center justify-center py-1 text-[10px] font-bold"
+                          style={{ backgroundColor: g === compScore ? gradeColors[compScore] : undefined, color: g === compScore ? "#fff" : "#94a3b8" }}>
+                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm ${g === compScore ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"}`}>{g}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center py-6 bg-slate-50 dark:bg-slate-800/50">
+                    <span className="text-4xl font-black text-slate-200 dark:text-slate-700">—</span>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Sub-scores (Compliance, Vulnerabilities, System Updates) */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4 flex flex-col justify-center gap-3 w-52">
+                {[
+                  { label: t("compliance.title"), score: compScore, color: gradeColors[compScore ?? ""] },
+                  { label: t("nodes.summaryVulnerabilities"), score: null, color: undefined },
+                  { label: t("nodes.summarySystemUpdates"), score: null, color: undefined },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-2.5">
+                    <span
+                      className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold text-white shrink-0 ${!item.score ? "bg-slate-200 dark:bg-slate-700" : ""}`}
+                      style={item.score && item.color ? { backgroundColor: item.color } : undefined}
+                    >
+                      {item.score ?? "—"}
+                    </span>
+                    <span className="text-xs text-slate-600 dark:text-slate-400">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* 3. Compliance progress bar */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-5 flex flex-col justify-center min-w-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance.title")}</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-slate-100">{totalRules > 0 ? `${compliancePercent}%` : "—"}</span>
+                </div>
+                {totalRules > 0 ? (
+                  <>
+                    <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: `${compliancePercent}%`, backgroundColor: gradeColors[compScore ?? ""] ?? "#94a3b8" }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-4 mt-2">
+                      <span className="text-xs text-emerald-600 dark:text-emerald-400">{totalCompliant} {t("nodes.summaryCompliant")}</span>
+                      {totalNonCompliant > 0 && (
+                        <span className="text-xs text-red-500">{totalNonCompliant} {t("nodes.summaryNonCompliant")}</span>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800" />
+                )}
+              </div>
+
+              {/* 4. Reachability */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4 flex flex-col items-center justify-center gap-1 w-36">
+                <span className={`inline-block h-4 w-4 rounded-full ${lastPingStatus === 1 ? "bg-emerald-500" : lastPingStatus === 0 ? "bg-red-500" : "bg-slate-300 dark:bg-slate-600"}`} />
+                <span className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {lastPingStatus === 1 ? t("nodes.summaryUp") : lastPingStatus === 0 ? t("nodes.summaryDown") : "—"}
+                </span>
+                {lastPingLatency != null && lastPingStatus === 1 && (
+                  <span className="text-xs text-slate-400 dark:text-slate-500">{lastPingLatency.toFixed(1)} ms</span>
+                )}
+                {pingLoss != null && (
+                  <span className={`text-[11px] ${pingLoss > 0 ? "text-red-500" : "text-emerald-500"}`}>{t("nodes.pingLoss")} {pingLoss.toFixed(1)}%</span>
+                )}
+              </div>
             </div>
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t("nodes.compliancePlaceholder")}</p>
+
+            {/* Row 2: Details */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Node info */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+                <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("nodes.summaryInfo")}</h3>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {[
+                    [t("nodes.ipAddress"), node.ipAddress],
+                    [t("nodes.hostname") ?? "Hostname", node.hostname],
+                    [t("nodes.colManufacturer"), node.manufacturer?.name],
+                    [t("nodes.colModel"), node.model?.name],
+                    [t("nodes.colProfile"), node.profile?.name],
+                    [t("nodes.summaryVersion"), node.discoveredVersion],
+                    [t("nodes.summaryDiscoveredModel"), node.discoveredModel],
+                    [t("nodes.summaryPolicy"), node.policy === "enforce" ? t("nodes.policyEnforce") : t("nodes.policyAudit")],
+                  ].filter(([, v]) => v).map(([label, value], i) => (
+                    <div key={i} className="flex items-center justify-between px-5 py-2.5">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{label}</span>
+                      <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{value}</span>
+                    </div>
+                  ))}
+                  {tempVal != null && (
+                    <div className="flex items-center justify-between px-5 py-2.5">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{t("models.monitoringCat_temperature")}</span>
+                      <span className={`text-sm font-medium ${tempVal > 70 ? "text-red-500" : tempVal > 50 ? "text-amber-500" : "text-slate-900 dark:text-slate-100"}`}>{tempVal.toFixed(0)}°C</span>
+                    </div>
+                  )}
+                  {diskVal != null && (
+                    <div className="flex items-center justify-between px-5 py-2.5">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">{t("models.monitoringCat_disk")}</span>
+                      <span className={`text-sm font-medium ${diskVal > 90 ? "text-red-500" : diskVal > 70 ? "text-amber-500" : "text-slate-900 dark:text-slate-100"}`}>{diskVal.toFixed(0)}%</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Last collections */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+                <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("nodes.summaryLastCollections")}</h3>
+                </div>
+                {collections.length === 0 ? (
+                  <div className="p-8 text-center">
+                    <p className="text-sm text-slate-400 dark:text-slate-500">{t("nodes.noCollections")}</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {collections.slice(0, 5).map((col) => (
+                      <div key={col.id} className="flex items-center gap-3 px-5 py-2.5">
+                        {statusIcon(col.status)}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                              {col.tags.length > 0 ? col.tags.join(", ") : `#${col.id}`}
+                            </span>
+                            <span className={`text-xs ${col.status === "completed" ? "text-emerald-500" : col.status === "failed" ? "text-red-500" : "text-slate-400"}`}>
+                              {statusLabel(col.status)}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                            {col.completedAt ? new Date(col.completedAt).toLocaleString(dateLocale) : col.createdAt ? new Date(col.createdAt).toLocaleString(dateLocale) : ""}
+                          </p>
+                        </div>
+                        <span className="text-xs text-slate-400 dark:text-slate-500">{col.completedCount}/{col.commandCount}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
+        );
+      })()}
+
+      {tab === "monitoring" && (
+        <div className="space-y-4">
+          {monitoringLoading && !monitoringData ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+            </div>
+          ) : !monitoringData || monitoringData.oidConfig.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+              <div className="text-center py-12">
+                <Activity className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="text-sm text-slate-500 dark:text-slate-400">{t("nodes.noMonitoringData")}</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("nodes.noMonitoringDataHint")}</p>
+              </div>
+            </div>
+          ) : (() => {
+            const cats = monitoringData.categories;
+            const cfgs = monitoringData.oidConfig;
+            const hasPing = cfgs.some((c) => c.category === "ping_latency");
+            const hasTemp = cfgs.some((c) => c.category === "temperature");
+            const hasDisk = cfgs.some((c) => c.category === "disk");
+            const hasCpu = cfgs.some((c) => c.category === "cpu");
+            const hasMem = cfgs.some((c) => c.category === "memory");
+            const hasIn = cfgs.some((c) => c.category === "interface_in");
+            const hasOut = cfgs.some((c) => c.category === "interface_out");
+            const hasTraffic = hasIn || hasOut;
+            const downtimeZones = computeDowntimeZones(cats["ping_status"] ?? []);
+
+            const lastValue = (cat: string) => {
+              const pts = cats[cat];
+              if (!pts || pts.length === 0) return null;
+              const last = pts[pts.length - 1];
+              return last.value;
+            };
+
+            const GaugeCard = ({ category, icon, color, unit, onClick }: { category: string; icon: React.ReactNode; color: string; unit: string; onClick: () => void }) => {
+              const val = lastValue(category);
+              return (
+                <button onClick={onClick} className="flex-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-5 flex flex-col items-center justify-center gap-2 hover:border-slate-300 dark:hover:border-slate-600 transition-colors cursor-pointer">
+                  <span className={color}>{icon}</span>
+                  <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400">{t(`models.monitoringCat_${category}`)}</h3>
+                  <span className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                    {val != null ? `${val % 1 === 0 ? val : val.toFixed(1)}` : "—"}
+                  </span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">{unit}</span>
+                </button>
+              );
+            };
+
+            return (
+              <div className="space-y-4">
+                {/* Row 1: Ping (2/3) + Temperature & Disk stacked (1/3) */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  {hasPing && (
+                    <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+                      <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                        <span className="text-indigo-500"><Gauge className="h-5 w-5" /></span>
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("nodes.pingTitle")}</h3>
+                      </div>
+                      <div className="p-4">
+                        <PingChart latencyPoints={cats["ping_latency"] ?? []} statusPoints={cats["ping_status"] ?? []} dateLocale={dateLocale} t={t} downtimeZones={downtimeZones} />
+                      </div>
+                    </div>
+                  )}
+                  {(hasTemp || hasDisk) && (
+                    <div className="flex flex-col gap-4">
+                      {hasTemp && (
+                        <GaugeCard category="temperature" icon={<Thermometer className="h-8 w-8" />} color="text-red-500" unit="°C" onClick={() => setMonitoringModal("temperature")} />
+                      )}
+                      {hasDisk && (
+                        <GaugeCard category="disk" icon={<HardDrive className="h-8 w-8" />} color="text-amber-500" unit="%" onClick={() => setMonitoringModal("disk")} />
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Row 2: CPU (1/2) + Memory (1/2) */}
+                {(hasCpu || hasMem) && (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {hasCpu && (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                          <span className="text-blue-500"><Cpu className="h-5 w-5" /></span>
+                          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("models.monitoringCat_cpu")}</h3>
+                          {(cats["cpu"] ?? []).length > 0 && (
+                            <span className="ml-auto text-lg font-bold text-slate-900 dark:text-slate-100">
+                              {lastValue("cpu")?.toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-4">
+                          {(cats["cpu"] ?? []).length === 0 ? (
+                            <div className="flex items-center justify-center h-48 text-sm text-slate-400 dark:text-slate-500">{t("nodes.monitoringNoPoints")}</div>
+                          ) : (
+                            <MonitoringChart points={cats["cpu"]} category="cpu" dateLocale={dateLocale} downtimeZones={downtimeZones} />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {hasMem && (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+                        <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                          <span className="text-violet-500"><MemoryStick className="h-5 w-5" /></span>
+                          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("models.monitoringCat_memory")}</h3>
+                          {(cats["memory"] ?? []).length > 0 && (
+                            <span className="ml-auto text-lg font-bold text-slate-900 dark:text-slate-100">
+                              {lastValue("memory")?.toFixed(1)}%
+                            </span>
+                          )}
+                        </div>
+                        <div className="p-4">
+                          {(cats["memory"] ?? []).length === 0 ? (
+                            <div className="flex items-center justify-center h-48 text-sm text-slate-400 dark:text-slate-500">{t("nodes.monitoringNoPoints")}</div>
+                          ) : (
+                            <MonitoringChart points={cats["memory"]} category="memory" dateLocale={dateLocale} downtimeZones={downtimeZones} />
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 3: Traffic (full width) */}
+                {hasTraffic && (
+                  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+                    <div className="flex items-center gap-3 px-5 py-3 border-b border-slate-100 dark:border-slate-800">
+                      <span className="text-cyan-500"><ArrowDownToLine className="h-5 w-5" /></span>
+                      <span className="text-orange-500"><ArrowUpFromLine className="h-5 w-5" /></span>
+                      <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("nodes.trafficTitle")}</h3>
+                    </div>
+                    <div className="p-4">
+                      <TrafficChart inPoints={cats["interface_in"] ?? []} outPoints={cats["interface_out"] ?? []} dateLocale={dateLocale} t={t} downtimeZones={downtimeZones} />
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal for temperature / disk detail chart */}
+                {monitoringModal && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setMonitoringModal(null)}>
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-3">
+                          <span className={MONITORING_CAT_META[monitoringModal]?.color ?? "text-slate-400"}>
+                            {MONITORING_CAT_META[monitoringModal]?.icon}
+                          </span>
+                          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t(`models.monitoringCat_${monitoringModal}`)}</h3>
+                        </div>
+                        <button onClick={() => setMonitoringModal(null)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                          <X className="h-5 w-5 text-slate-400" />
+                        </button>
+                      </div>
+                      <div className="p-6">
+                        {(cats[monitoringModal] ?? []).length === 0 ? (
+                          <div className="flex items-center justify-center h-48 text-sm text-slate-400 dark:text-slate-500">{t("nodes.monitoringNoPoints")}</div>
+                        ) : (
+                          <MonitoringChart points={cats[monitoringModal]} category={monitoringModal} dateLocale={dateLocale} downtimeZones={downtimeZones} />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -1406,4 +1770,395 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+const MONITORING_CAT_META: Record<string, { icon: React.ReactNode; color: string; chartColor: string }> = {
+  cpu: { icon: <Cpu className="h-5 w-5" />, color: "text-blue-500", chartColor: "#3b82f6" },
+  memory: { icon: <MemoryStick className="h-5 w-5" />, color: "text-violet-500", chartColor: "#8b5cf6" },
+  disk: { icon: <HardDrive className="h-5 w-5" />, color: "text-amber-500", chartColor: "#f59e0b" },
+  temperature: { icon: <Thermometer className="h-5 w-5" />, color: "text-red-500", chartColor: "#ef4444" },
+  uptime: { icon: <Clock className="h-5 w-5" />, color: "text-emerald-500", chartColor: "#10b981" },
+  interface_in: { icon: <ArrowDownToLine className="h-5 w-5" />, color: "text-cyan-500", chartColor: "#06b6d4" },
+  interface_out: { icon: <ArrowUpFromLine className="h-5 w-5" />, color: "text-orange-500", chartColor: "#f97316" },
+};
+
+function MonitoringChart({ points, category, dateLocale, downtimeZones = [] }: { points: SnmpDataPoint[]; category: string; dateLocale: string; downtimeZones?: { x1: number; x2: number }[] }) {
+  const { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceArea } = require("recharts");
+
+  const chartColor = MONITORING_CAT_META[category]?.chartColor ?? "#3b82f6";
+
+  const data = points
+    .filter((p) => p.value != null)
+    .map((p) => ({
+      time: new Date(p.time).getTime(),
+      value: p.value,
+    }));
+
+  const avg = data.length > 0 ? data.reduce((sum, d) => sum + (d.value as number), 0) / data.length : null;
+
+  if (data.length < 2) {
+    return (
+      <div className="flex items-center justify-center h-48 text-xs text-slate-400 dark:text-slate-500">
+        {data.length === 1 ? `${data[0].value}` : "—"}
+      </div>
+    );
+  }
+
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+  const formatTooltipTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  return (
+    <div className="h-48">
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data} margin={{ top: 5, right: 55, left: -10, bottom: 0 }}>
+          <defs>
+            <linearGradient id={`gradient-${category}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={chartColor} stopOpacity={0.2} />
+              <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-100 dark:text-slate-800" />
+          <XAxis
+            dataKey="time"
+            type="number"
+            domain={["dataMin", "dataMax"]}
+            tickFormatter={formatTime}
+            tick={{ fontSize: 11 }}
+            stroke="currentColor"
+            className="text-slate-400 dark:text-slate-500"
+          />
+          <YAxis
+            tick={{ fontSize: 11 }}
+            stroke="currentColor"
+            className="text-slate-400 dark:text-slate-500"
+            domain={["auto", "auto"]}
+          />
+          <Tooltip
+            labelFormatter={formatTooltipTime}
+            formatter={(v: number) => [v % 1 === 0 ? v : v.toFixed(2), ""]}
+            contentStyle={{
+              backgroundColor: "var(--tooltip-bg, #fff)",
+              border: "1px solid var(--tooltip-border, #e2e8f0)",
+              borderRadius: "8px",
+              fontSize: "12px",
+            }}
+          />
+          {downtimeZones.map((g, i) => (
+            <ReferenceArea key={`down-${i}`} x1={g.x1} x2={g.x2} fill="#94a3b8" fillOpacity={0.15} strokeOpacity={0} />
+          ))}
+          {avg != null && (
+            <ReferenceLine
+              y={avg}
+              stroke="#22c55e"
+              strokeDasharray="6 3"
+              strokeWidth={1.5}
+              label={{ value: `avg ${avg % 1 === 0 ? avg : avg.toFixed(1)}`, position: "right", fill: "#22c55e", fontSize: 11 }}
+            />
+          )}
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={chartColor}
+            strokeWidth={2}
+            fill={`url(#gradient-${category})`}
+            dot={data.length <= 60}
+            activeDot={{ r: 4, strokeWidth: 0 }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function computeDowntimeZones(statusPoints: SnmpDataPoint[]): { x1: number; x2: number }[] {
+  if (statusPoints.length === 0) return [];
+  const sorted = statusPoints
+    .map((p) => ({ time: new Date(p.time).getTime(), up: p.value === 1 }))
+    .sort((a, b) => a.time - b.time);
+
+  const zones: { x1: number; x2: number }[] = [];
+  let downStart: number | null = null;
+
+  for (const pt of sorted) {
+    if (!pt.up && downStart === null) {
+      downStart = pt.time;
+    } else if (pt.up && downStart !== null) {
+      zones.push({ x1: downStart, x2: pt.time });
+      downStart = null;
+    }
+  }
+  // If still down at the end, extend to last point
+  if (downStart !== null) {
+    zones.push({ x1: downStart, x2: sorted[sorted.length - 1].time });
+  }
+  return zones;
+}
+
+function computeDeltas(points: SnmpDataPoint[]): { time: number; rate: number }[] {
+  // Deduplicate by keeping the last value per second
+  const bySecond = new Map<number, number>();
+  for (const p of points) {
+    if (p.value == null) continue;
+    const sec = Math.floor(new Date(p.time).getTime() / 1000) * 1000;
+    bySecond.set(sec, p.value);
+  }
+  const numeric = Array.from(bySecond.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, abs]) => ({ time, abs }));
+
+  const deltas: { time: number; rate: number }[] = [];
+  for (let i = 1; i < numeric.length; i++) {
+    const dt = (numeric[i].time - numeric[i - 1].time) / 1000;
+    if (dt < 3) continue; // skip points too close together (noise)
+    let diff = numeric[i].abs - numeric[i - 1].abs;
+    if (diff < 0) diff = 0; // counter wrap
+    deltas.push({ time: numeric[i].time, rate: diff / dt });
+  }
+  return deltas;
+}
+
+function formatTrafficRate(bytesPerSec: number): string {
+  const abs = Math.abs(bytesPerSec);
+  if (abs < 1024) return `${abs.toFixed(0)} B/s`;
+  if (abs < 1024 * 1024) return `${(abs / 1024).toFixed(1)} KB/s`;
+  if (abs < 1024 * 1024 * 1024) return `${(abs / (1024 * 1024)).toFixed(1)} MB/s`;
+  return `${(abs / (1024 * 1024 * 1024)).toFixed(2)} GB/s`;
+}
+
+function TrafficChart({ inPoints, outPoints, dateLocale, t, downtimeZones = [] }: { inPoints: SnmpDataPoint[]; outPoints: SnmpDataPoint[]; dateLocale: string; t: (k: string) => string; downtimeZones?: { x1: number; x2: number }[] }) {
+  const { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceArea } = require("recharts");
+
+  const inDeltas = computeDeltas(inPoints);
+  const outDeltas = computeDeltas(outPoints);
+
+  const inMap = new Map(inDeltas.map((d) => [d.time, d.rate]));
+  const outMap = new Map(outDeltas.map((d) => [d.time, d.rate]));
+
+  // Use in timeline as base, match out by closest timestamp (within 2s tolerance)
+  const findClosest = (map: Map<number, number>, ts: number): number | null => {
+    const exact = map.get(ts);
+    if (exact !== undefined) return exact;
+    for (const [t, v] of map) {
+      if (Math.abs(t - ts) <= 2000) return v;
+    }
+    return null;
+  };
+
+  // Merge: keep all timestamps from both series
+  const timeSet = new Set<number>();
+  inDeltas.forEach((d) => timeSet.add(d.time));
+  outDeltas.forEach((d) => timeSet.add(d.time));
+  const times = Array.from(timeSet).sort((a, b) => a - b);
+
+  const data = times.map((time) => ({
+    time,
+    in: findClosest(inMap, time) ?? 0,
+    out: -(findClosest(outMap, time) ?? 0),
+  }));
+
+  if (data.length < 2) {
+    return (
+      <div className="flex items-center justify-center h-48 text-sm text-slate-400 dark:text-slate-500">
+        {t("nodes.monitoringNoPoints")}
+      </div>
+    );
+  }
+
+  const lastIn = inDeltas.length > 0 ? inDeltas[inDeltas.length - 1].rate : 0;
+  const lastOut = outDeltas.length > 0 ? outDeltas[outDeltas.length - 1].rate : 0;
+
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+  const formatTooltipTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  return (
+    <div>
+      <div className="flex items-center gap-6 mb-2 px-1">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="inline-block w-3 h-0.5 bg-cyan-500 rounded" />
+          <span className="text-slate-500 dark:text-slate-400">{t("nodes.trafficIn")}</span>
+          <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">{formatTrafficRate(lastIn)}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="inline-block w-3 h-0.5 bg-orange-500 rounded" />
+          <span className="text-slate-500 dark:text-slate-400">{t("nodes.trafficOut")}</span>
+          <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">{formatTrafficRate(lastOut)}</span>
+        </div>
+      </div>
+      <div className="h-56">
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 5, right: 10, left: 5, bottom: 0 }}>
+            <defs>
+              <linearGradient id="gradient-traffic-in" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+              </linearGradient>
+              <linearGradient id="gradient-traffic-out" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="5%" stopColor="#f97316" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-100 dark:text-slate-800" />
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={formatTime}
+              tick={{ fontSize: 11 }}
+              stroke="currentColor"
+              className="text-slate-400 dark:text-slate-500"
+            />
+            <YAxis
+              tick={{ fontSize: 10 }}
+              stroke="currentColor"
+              className="text-slate-400 dark:text-slate-500"
+              tickFormatter={(v: number) => formatTrafficRate(Math.abs(v))}
+            />
+            <Tooltip
+              labelFormatter={formatTooltipTime}
+              formatter={(v: number, name: string) => [formatTrafficRate(Math.abs(v)), name === "in" ? t("nodes.trafficIn") : t("nodes.trafficOut")]}
+              contentStyle={{
+                backgroundColor: "var(--tooltip-bg, #fff)",
+                border: "1px solid var(--tooltip-border, #e2e8f0)",
+                borderRadius: "8px",
+                fontSize: "12px",
+              }}
+            />
+            {downtimeZones.map((g, i) => (
+              <ReferenceArea key={`down-${i}`} x1={g.x1} x2={g.x2} fill="#94a3b8" fillOpacity={0.15} strokeOpacity={0} />
+            ))}
+            <ReferenceLine y={0} stroke="currentColor" className="text-slate-300 dark:text-slate-600" strokeWidth={1} />
+            <Area type="monotone" dataKey="in" stroke="#06b6d4" strokeWidth={2} fill="url(#gradient-traffic-in)" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+            <Area type="monotone" dataKey="out" stroke="#f97316" strokeWidth={2} fill="url(#gradient-traffic-out)" dot={false} activeDot={{ r: 3, strokeWidth: 0 }} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function PingChart({ latencyPoints, statusPoints, dateLocale, t, downtimeZones = [] }: { latencyPoints: SnmpDataPoint[]; statusPoints: SnmpDataPoint[]; dateLocale: string; t: (k: string) => string; downtimeZones?: { x1: number; x2: number }[] }) {
+  const { ResponsiveContainer, ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ReferenceArea } = require("recharts");
+
+  const latencyData = latencyPoints.filter((p) => p.value != null).map((p) => ({
+    time: new Date(p.time).getTime(),
+    latency: p.value as number,
+  }));
+
+  const statusMap = new Map(statusPoints.map((p) => [new Date(p.time).getTime(), p.value]));
+
+  const data = latencyData.map((d) => ({
+    ...d,
+    status: statusMap.get(d.time) ?? 1,
+  }));
+
+  statusPoints.forEach((sp) => {
+    const ts = new Date(sp.time).getTime();
+    if (sp.value === 0 && !latencyData.some((d) => d.time === ts)) {
+      data.push({ time: ts, latency: 0, status: 0 });
+    }
+  });
+  data.sort((a, b) => a.time - b.time);
+
+  if (data.length < 2) {
+    return (
+      <div className="flex items-center justify-center h-48 text-sm text-slate-400 dark:text-slate-500">
+        {t("nodes.monitoringNoPoints")}
+      </div>
+    );
+  }
+
+  const reachable = data.filter((d) => d.status === 1);
+  const avgLatency = reachable.length > 0 ? reachable.reduce((s, d) => s + d.latency, 0) / reachable.length : 0;
+  const lastLatency = data.length > 0 ? data[data.length - 1].latency : 0;
+  const lastStatus = data.length > 0 ? data[data.length - 1].status : 0;
+  const lossCount = data.filter((d) => d.status === 0).length;
+  const lossPercent = data.length > 0 ? ((lossCount / data.length) * 100).toFixed(1) : "0";
+
+  const formatTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit" });
+  const formatTooltipTime = (ts: number) => new Date(ts).toLocaleTimeString(dateLocale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+  return (
+    <div>
+      <div className="flex items-center gap-6 mb-2 px-1">
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`inline-block w-2 h-2 rounded-full ${lastStatus === 1 ? "bg-emerald-500" : "bg-red-500"}`} />
+          <span className="text-slate-500 dark:text-slate-400">{t("nodes.pingLatency")}</span>
+          <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">{lastStatus === 1 ? `${lastLatency.toFixed(1)} ms` : "timeout"}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500 dark:text-slate-400">{t("nodes.pingAvg")}</span>
+          <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">{avgLatency.toFixed(1)} ms</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-slate-500 dark:text-slate-400">{t("nodes.pingLoss")}</span>
+          <span className={`font-mono font-semibold ${lossCount > 0 ? "text-red-500" : "text-emerald-600 dark:text-emerald-400"}`}>{lossPercent}%</span>
+        </div>
+      </div>
+      {/* Status bar */}
+      <div className="flex gap-px mb-1 rounded overflow-hidden h-2">
+        {data.map((d, i) => (
+          <div key={i} className={`flex-1 ${d.status === 1 ? "bg-emerald-400 dark:bg-emerald-500" : "bg-red-400 dark:bg-red-500"}`} title={new Date(d.time).toLocaleTimeString(dateLocale)} />
+        ))}
+      </div>
+      {/* Latency chart */}
+      <div className="h-48">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 5, right: 55, left: -10, bottom: 0 }}>
+            <defs>
+              <linearGradient id="gradient-ping" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="text-slate-100 dark:text-slate-800" />
+            <XAxis
+              dataKey="time"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={formatTime}
+              tick={{ fontSize: 11 }}
+              stroke="currentColor"
+              className="text-slate-400 dark:text-slate-500"
+            />
+            <YAxis
+              tick={{ fontSize: 11 }}
+              stroke="currentColor"
+              className="text-slate-400 dark:text-slate-500"
+              tickFormatter={(v: number) => `${v.toFixed(0)} ms`}
+              domain={[0, "auto"]}
+            />
+            <Tooltip
+              labelFormatter={formatTooltipTime}
+              formatter={(v: number) => [`${v.toFixed(2)} ms`, t("nodes.pingLatency")]}
+              contentStyle={{
+                backgroundColor: "var(--tooltip-bg, #fff)",
+                border: "1px solid var(--tooltip-border, #e2e8f0)",
+                borderRadius: "8px",
+                fontSize: "12px",
+              }}
+            />
+            {downtimeZones.map((g, i) => (
+              <ReferenceArea key={`down-${i}`} x1={g.x1} x2={g.x2} fill="#94a3b8" fillOpacity={0.15} strokeOpacity={0} />
+            ))}
+            <ReferenceLine
+              y={avgLatency}
+              stroke="#22c55e"
+              strokeDasharray="6 3"
+              strokeWidth={1.5}
+              label={{ value: `avg ${avgLatency.toFixed(1)} ms`, position: "right", fill: "#22c55e", fontSize: 11 }}
+            />
+            <Area
+              type="monotone"
+              dataKey="latency"
+              stroke="#6366f1"
+              strokeWidth={2}
+              fill="url(#gradient-ping)"
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 }

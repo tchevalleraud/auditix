@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import FolderPicker from "@/components/FolderPicker";
 import {
   Loader2,
   Terminal,
@@ -18,6 +19,8 @@ import {
   ChevronDown,
   ToggleLeft,
   ToggleRight,
+  Download,
+  Upload,
 } from "lucide-react";
 
 interface Command {
@@ -70,6 +73,14 @@ export default function CollectionCommandsPage() {
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "cmd" | "folder"; id: number } | null>(null);
+
+  // Export/Import
+  const [exportingId, setExportingId] = useState<number | null>(null);
+  const [importTargetId, setImportTargetId] = useState<number | null>(null);
+  const [importPreview, setImportPreview] = useState<{ folderName: string; commandCount: number; subfolderCount: number } | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!current) return;
@@ -170,6 +181,66 @@ export default function CollectionCommandsPage() {
     await load();
   };
 
+  const handleExportFolder = async (folderId: number, folderName: string) => {
+    setExportingId(folderId);
+    try {
+      const res = await fetch(`/api/collection-folders/${folderId}/export`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `commands-${folderName}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); } finally { setExportingId(null); }
+  };
+
+  const handleImportFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (importInputRef.current) importInputRef.current.value = "";
+    setImportFile(file);
+    setImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/collection-folders/preview-import`, { method: "POST", body: formData });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Preview failed"); }
+      setImportPreview(await res.json());
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Preview failed");
+      setImportFile(null);
+      setImportTargetId(null);
+    } finally { setImportLoading(false); }
+  };
+
+  const handleConfirmImportFolder = async () => {
+    if (!importFile || !current) return;
+    setImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const parentParam = importTargetId ? `&parentId=${importTargetId}` : "";
+      const res = await fetch(`/api/collection-folders/import?context=${current.id}${parentParam}`, { method: "POST", body: formData });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Import failed"); }
+      await load();
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : "Import failed"); }
+    finally {
+      setImportLoading(false);
+      setImportFile(null);
+      setImportPreview(null);
+      setImportTargetId(null);
+    }
+  };
+
+  const closeImportModal = () => { setImportFile(null); setImportPreview(null); setImportTargetId(null); };
+
   if (loading) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-slate-900 dark:text-white" /></div>;
   }
@@ -184,6 +255,10 @@ export default function CollectionCommandsPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("collection_commands.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => { setImportTargetId(null); importInputRef.current?.click(); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <Upload className="h-4 w-4" />
+            {t("collection_commands.importFolder")}
+          </button>
           <button onClick={() => openCreateFolder(null)} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
             <FolderPlus className="h-4 w-4" />
             {t("collection_commands.newFolder")}
@@ -211,6 +286,8 @@ export default function CollectionCommandsPage() {
                 openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
                 deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
                 deleteCmd={deleteCmd} deleteFolder={deleteFolder}
+                exportingId={exportingId} onExport={handleExportFolder}
+                onImport={(parentId) => { setImportTargetId(parentId); importInputRef.current?.click(); }}
               />
             ))}
             {/* Root commands after */}
@@ -240,6 +317,9 @@ export default function CollectionCommandsPage() {
             <Field label={t("collection_commands.commandsLabel")} help={t("collection_commands.commandsHelp")}>
               <textarea value={cmdCommands} onChange={(e) => setCmdCommands(e.target.value)} rows={5} placeholder={t("collection_commands.commandsPlaceholder")} className={`${inputCls} font-mono resize-none`} />
             </Field>
+            <Field label={t("collection_commands.folder")}>
+              <FolderPicker folders={tree.folders} value={cmdFolderId} onChange={setCmdFolderId} rootLabel={t("collection_commands.noFolder")} />
+            </Field>
             <label className="flex items-center gap-3 cursor-pointer">
               <button type="button" onClick={() => setCmdEnabled(!cmdEnabled)}>
                 {cmdEnabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
@@ -258,6 +338,39 @@ export default function CollectionCommandsPage() {
             <input type="text" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder={t("collection_commands.folderNamePlaceholder")} className={inputCls} />
           </Field>
           <ModalFooter t={t} saving={saving} disabled={!folderName.trim()} onCancel={() => setFolderModal(false)} onSave={saveFolder} />
+        </Modal>
+      )}
+
+      {/* Hidden file input for import */}
+      <input ref={importInputRef} type="file" accept=".json" onChange={handleImportFileSelect} className="hidden" />
+
+      {/* Import preview modal */}
+      {importFile && (importPreview || importLoading) && (
+        <Modal title={t("collection_commands.importPreviewTitle")} onClose={closeImportModal}>
+          {importLoading && !importPreview ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+            </div>
+          ) : importPreview && (
+            <>
+              <div className="space-y-3">
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+                  <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{importPreview.folderName}</p>
+                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span>{importPreview.commandCount} {t("collection_commands.importCountCommands")}</span>
+                    {importPreview.subfolderCount > 0 && <span>{importPreview.subfolderCount} {t("collection_commands.importCountFolders")}</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800 mt-4">
+                <button onClick={closeImportModal} className="rounded-lg px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">{t("common.cancel")}</button>
+                <button onClick={handleConfirmImportFolder} disabled={importLoading} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                  {importLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {t("collection_commands.importConfirm")}
+                </button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </div>
@@ -309,7 +422,7 @@ function countCommands(folder: Folder): number {
 }
 
 // --- Folder node ---
-function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEditCmd, toggleCmd, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteCmd, deleteFolder }: {
+function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEditCmd, toggleCmd, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteCmd, deleteFolder, exportingId, onExport, onImport }: {
   folder: Folder; depth: number; t: (k: string) => string;
   expanded: Set<number>; toggle: (id: number) => void;
   openCreateCmd: (folderId: number | null) => void;
@@ -321,6 +434,9 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
   setDeleteConfirm: (v: { type: "cmd" | "folder"; id: number } | null) => void;
   deleteCmd: (id: number) => void;
   deleteFolder: (id: number) => void;
+  exportingId: number | null;
+  onExport: (id: number, name: string) => void;
+  onImport: (parentId: number) => void;
 }) {
   const isExpanded = expanded.has(folder.id);
   const pl = depth === 0 ? "pl-4" : depth === 1 ? "pl-10" : depth === 2 ? "pl-16" : "pl-22";
@@ -350,6 +466,12 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
           </button>
           {!folder.autoGenerated && (
             <>
+              <button onClick={() => onExport(folder.id, folder.name)} disabled={exportingId === folder.id} className="rounded-lg p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors disabled:opacity-50" title={t("collection_commands.exportFolder")}>
+                {exportingId === folder.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              </button>
+              <button onClick={() => onImport(folder.id)} className="rounded-lg p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title={t("collection_commands.importFolder")}>
+                <Upload className="h-3.5 w-3.5" />
+              </button>
               <button onClick={() => openEditFolder(folder)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors">
                 <Pencil className="h-3.5 w-3.5" />
               </button>
@@ -377,6 +499,7 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
               openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
               deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
               deleteCmd={deleteCmd} deleteFolder={deleteFolder}
+              exportingId={exportingId} onExport={onExport} onImport={onImport}
             />
           ))}
           {folder.commands.map((cmd) => (

@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Activity, Cpu, MemoryStick, HardDrive, Thermometer, Clock, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 
 interface ManufacturerOption {
   id: number;
@@ -33,13 +33,24 @@ interface CollectionCmd {
   association: "auto" | "manual";
 }
 
-interface AvailableCmd {
+interface AvailableItem {
   id: number;
   name: string;
   description: string | null;
-  commands: string;
   enabled: boolean;
-  folderName: string | null;
+}
+
+interface AvailableFolder {
+  id: number;
+  name: string;
+  type: string;
+  children: AvailableFolder[];
+  commands?: AvailableItem[];
+  rules?: AvailableItem[];
+}
+
+interface AvailableTree {
+  folders: AvailableFolder[];
 }
 
 interface CollectionRuleItem {
@@ -51,15 +62,13 @@ interface CollectionRuleItem {
   association: "auto" | "manual";
 }
 
-interface AvailableRule {
-  id: number;
-  name: string;
-  description: string | null;
+interface MonitoringOidItem {
+  category: string;
+  oid: string;
   enabled: boolean;
-  folderName: string | null;
 }
 
-type Tab = "edit" | "script" | "collection" | "rules";
+type Tab = "edit" | "script" | "collection" | "rules" | "monitoring";
 
 export default function ModelDetailPage() {
   const router = useRouter();
@@ -95,21 +104,38 @@ export default function ModelDetailPage() {
 
   // Associate modal state
   const [showAssociateModal, setShowAssociateModal] = useState(false);
-  const [availableCmds, setAvailableCmds] = useState<AvailableCmd[]>([]);
+  const [availableCmdTree, setAvailableCmdTree] = useState<AvailableTree>({ folders: [] });
   const [availableLoading, setAvailableLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [associating, setAssociating] = useState(false);
+  const [expandedCmdFolders, setExpandedCmdFolders] = useState<Set<number>>(new Set());
+
+  // Monitoring OID state
+  const [monitoringOids, setMonitoringOids] = useState<MonitoringOidItem[]>([]);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [savingMonitoring, setSavingMonitoring] = useState(false);
+  const [savedMonitoring, setSavedMonitoring] = useState(false);
+
+  const MONITORING_CATEGORIES = [
+    { key: "cpu", icon: <Cpu className="h-5 w-5" />, color: "text-blue-500" },
+    { key: "memory", icon: <MemoryStick className="h-5 w-5" />, color: "text-violet-500" },
+    { key: "disk", icon: <HardDrive className="h-5 w-5" />, color: "text-amber-500" },
+    { key: "temperature", icon: <Thermometer className="h-5 w-5" />, color: "text-red-500" },
+    { key: "interface_in", icon: <ArrowDownToLine className="h-5 w-5" />, color: "text-cyan-500" },
+    { key: "interface_out", icon: <ArrowUpFromLine className="h-5 w-5" />, color: "text-orange-500" },
+  ];
 
   // Collection rules state
   const [collectionRules, setCollectionRules] = useState<CollectionRuleItem[]>([]);
   const [rulesLoading, setRulesLoading] = useState(false);
   const [showAssociateRuleModal, setShowAssociateRuleModal] = useState(false);
-  const [availableRules, setAvailableRules] = useState<AvailableRule[]>([]);
+  const [availableRuleTree, setAvailableRuleTree] = useState<AvailableTree>({ folders: [] });
   const [availableRulesLoading, setAvailableRulesLoading] = useState(false);
   const [ruleSearchQuery, setRuleSearchQuery] = useState("");
   const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const [associatingRules, setAssociatingRules] = useState(false);
+  const [expandedRuleFolders, setExpandedRuleFolders] = useState<Set<number>>(new Set());
 
   const dateLocale =
     locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
@@ -148,6 +174,24 @@ export default function ModelDetailPage() {
     setCollectionLoading(false);
   }, [modelId]);
 
+  const loadMonitoringOids = useCallback(async () => {
+    if (!modelId) return;
+    setMonitoringLoading(true);
+    const res = await fetch(`/api/monitoring-oids/by-model/${modelId}`);
+    if (res.ok) {
+      const data: { category: string; oid: string; enabled: boolean }[] = await res.json();
+      // Merge with all categories (fill missing ones with defaults)
+      const merged = MONITORING_CATEGORIES.map((cat) => {
+        const found = data.find((d) => d.category === cat.key);
+        return found ? { category: cat.key, oid: found.oid, enabled: found.enabled } : { category: cat.key, oid: "", enabled: false };
+      });
+      setMonitoringOids(merged);
+    } else {
+      setMonitoringOids(MONITORING_CATEGORIES.map((cat) => ({ category: cat.key, oid: "", enabled: false })));
+    }
+    setMonitoringLoading(false);
+  }, [modelId]);
+
   const loadCollectionRules = useCallback(async () => {
     if (!modelId) return;
     setRulesLoading(true);
@@ -159,7 +203,8 @@ export default function ModelDetailPage() {
   useEffect(() => {
     if (activeTab === "collection") loadCollectionCmds();
     if (activeTab === "rules") loadCollectionRules();
-  }, [activeTab, loadCollectionCmds, loadCollectionRules]);
+    if (activeTab === "monitoring") loadMonitoringOids();
+  }, [activeTab, loadCollectionCmds, loadCollectionRules, loadMonitoringOids]);
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -218,13 +263,45 @@ export default function ModelDetailPage() {
     }
   };
 
+  const handleSaveMonitoring = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingMonitoring(true);
+    setSavedMonitoring(false);
+    try {
+      const res = await fetch(`/api/monitoring-oids/by-model/${modelId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: monitoringOids.filter((o) => o.oid.trim() !== "") }),
+      });
+      if (res.ok) {
+        setSavedMonitoring(true);
+        setTimeout(() => setSavedMonitoring(false), 2000);
+      }
+    } finally {
+      setSavingMonitoring(false);
+    }
+  };
+
+  const updateMonitoringOid = (category: string, field: "oid" | "enabled", value: string | boolean) => {
+    setMonitoringOids((prev) => prev.map((o) => o.category === category ? { ...o, [field]: value } : o));
+  };
+
   const openAssociateModal = async () => {
     setShowAssociateModal(true);
     setSearchQuery("");
     setSelectedIds([]);
+    setExpandedCmdFolders(new Set());
     setAvailableLoading(true);
     const res = await fetch(`/api/collection-commands/available-for-model/${modelId}`);
-    if (res.ok) setAvailableCmds(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      setAvailableCmdTree(data);
+      // Auto-expand all folders
+      const allIds = new Set<number>();
+      const walk = (folders: AvailableFolder[]) => { for (const f of folders) { allIds.add(f.id); walk(f.children); } };
+      walk(data.folders);
+      setExpandedCmdFolders(allIds);
+    }
     setAvailableLoading(false);
   };
 
@@ -254,20 +331,28 @@ export default function ModelDetailPage() {
     setSelectedIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
-  const filteredAvailable = availableCmds.filter((c) => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.toLowerCase();
-    return c.name.toLowerCase().includes(q) || (c.description?.toLowerCase().includes(q)) || (c.folderName?.toLowerCase().includes(q));
-  });
+  const matchesSearch = (item: AvailableItem, query: string) => {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    return item.name.toLowerCase().includes(q) || (item.description?.toLowerCase().includes(q) ?? false);
+  };
 
   // Rule association functions
   const openAssociateRuleModal = async () => {
     setShowAssociateRuleModal(true);
     setRuleSearchQuery("");
     setSelectedRuleIds([]);
+    setExpandedRuleFolders(new Set());
     setAvailableRulesLoading(true);
     const res = await fetch(`/api/collection-rules/available-for-model/${modelId}`);
-    if (res.ok) setAvailableRules(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      setAvailableRuleTree(data);
+      const allIds = new Set<number>();
+      const walk = (folders: AvailableFolder[]) => { for (const f of folders) { allIds.add(f.id); walk(f.children); } };
+      walk(data.folders);
+      setExpandedRuleFolders(allIds);
+    }
     setAvailableRulesLoading(false);
   };
 
@@ -297,11 +382,8 @@ export default function ModelDetailPage() {
     setSelectedRuleIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
   };
 
-  const filteredAvailableRules = availableRules.filter((r) => {
-    if (!ruleSearchQuery.trim()) return true;
-    const q = ruleSearchQuery.toLowerCase();
-    return r.name.toLowerCase().includes(q) || (r.description?.toLowerCase().includes(q)) || (r.folderName?.toLowerCase().includes(q));
-  });
+  const totalAvailableCmds = countTreeItems(availableCmdTree.folders, "commands");
+  const totalAvailableRules = countTreeItems(availableRuleTree.folders, "rules");
 
   if (fetchLoading) {
     return (
@@ -320,6 +402,7 @@ export default function ModelDetailPage() {
     { key: "script", label: t("models.tabScript"), icon: <TerminalSquare className="h-4 w-4" /> },
     { key: "collection", label: t("models.tabCollection"), icon: <Terminal className="h-4 w-4" /> },
     { key: "rules", label: t("models.tabRules"), icon: <FileSearch className="h-4 w-4" /> },
+    { key: "monitoring", label: t("models.tabMonitoring"), icon: <Activity className="h-4 w-4" /> },
   ];
 
   const autoCmds = collectionCmds.filter((c) => c.association === "auto");
@@ -551,106 +634,28 @@ export default function ModelDetailPage() {
 
           {/* Associate command modal */}
           {showAssociateModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[80vh] flex flex-col">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("models.associateCommand")}</h3>
-                  <button onClick={() => setShowAssociateModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                    <X className="h-5 w-5 text-slate-400" />
-                  </button>
-                </div>
-
-                <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder={t("models.searchCommands")}
-                      className={`${inputCls} pl-9`}
-                      autoFocus
-                    />
-                  </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto">
-                  {availableLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
-                    </div>
-                  ) : filteredAvailable.length === 0 ? (
-                    <div className="p-8 text-center">
-                      <p className="text-sm text-slate-400 dark:text-slate-500">{t("models.noAvailableCommands")}</p>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {filteredAvailable.map((cmd) => {
-                        const isSelected = selectedIds.includes(cmd.id);
-                        return (
-                          <button
-                            key={cmd.id}
-                            onClick={() => toggleSelected(cmd.id)}
-                            className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-colors ${
-                              isSelected ? "bg-slate-100 dark:bg-slate-800" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                            }`}
-                          >
-                            <div className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                              isSelected
-                                ? "bg-slate-900 dark:bg-white border-slate-900 dark:border-white"
-                                : "border-slate-300 dark:border-slate-600"
-                            }`}>
-                              {isSelected && (
-                                <svg className="h-3 w-3 text-white dark:text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{cmd.name}</span>
-                                {cmd.folderName && (
-                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{cmd.folderName}</span>
-                                )}
-                                {!cmd.enabled && (
-                                  <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{t("collection_commands.disabled")}</span>
-                                )}
-                              </div>
-                              {cmd.description && (
-                                <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{cmd.description}</p>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-800">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">
-                    {selectedIds.length > 0 ? t("models.selectedCount").replace("{count}", String(selectedIds.length)) : ""}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowAssociateModal(false)}
-                      className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      onClick={handleAssociate}
-                      disabled={selectedIds.length === 0 || associating}
-                      className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-                    >
-                      {associating && <Loader2 className="h-4 w-4 animate-spin" />}
-                      <LinkIcon className="h-4 w-4" />
-                      {t("models.associate")}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <AssociateTreeModal
+              title={t("models.associateCommand")}
+              searchPlaceholder={t("models.searchCommands")}
+              emptyLabel={t("models.noAvailableCommands")}
+              disabledLabel={t("collection_commands.disabled")}
+              loading={availableLoading}
+              tree={availableCmdTree}
+              itemsKey="commands"
+              searchQuery={searchQuery}
+              onSearchChange={setSearchQuery}
+              selectedIds={selectedIds}
+              onToggle={toggleSelected}
+              expandedFolders={expandedCmdFolders}
+              onToggleFolder={(id) => setExpandedCmdFolders((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; })}
+              matchesSearch={matchesSearch}
+              onClose={() => setShowAssociateModal(false)}
+              onConfirm={handleAssociate}
+              confirming={associating}
+              confirmLabel={t("models.associate")}
+              selectedLabel={t("models.selectedCount")}
+              cancelLabel={t("common.cancel")}
+            />
           )}
         </div>
       )}
@@ -711,106 +716,105 @@ export default function ModelDetailPage() {
 
           {/* Associate rule modal */}
           {showAssociateRuleModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[80vh] flex flex-col">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("models.associateRule")}</h3>
-                  <button onClick={() => setShowAssociateRuleModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                    <X className="h-5 w-5 text-slate-400" />
-                  </button>
-                </div>
 
-                <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
-                      value={ruleSearchQuery}
-                      onChange={(e) => setRuleSearchQuery(e.target.value)}
-                      placeholder={t("models.searchRules")}
-                      className={`${inputCls} pl-9`}
-                      autoFocus
-                    />
-                  </div>
-                </div>
+            <AssociateTreeModal
+              title={t("models.associateRule")}
+              searchPlaceholder={t("models.searchRules")}
+              emptyLabel={t("models.noAvailableRules")}
+              disabledLabel={t("collection_rules.disabled")}
+              loading={availableRulesLoading}
+              tree={availableRuleTree}
+              itemsKey="rules"
+              searchQuery={ruleSearchQuery}
+              onSearchChange={setRuleSearchQuery}
+              selectedIds={selectedRuleIds}
+              onToggle={toggleSelectedRule}
+              expandedFolders={expandedRuleFolders}
+              onToggleFolder={(id) => setExpandedRuleFolders((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; })}
+              matchesSearch={matchesSearch}
+              onClose={() => setShowAssociateRuleModal(false)}
+              onConfirm={handleAssociateRules}
+              confirming={associatingRules}
+              confirmLabel={t("models.associate")}
+              selectedLabel={t("models.selectedCount")}
+              cancelLabel={t("common.cancel")}
+            />
+          )}
+        </div>
+      )}
 
-                <div className="flex-1 overflow-y-auto">
-                  {availableRulesLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
-                    </div>
-                  ) : filteredAvailableRules.length === 0 ? (
-                    <div className="p-8 text-center">
-                      <p className="text-sm text-slate-400 dark:text-slate-500">{t("models.noAvailableRules")}</p>
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {filteredAvailableRules.map((rule) => {
-                        const isSelected = selectedRuleIds.includes(rule.id);
-                        return (
-                          <button
-                            key={rule.id}
-                            onClick={() => toggleSelectedRule(rule.id)}
-                            className={`w-full text-left px-6 py-3 flex items-center gap-3 transition-colors ${
-                              isSelected ? "bg-slate-100 dark:bg-slate-800" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"
-                            }`}
-                          >
-                            <div className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
-                              isSelected
-                                ? "bg-slate-900 dark:bg-white border-slate-900 dark:border-white"
-                                : "border-slate-300 dark:border-slate-600"
-                            }`}>
-                              {isSelected && (
-                                <svg className="h-3 w-3 text-white dark:text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{rule.name}</span>
-                                {rule.folderName && (
-                                  <span className="text-[10px] text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{rule.folderName}</span>
-                                )}
-                                {!rule.enabled && (
-                                  <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{t("collection_rules.disabled")}</span>
-                                )}
-                              </div>
-                              {rule.description && (
-                                <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{rule.description}</p>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-800">
-                  <span className="text-sm text-slate-500 dark:text-slate-400">
-                    {selectedRuleIds.length > 0 ? t("models.selectedCount").replace("{count}", String(selectedRuleIds.length)) : ""}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowAssociateRuleModal(false)}
-                      className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      {t("common.cancel")}
-                    </button>
-                    <button
-                      onClick={handleAssociateRules}
-                      disabled={selectedRuleIds.length === 0 || associatingRules}
-                      className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-                    >
-                      {associatingRules && <Loader2 className="h-4 w-4 animate-spin" />}
-                      <LinkIcon className="h-4 w-4" />
-                      {t("models.associate")}
-                    </button>
-                  </div>
-                </div>
-              </div>
+      {activeTab === "monitoring" && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          {monitoringLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
             </div>
+          ) : (
+            <form onSubmit={handleSaveMonitoring} className="p-6 space-y-4">
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">{t("models.monitoringSubtitle")}</p>
+
+              <div className="space-y-3">
+                {MONITORING_CATEGORIES.map((cat) => {
+                  const item = monitoringOids.find((o) => o.category === cat.key);
+                  if (!item) return null;
+                  return (
+                    <div
+                      key={cat.key}
+                      className={`flex items-center gap-4 rounded-lg border px-4 py-3 transition-colors ${
+                        item.enabled
+                          ? "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+                          : "border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50"
+                      }`}
+                    >
+                      <div className={`shrink-0 ${item.enabled ? cat.color : "text-slate-300 dark:text-slate-600"}`}>
+                        {cat.icon}
+                      </div>
+                      <div className="shrink-0 w-36">
+                        <span className={`text-sm font-medium ${item.enabled ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>
+                          {t(`models.monitoringCat_${cat.key}`)}
+                        </span>
+                      </div>
+                      <div className="flex-1">
+                        <input
+                          type="text"
+                          value={item.oid}
+                          onChange={(e) => updateMonitoringOid(cat.key, "oid", e.target.value)}
+                          placeholder={t("models.monitoringOidPlaceholder")}
+                          className={`w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors ${
+                            !item.enabled ? "opacity-50" : ""
+                          }`}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => updateMonitoringOid(cat.key, "enabled", !item.enabled)}
+                        className="shrink-0"
+                      >
+                        {item.enabled ? (
+                          <ToggleRight className="h-6 w-6 text-emerald-500" />
+                        ) : (
+                          <ToggleLeft className="h-6 w-6 text-slate-300 dark:text-slate-600" />
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="submit"
+                  disabled={savingMonitoring}
+                  className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                >
+                  {savingMonitoring && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("common.save")}
+                </button>
+                {savedMonitoring && (
+                  <span className="text-sm text-green-600 dark:text-green-400">{t("models.saved")}</span>
+                )}
+              </div>
+            </form>
           )}
         </div>
       )}
@@ -912,5 +916,140 @@ function CmdRow({ cmd, t, onDissociate }: { cmd: CollectionCmd; t: (k: string) =
         </button>
       )}
     </div>
+  );
+}
+
+function countTreeItems(folders: AvailableFolder[], key: "commands" | "rules"): number {
+  let count = 0;
+  for (const f of folders) {
+    count += (key === "commands" ? f.commands?.length : f.rules?.length) ?? 0;
+    count += countTreeItems(f.children, key);
+  }
+  return count;
+}
+
+function AssociateTreeModal({
+  title, searchPlaceholder, emptyLabel, disabledLabel, loading, tree, itemsKey,
+  searchQuery, onSearchChange, selectedIds, onToggle, expandedFolders, onToggleFolder,
+  matchesSearch, onClose, onConfirm, confirming, confirmLabel, selectedLabel, cancelLabel,
+}: {
+  title: string; searchPlaceholder: string; emptyLabel: string; disabledLabel: string;
+  loading: boolean; tree: AvailableTree; itemsKey: "commands" | "rules";
+  searchQuery: string; onSearchChange: (v: string) => void;
+  selectedIds: number[]; onToggle: (id: number) => void;
+  expandedFolders: Set<number>; onToggleFolder: (id: number) => void;
+  matchesSearch: (item: AvailableItem, query: string) => boolean;
+  onClose: () => void; onConfirm: () => void; confirming: boolean;
+  confirmLabel: string; selectedLabel: string; cancelLabel: string;
+}) {
+  const totalItems = countTreeItems(tree.folders, itemsKey);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{title}</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+            <X className="h-5 w-5 text-slate-400" />
+          </button>
+        </div>
+        <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input type="text" value={searchQuery} onChange={(e) => onSearchChange(e.target.value)} placeholder={searchPlaceholder} autoFocus
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-2.5 pl-9 pr-3.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors" />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" /></div>
+          ) : totalItems === 0 ? (
+            <div className="p-8 text-center"><p className="text-sm text-slate-400 dark:text-slate-500">{emptyLabel}</p></div>
+          ) : (
+            <div className="py-1">
+              {tree.folders.map((folder) => (
+                <AssocFolderNode key={folder.id} folder={folder} depth={0} itemsKey={itemsKey} selectedIds={selectedIds} onToggle={onToggle}
+                  expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} matchesSearch={matchesSearch} searchQuery={searchQuery} disabledLabel={disabledLabel} />
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+          <span className="text-sm text-slate-500 dark:text-slate-400">
+            {selectedIds.length > 0 ? selectedLabel.replace("{count}", String(selectedIds.length)) : ""}
+          </span>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">{cancelLabel}</button>
+            <button onClick={onConfirm} disabled={selectedIds.length === 0 || confirming}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+              {confirming && <Loader2 className="h-4 w-4 animate-spin" />}
+              <LinkIcon className="h-4 w-4" />
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssocFolderNode({ folder, depth, itemsKey, selectedIds, onToggle, expandedFolders, onToggleFolder, matchesSearch, searchQuery, disabledLabel }: {
+  folder: AvailableFolder; depth: number; itemsKey: "commands" | "rules"; selectedIds: number[]; onToggle: (id: number) => void;
+  expandedFolders: Set<number>; onToggleFolder: (id: number) => void; matchesSearch: (item: AvailableItem, query: string) => boolean; searchQuery: string; disabledLabel: string;
+}) {
+  const isExpanded = expandedFolders.has(folder.id);
+  const items: AvailableItem[] = (itemsKey === "commands" ? folder.commands : folder.rules) ?? [];
+  const filteredItems = items.filter((item) => matchesSearch(item, searchQuery));
+  const hasChildren = folder.children.length > 0 || items.length > 0;
+  const folderColor = folder.type === "manufacturer" ? "text-amber-500" : folder.type === "model" ? "text-blue-500" : "text-slate-400 dark:text-slate-500";
+
+  return (
+    <>
+      <button onClick={() => onToggleFolder(folder.id)}
+        className="w-full flex items-center gap-1.5 py-1.5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+        style={{ paddingLeft: `${12 + depth * 20}px`, paddingRight: "16px" }}>
+        {hasChildren ? (
+          <span className="shrink-0 p-0.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700">
+            {isExpanded ? <ChevronDown className="h-3.5 w-3.5 text-slate-400" /> : <ChevronRight className="h-3.5 w-3.5 text-slate-400" />}
+          </span>
+        ) : (
+          <span className="w-[18px] shrink-0" />
+        )}
+        {isExpanded ? <FolderOpen className={`h-4 w-4 ${folderColor} shrink-0`} /> : <FolderClosed className={`h-4 w-4 ${folderColor} shrink-0`} />}
+        <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{folder.name}</span>
+        <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-200 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-700 ml-auto">{items.length}</span>
+      </button>
+      {isExpanded && (
+        <>
+          {folder.children.map((child) => (
+            <AssocFolderNode key={child.id} folder={child} depth={depth + 1} itemsKey={itemsKey} selectedIds={selectedIds} onToggle={onToggle}
+              expandedFolders={expandedFolders} onToggleFolder={onToggleFolder} matchesSearch={matchesSearch} searchQuery={searchQuery} disabledLabel={disabledLabel} />
+          ))}
+          {filteredItems.map((item) => (
+            <AssocItemRow key={item.id} item={item} depth={depth + 1} isSelected={selectedIds.includes(item.id)} onToggle={() => onToggle(item.id)} disabledLabel={disabledLabel} />
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+function AssocItemRow({ item, depth, isSelected, onToggle, disabledLabel }: { item: AvailableItem; depth: number; isSelected: boolean; onToggle: () => void; disabledLabel: string }) {
+  return (
+    <button onClick={onToggle}
+      className={`w-full text-left flex items-center gap-3 py-2 transition-colors ${isSelected ? "bg-slate-100 dark:bg-slate-800" : "hover:bg-slate-50 dark:hover:bg-slate-800/50"}`}
+      style={{ paddingLeft: `${16 + depth * 20 + 24}px`, paddingRight: "16px" }}>
+      <div className={`h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${isSelected ? "bg-slate-900 dark:bg-white border-slate-900 dark:border-white" : "border-slate-300 dark:border-slate-600"}`}>
+        {isSelected && <svg className="h-2.5 w-2.5 text-white dark:text-slate-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+      </div>
+      <FileText className={`h-3.5 w-3.5 shrink-0 ${item.enabled ? "text-emerald-500" : "text-slate-300 dark:text-slate-600"}`} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`text-sm font-medium ${item.enabled ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}`}>{item.name}</span>
+          {!item.enabled && <span className="text-[10px] text-slate-400 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5">{disabledLabel}</span>}
+        </div>
+        {item.description && <p className="text-xs text-slate-400 dark:text-slate-500 truncate">{item.description}</p>}
+      </div>
+    </button>
   );
 }

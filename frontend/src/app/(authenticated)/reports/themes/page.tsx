@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
@@ -13,6 +13,9 @@ import {
   Trash2,
   X,
   Star,
+  Download,
+  Upload,
+  AlertTriangle,
 } from "lucide-react";
 
 interface ThemeItem {
@@ -27,6 +30,18 @@ interface ThemeItem {
   createdAt: string;
 }
 
+interface ImportPreview {
+  theme: {
+    name: string;
+    description: string | null;
+    exists: boolean;
+    colors: { primary: string; secondary: string };
+    font: string;
+    fontSize: number;
+  };
+  exportedAt: string | null;
+}
+
 export default function ReportThemesPage() {
   const { t, locale } = useI18n();
   const { current } = useAppContext();
@@ -34,12 +49,21 @@ export default function ReportThemesPage() {
   const [themes, setThemes] = useState<ThemeItem[]>([]);
   const [search, setSearch] = useState("");
   const [fetchLoading, setFetchLoading] = useState(true);
+  const [exportingId, setExportingId] = useState<number | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const [modal, setModal] = useState(false);
   const [themeName, setThemeName] = useState("");
   const [themeDescription, setThemeDescription] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ThemeItem | null>(null);
+
+  // Import modal state
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<ImportPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const dateLocale =
     locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
@@ -95,6 +119,90 @@ export default function ReportThemesPage() {
     loadThemes();
   };
 
+  const handleExport = async (theme: ThemeItem) => {
+    setExportingId(theme.id);
+    try {
+      const res = await fetch(`/api/report-themes/${theme.id}/export`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `theme-${theme.name}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setExportingId(null);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !current) return;
+    if (importInputRef.current) importInputRef.current.value = "";
+
+    setImportFile(file);
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setImportPreview(null);
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/report-themes/preview-import?context=${current.id}`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Preview failed");
+      }
+      setImportPreview(await res.json());
+    } catch (e: unknown) {
+      setPreviewError(e instanceof Error ? e.message : "Preview failed");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importFile || !current) return;
+    setImporting(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const res = await fetch(`/api/report-themes/import?context=${current.id}`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Import failed");
+      }
+      await loadThemes();
+      closeImportModal();
+    } catch (e: unknown) {
+      setPreviewError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const closeImportModal = () => {
+    setImportFile(null);
+    setImportPreview(null);
+    setPreviewError(null);
+    setPreviewLoading(false);
+    setImporting(false);
+  };
+
   const inputClass =
     "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -114,13 +222,23 @@ export default function ReportThemesPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t("report_themes.title")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("report_themes.subtitle")}</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          {t("report_themes.newTheme")}
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={importInputRef} type="file" accept=".json" onChange={handleFileSelect} className="hidden" />
+          <button
+            onClick={() => importInputRef.current?.click()}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            {t("report_themes.import")}
+          </button>
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            {t("report_themes.newTheme")}
+          </button>
+        </div>
       </div>
 
       <div className="relative max-w-md">
@@ -201,6 +319,18 @@ export default function ReportThemesPage() {
                     </td>
                     <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleExport(theme)}
+                          disabled={exportingId === theme.id}
+                          className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+                          title={t("report_themes.export")}
+                        >
+                          {exportingId === theme.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+                          ) : (
+                            <Download className="h-4 w-4 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400" />
+                          )}
+                        </button>
                         <button
                           onClick={() => router.push(`/reports/themes/${theme.id}`)}
                           className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -297,6 +427,118 @@ export default function ReportThemesPage() {
                 {t("common.delete")}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import preview modal */}
+      {importFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <Upload className="h-5 w-5 text-slate-400" />
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.importPreviewTitle")}</h3>
+                  <p className="text-xs text-slate-400 dark:text-slate-500">{importFile.name}</p>
+                </div>
+              </div>
+              <button onClick={closeImportModal} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <X className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+              {previewLoading && (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+                </div>
+              )}
+
+              {previewError && (
+                <div className="rounded-lg bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 px-4 py-3">
+                  <p className="text-sm text-red-700 dark:text-red-400">{previewError}</p>
+                </div>
+              )}
+
+              {importPreview && !previewLoading && (
+                <>
+                  {/* Theme info */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                      <Palette className="h-3.5 w-3.5" />
+                      {t("report_themes.importSectionTheme")}
+                    </div>
+                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5">
+                          <div
+                            className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-700"
+                            style={{ backgroundColor: importPreview.theme.colors.primary }}
+                          />
+                          <div
+                            className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-700"
+                            style={{ backgroundColor: importPreview.theme.colors.secondary }}
+                          />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{importPreview.theme.name}</p>
+                          {importPreview.theme.description && (
+                            <p className="text-xs text-slate-400 mt-0.5">{importPreview.theme.description}</p>
+                          )}
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {importPreview.theme.font} &middot; {importPreview.theme.fontSize}pt
+                          </p>
+                        </div>
+                      </div>
+                      {importPreview.theme.exists ? (
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20">
+                          <AlertTriangle className="h-3 w-3" />
+                          {t("report_themes.importExists")}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20">
+                          <Plus className="h-3 w-3" />
+                          {t("report_themes.importNew")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Warning if theme already exists */}
+                  {importPreview.theme.exists && (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3">
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-700 dark:text-amber-400">{t("report_themes.importWarningDuplicate")}</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Footer */}
+            {importPreview && !previewLoading && (
+              <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+                <button
+                  onClick={closeImportModal}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  onClick={handleConfirmImport}
+                  disabled={importing}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 dark:bg-white text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors disabled:opacity-50"
+                >
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {t("report_themes.importConfirm")}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

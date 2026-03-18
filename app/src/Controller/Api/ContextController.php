@@ -23,6 +23,9 @@ class ContextController extends AbstractController
             'name' => $c->getName(),
             'description' => $c->getDescription(),
             'monitoringEnabled' => $c->isMonitoringEnabled(),
+            'snmpRetentionMinutes' => $c->getSnmpRetentionMinutes(),
+            'snmpPollIntervalSeconds' => $c->getSnmpPollIntervalSeconds(),
+            'icmpPollIntervalSeconds' => $c->getIcmpPollIntervalSeconds(),
             'isDefault' => $c->isDefault(),
             'userCount' => $c->getUsers()->count(),
             'createdAt' => $c->getCreatedAt()->format('c'),
@@ -69,6 +72,15 @@ class ContextController extends AbstractController
         $context->setName($data['name']);
         $context->setDescription($data['description'] ?? null);
         $context->setMonitoringEnabled($data['monitoringEnabled'] ?? false);
+        if (array_key_exists('snmpRetentionMinutes', $data)) {
+            $context->setSnmpRetentionMinutes(max(1, (int) $data['snmpRetentionMinutes']));
+        }
+        if (array_key_exists('snmpPollIntervalSeconds', $data)) {
+            $context->setSnmpPollIntervalSeconds(max(5, (int) $data['snmpPollIntervalSeconds']));
+        }
+        if (array_key_exists('icmpPollIntervalSeconds', $data)) {
+            $context->setIcmpPollIntervalSeconds(max(5, (int) $data['icmpPollIntervalSeconds']));
+        }
 
         $em->persist($context);
         $em->flush();
@@ -88,6 +100,15 @@ class ContextController extends AbstractController
         $context->setName($data['name']);
         $context->setDescription($data['description'] ?? null);
         $context->setMonitoringEnabled($data['monitoringEnabled'] ?? false);
+        if (array_key_exists('snmpRetentionMinutes', $data)) {
+            $context->setSnmpRetentionMinutes(max(1, (int) $data['snmpRetentionMinutes']));
+        }
+        if (array_key_exists('snmpPollIntervalSeconds', $data)) {
+            $context->setSnmpPollIntervalSeconds(max(5, (int) $data['snmpPollIntervalSeconds']));
+        }
+        if (array_key_exists('icmpPollIntervalSeconds', $data)) {
+            $context->setIcmpPollIntervalSeconds(max(5, (int) $data['icmpPollIntervalSeconds']));
+        }
 
         $em->flush();
 

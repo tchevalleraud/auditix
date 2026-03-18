@@ -21,7 +21,7 @@ interface ContextUser {
   avatar: string | null;
 }
 
-type TabKey = "general" | "monitoring" | "members";
+type TabKey = "general" | "monitoring" | "retention" | "members";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -40,6 +40,13 @@ export default function SettingsPage() {
   // Monitoring
   const [monitoringEnabled, setMonitoringEnabled] = useState(false);
 
+  // Data Retention & Poll intervals
+  const [snmpRetentionMinutes, setSnmpRetentionMinutes] = useState(120);
+  const [snmpPollIntervalSeconds, setSnmpPollIntervalSeconds] = useState(60);
+  const [icmpPollIntervalSeconds, setIcmpPollIntervalSeconds] = useState(60);
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionSaved, setRetentionSaved] = useState(false);
+
   // Members
   const [allUsers, setAllUsers] = useState<ContextUser[]>([]);
   const [memberIds, setMemberIds] = useState<Set<number>>(new Set());
@@ -53,6 +60,9 @@ export default function SettingsPage() {
       setName(current.name);
       setDescription(current.description ?? "");
       setMonitoringEnabled(current.monitoringEnabled);
+      setSnmpRetentionMinutes(current.snmpRetentionMinutes ?? 120);
+      setSnmpPollIntervalSeconds(current.snmpPollIntervalSeconds ?? 60);
+      setIcmpPollIntervalSeconds(current.icmpPollIntervalSeconds ?? 60);
       setIsDefault(current.isDefault);
     }
   }, [current]);
@@ -136,6 +146,27 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveRetention = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!current) return;
+    setRetentionSaving(true);
+    setRetentionSaved(false);
+    try {
+      const res = await fetch(`/api/contexts/${current.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description: description || null, monitoringEnabled, snmpRetentionMinutes, snmpPollIntervalSeconds, icmpPollIntervalSeconds }),
+      });
+      if (res.ok) {
+        await reload();
+        setRetentionSaved(true);
+        setTimeout(() => setRetentionSaved(false), 2000);
+      }
+    } finally {
+      setRetentionSaving(false);
+    }
+  };
+
   const filteredUsers = allUsers.filter(
     (u) =>
       u.username.toLowerCase().includes(memberSearch.toLowerCase()) ||
@@ -146,6 +177,7 @@ export default function SettingsPage() {
   const tabs: { key: TabKey; label: string }[] = [
     { key: "general", label: t("settings.tabGeneral") },
     { key: "monitoring", label: t("settings.tabMonitoring") },
+    { key: "retention", label: t("settings.tabRetention") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
   ];
 
@@ -251,6 +283,80 @@ export default function SettingsPage() {
               />
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Data Retention tab */}
+      {tab === "retention" && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          <form onSubmit={handleSaveRetention} className="p-6 space-y-5">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                {t("settings.retentionTitle")}
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {t("settings.retentionHelp")}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass}>{t("settings.icmpIntervalLabel")}</label>
+              <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.icmpIntervalHelp")}</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="5"
+                  max="3600"
+                  value={icmpPollIntervalSeconds}
+                  onChange={(e) => setIcmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
+                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                />
+                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass}>{t("settings.pollIntervalLabel")}</label>
+              <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.pollIntervalHelp")}</p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="5"
+                  max="3600"
+                  value={snmpPollIntervalSeconds}
+                  onChange={(e) => setSnmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
+                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                />
+                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass}>{t("settings.snmpRetentionLabel")}</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min="1"
+                  max="43200"
+                  value={snmpRetentionMinutes}
+                  onChange={(e) => setSnmpRetentionMinutes(Math.max(1, Number(e.target.value)))}
+                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                />
+                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.minutes")}</span>
+                <span className="text-xs text-slate-400 dark:text-slate-500">
+                  ({Math.floor(snmpRetentionMinutes / 60)}{t("settings.hours")}{snmpRetentionMinutes % 60 > 0 ? ` ${snmpRetentionMinutes % 60}min` : ""})
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              {retentionSaved && <span className="text-sm text-green-600 dark:text-green-400">{t("settings.saved")}</span>}
+              <button
+                type="submit"
+                disabled={retentionSaving}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {retentionSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("common.save")}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 

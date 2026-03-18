@@ -24,6 +24,9 @@ export default function EditContextPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [monitoringEnabled, setMonitoringEnabled] = useState(false);
+  const [snmpRetentionMinutes, setSnmpRetentionMinutes] = useState(120);
+  const [retentionSaving, setRetentionSaving] = useState(false);
+  const [retentionSaved, setRetentionSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
@@ -58,6 +61,7 @@ export default function EditContextPage() {
       setName(ctx.name);
       setDescription(ctx.description ?? "");
       setMonitoringEnabled(ctx.monitoringEnabled);
+      setSnmpRetentionMinutes(ctx.snmpRetentionMinutes ?? 120);
       setIsDefault(ctx.isDefault);
       setReady(true);
     }
@@ -118,6 +122,25 @@ export default function EditContextPage() {
       }
     } finally {
       setMembersSaving(false);
+    }
+  };
+
+  const saveRetention = async () => {
+    setRetentionSaving(true);
+    setRetentionSaved(false);
+    try {
+      const res = await fetch(`/api/contexts/${contextId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, description: description || null, monitoringEnabled, snmpRetentionMinutes }),
+      });
+      if (res.ok) {
+        setRetentionSaved(true);
+        await reload();
+        setTimeout(() => setRetentionSaved(false), 3000);
+      }
+    } finally {
+      setRetentionSaving(false);
     }
   };
 
@@ -234,6 +257,52 @@ export default function EditContextPage() {
               }`}
             />
           </button>
+        </div>
+      </div>
+
+      {/* Data Retention */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            {t("admin_contexts.dataRetention")}
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            {t("admin_contexts.dataRetentionDescription")}
+          </p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+              {t("admin_contexts.snmpRetention")}
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min="1"
+                max="43200"
+                value={snmpRetentionMinutes}
+                onChange={(e) => setSnmpRetentionMinutes(Math.max(1, Number(e.target.value)))}
+                className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+              />
+              <span className="text-sm text-slate-500 dark:text-slate-400">{t("admin_contexts.minutes")}</span>
+              <span className="text-xs text-slate-400 dark:text-slate-500">
+                ({Math.floor(snmpRetentionMinutes / 60)}{t("admin_contexts.hours")}{snmpRetentionMinutes % 60 > 0 ? ` ${snmpRetentionMinutes % 60}min` : ""})
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <button
+              onClick={saveRetention}
+              disabled={retentionSaving}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+            >
+              {retentionSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("common.save")}
+            </button>
+            {retentionSaved && (
+              <span className="text-sm text-emerald-600 dark:text-emerald-400">{t("models.saved")}</span>
+            )}
+          </div>
         </div>
       </div>
 

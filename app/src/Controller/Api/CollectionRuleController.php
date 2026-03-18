@@ -200,12 +200,7 @@ class CollectionRuleController extends AbstractController
     {
         $context = $model->getContext();
 
-        $all = $em->getRepository(CollectionRule::class)->findBy(
-            ['context' => $context],
-            ['name' => 'ASC']
-        );
-
-        $autoIds = [];
+        $excludeIds = array_map(fn($r) => $r->getId(), $model->getManualRules()->toArray());
 
         $modelFolder = $em->getRepository(CollectionRuleFolder::class)->findOneBy([
             'model' => $model,
@@ -219,27 +214,59 @@ class CollectionRuleController extends AbstractController
 
         if ($modelFolder) {
             foreach ($em->getRepository(CollectionRule::class)->findBy(['folder' => $modelFolder]) as $r) {
-                $autoIds[] = $r->getId();
+                $excludeIds[] = $r->getId();
             }
         }
         if ($manFolder) {
             foreach ($em->getRepository(CollectionRule::class)->findBy(['folder' => $manFolder]) as $r) {
-                $autoIds[] = $r->getId();
+                $excludeIds[] = $r->getId();
             }
         }
 
-        $manualIds = array_map(fn($r) => $r->getId(), $model->getManualRules()->toArray());
-        $excludeIds = array_merge($autoIds, $manualIds);
+        // Build tree of custom folders only, with available rules
+        $rootFolders = $em->getRepository(CollectionRuleFolder::class)->findBy(
+            ['context' => $context, 'parent' => null, 'type' => CollectionRuleFolder::TYPE_CUSTOM],
+            ['name' => 'ASC']
+        );
 
-        $available = array_filter($all, fn($r) => !in_array($r->getId(), $excludeIds, true));
+        $folders = [];
+        foreach ($rootFolders as $f) {
+            $node = $this->buildAvailableRuleTree($f, $em, $excludeIds);
+            if ($node) $folders[] = $node;
+        }
 
-        return $this->json(array_values(array_map(fn($r) => [
-            'id' => $r->getId(),
-            'name' => $r->getName(),
-            'description' => $r->getDescription(),
-            'enabled' => $r->isEnabled(),
-            'folderName' => $r->getFolder()?->getName(),
-        ], $available)));
+        return $this->json(['folders' => $folders]);
+    }
+
+    private function buildAvailableRuleTree(CollectionRuleFolder $folder, EntityManagerInterface $em, array $excludeIds): ?array
+    {
+        $rules = [];
+        foreach ($em->getRepository(CollectionRule::class)->findBy(['folder' => $folder], ['name' => 'ASC']) as $r) {
+            if (!in_array($r->getId(), $excludeIds, true)) {
+                $rules[] = [
+                    'id' => $r->getId(),
+                    'name' => $r->getName(),
+                    'description' => $r->getDescription(),
+                    'enabled' => $r->isEnabled(),
+                ];
+            }
+        }
+
+        $children = [];
+        foreach ($em->getRepository(CollectionRuleFolder::class)->findBy(['parent' => $folder, 'type' => CollectionRuleFolder::TYPE_CUSTOM], ['name' => 'ASC']) as $child) {
+            $node = $this->buildAvailableRuleTree($child, $em, $excludeIds);
+            if ($node) $children[] = $node;
+        }
+
+        if (empty($rules) && empty($children)) return null;
+
+        return [
+            'id' => $folder->getId(),
+            'name' => $folder->getName(),
+            'type' => $folder->getType(),
+            'children' => $children,
+            'rules' => $rules,
+        ];
     }
 
     #[Route('', methods: ['POST'])]
@@ -308,6 +335,10 @@ class CollectionRuleController extends AbstractController
         if (array_key_exists('tag', $data)) {
             $source = $data['source'] ?? $rule->getSource();
             $rule->setTag($source === CollectionRule::SOURCE_LOCAL ? ($data['tag'] ?: null) : null);
+        }
+        if (array_key_exists('folderId', $data)) {
+            $folder = $data['folderId'] ? $em->getRepository(CollectionRuleFolder::class)->find($data['folderId']) : null;
+            $rule->setFolder($folder);
         }
 
         $em->flush();

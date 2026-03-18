@@ -179,14 +179,8 @@ class CollectionCommandController extends AbstractController
     {
         $context = $model->getContext();
 
-        // All commands in this context
-        $all = $em->getRepository(CollectionCommand::class)->findBy(
-            ['context' => $context],
-            ['name' => 'ASC']
-        );
-
         // IDs already associated (auto or manual)
-        $autoIds = [];
+        $excludeIds = array_map(fn($c) => $c->getId(), $model->getManualCommands()->toArray());
 
         $modelFolder = $em->getRepository(CollectionFolder::class)->findOneBy([
             'model' => $model,
@@ -200,28 +194,54 @@ class CollectionCommandController extends AbstractController
 
         if ($modelFolder) {
             foreach ($em->getRepository(CollectionCommand::class)->findBy(['folder' => $modelFolder]) as $c) {
-                $autoIds[] = $c->getId();
+                $excludeIds[] = $c->getId();
             }
         }
         if ($manFolder) {
             foreach ($em->getRepository(CollectionCommand::class)->findBy(['folder' => $manFolder]) as $c) {
-                $autoIds[] = $c->getId();
+                $excludeIds[] = $c->getId();
             }
         }
 
-        $manualIds = array_map(fn($c) => $c->getId(), $model->getManualCommands()->toArray());
-        $excludeIds = array_merge($autoIds, $manualIds);
+        // Build tree of custom folders only, with available commands
+        $rootFolders = $em->getRepository(CollectionFolder::class)->findBy(
+            ['context' => $context, 'parent' => null, 'type' => CollectionFolder::TYPE_CUSTOM],
+            ['name' => 'ASC']
+        );
 
-        $available = array_filter($all, fn($c) => !in_array($c->getId(), $excludeIds, true));
+        $folders = [];
+        foreach ($rootFolders as $f) {
+            $node = $this->buildAvailableCmdTree($f, $em, $excludeIds);
+            if ($node) $folders[] = $node;
+        }
 
-        return $this->json(array_values(array_map(fn($c) => [
-            'id' => $c->getId(),
-            'name' => $c->getName(),
-            'description' => $c->getDescription(),
-            'commands' => $c->getCommands(),
-            'enabled' => $c->isEnabled(),
-            'folderName' => $c->getFolder()?->getName(),
-        ], $available)));
+        return $this->json(['folders' => $folders]);
+    }
+
+    private function buildAvailableCmdTree(CollectionFolder $folder, EntityManagerInterface $em, array $excludeIds): ?array
+    {
+        $commands = [];
+        foreach ($em->getRepository(CollectionCommand::class)->findBy(['folder' => $folder], ['name' => 'ASC']) as $c) {
+            if (!in_array($c->getId(), $excludeIds, true)) {
+                $commands[] = $this->serializeCommand($c);
+            }
+        }
+
+        $children = [];
+        foreach ($em->getRepository(CollectionFolder::class)->findBy(['parent' => $folder, 'type' => CollectionFolder::TYPE_CUSTOM], ['name' => 'ASC']) as $child) {
+            $node = $this->buildAvailableCmdTree($child, $em, $excludeIds);
+            if ($node) $children[] = $node;
+        }
+
+        if (empty($commands) && empty($children)) return null;
+
+        return [
+            'id' => $folder->getId(),
+            'name' => $folder->getName(),
+            'type' => $folder->getType(),
+            'children' => $children,
+            'commands' => $commands,
+        ];
     }
 
     #[Route('', methods: ['POST'])]
@@ -280,6 +300,10 @@ class CollectionCommandController extends AbstractController
         }
         if (isset($data['enabled'])) {
             $cmd->setEnabled($data['enabled']);
+        }
+        if (array_key_exists('folderId', $data)) {
+            $folder = $data['folderId'] ? $em->getRepository(CollectionFolder::class)->find($data['folderId']) : null;
+            $cmd->setFolder($folder);
         }
 
         $em->flush();

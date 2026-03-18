@@ -71,6 +71,7 @@ framework:
             Symfony\Component\Notifier\Message\SmsMessage: async
 
             App\Message\PingNodeMessage: monitoring
+            App\Message\SnmpPollNodeMessage: monitoring
             App\Message\CollectNodeMessage: collector
             App\Message\EvaluateComplianceMessage: compliance
             App\Message\GenerateReportMessage: generator

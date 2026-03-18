@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import FolderPicker from "@/components/FolderPicker";
 import {
   Loader2,
   ArrowLeft,
@@ -111,6 +112,8 @@ export default function CollectionRuleEditPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
+  const [folderId, setFolderId] = useState<number | null>(null);
+  const [ruleFolderTree, setRuleFolderTree] = useState<{ id: number; name: string; type: "custom" | "manufacturer" | "model"; children: any[] }[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -206,6 +209,7 @@ export default function CollectionRuleEditPage() {
       setName(data.name);
       setDescription(data.description ?? "");
       setEnabled(data.enabled);
+      setFolderId(data.folderId);
       setSource(data.source);
       setCommand(data.command ?? "");
       setTag(data.tag ?? "");
@@ -215,6 +219,17 @@ export default function CollectionRuleEditPage() {
   }, [ruleId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!current) return;
+    (async () => {
+      const res = await fetch(`/api/collection-rules/tree?context=${current.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setRuleFolderTree(data.folders ?? []);
+      }
+    })();
+  }, [current]);
 
   const loadNodes = useCallback(async () => {
     if (!current) return;
@@ -237,7 +252,7 @@ export default function CollectionRuleEditPage() {
     if (!name.trim()) return;
     setSaving(true);
     try {
-      const body = { name, description: description || null, enabled };
+      const body = { name, description: description || null, enabled, folderId };
       const res = await fetch(`/api/collection-rules/${ruleId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -909,6 +924,10 @@ export default function CollectionRuleEditPage() {
                 {enabled ? t("collection_rules.enabled") : t("collection_rules.disabled")}
               </span>
             </label>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.folder")}</label>
+              <FolderPicker folders={ruleFolderTree} value={folderId} onChange={setFolderId} rootLabel={t("collection_rules.noFolder")} />
+            </div>
           </div>
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
             <button

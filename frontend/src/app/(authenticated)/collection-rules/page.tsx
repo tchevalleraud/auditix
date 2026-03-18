@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import FolderPicker from "@/components/FolderPicker";
 import {
   Loader2,
   FileSearch,
@@ -22,6 +23,10 @@ import {
   ToggleRight,
   Monitor,
   Wifi,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 
 interface Rule {
@@ -77,6 +82,14 @@ export default function CollectionRulesPage() {
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "rule" | "folder"; id: number } | null>(null);
+
+  // Export/Import
+  const [exportingId, setExportingId] = useState<number | null>(null);
+  const [importTargetId, setImportTargetId] = useState<number | null>(null);
+  const [importPreview, setImportPreview] = useState<{ folderName: string; ruleCount: number; extractCount: number; subfolderCount: number; categories: { name: string; exists: boolean }[] } | null>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
     if (!current) return;
@@ -170,6 +183,66 @@ export default function CollectionRulesPage() {
     await load();
   };
 
+  const handleExportFolder = async (folderId: number, folderName: string) => {
+    setExportingId(folderId);
+    try {
+      const res = await fetch(`/api/collection-rule-folders/${folderId}/export`);
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const match = disposition.match(/filename="?([^"]+)"?/);
+      const filename = match?.[1] || `rules-${folderName}.json`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) { console.error(e); } finally { setExportingId(null); }
+  };
+
+  const handleImportFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !current) return;
+    if (importInputRef.current) importInputRef.current.value = "";
+    setImportFile(file);
+    setImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch(`/api/collection-rule-folders/preview-import?context=${current.id}`, { method: "POST", body: formData });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Preview failed"); }
+      setImportPreview(await res.json());
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "Preview failed");
+      setImportFile(null);
+      setImportTargetId(null);
+    } finally { setImportLoading(false); }
+  };
+
+  const handleConfirmImportFolder = async () => {
+    if (!importFile || !current) return;
+    setImportLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", importFile);
+      const parentParam = importTargetId ? `&parentId=${importTargetId}` : "";
+      const res = await fetch(`/api/collection-rule-folders/import?context=${current.id}${parentParam}`, { method: "POST", body: formData });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || "Import failed"); }
+      await load();
+    } catch (e: unknown) { alert(e instanceof Error ? e.message : "Import failed"); }
+    finally {
+      setImportLoading(false);
+      setImportFile(null);
+      setImportPreview(null);
+      setImportTargetId(null);
+    }
+  };
+
+  const closeImportModal = () => { setImportFile(null); setImportPreview(null); setImportTargetId(null); };
+
   if (loading) {
     return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-slate-900 dark:text-white" /></div>;
   }
@@ -184,6 +257,10 @@ export default function CollectionRulesPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("collection_rules.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={() => { setImportTargetId(null); importInputRef.current?.click(); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <Upload className="h-4 w-4" />
+            {t("collection_rules.importFolder")}
+          </button>
           <button onClick={() => openCreateFolder(null)} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
             <FolderPlus className="h-4 w-4" />
             {t("collection_rules.newFolder")}
@@ -210,6 +287,8 @@ export default function CollectionRulesPage() {
                 openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
                 deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
                 deleteRule={deleteRule} deleteFolder={deleteFolder}
+                exportingId={exportingId} onExport={handleExportFolder}
+                onImport={(parentId) => { setImportTargetId(parentId); importInputRef.current?.click(); }}
               />
             ))}
             {tree.rootRules.map((rule) => (
@@ -235,6 +314,9 @@ export default function CollectionRulesPage() {
             <Field label={t("collection_rules.description")}>
               <input type="text" value={ruleDesc} onChange={(e) => setRuleDesc(e.target.value)} placeholder={t("collection_rules.descriptionPlaceholder")} className={inputCls} />
             </Field>
+            <Field label={t("collection_rules.folder")}>
+              <FolderPicker folders={tree.folders} value={ruleFolderId} onChange={setRuleFolderId} rootLabel={t("collection_rules.noFolder")} />
+            </Field>
             <label className="flex items-center gap-3 cursor-pointer">
               <button type="button" onClick={() => setRuleEnabled(!ruleEnabled)}>
                 {ruleEnabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
@@ -253,6 +335,58 @@ export default function CollectionRulesPage() {
             <input type="text" value={folderName} onChange={(e) => setFolderName(e.target.value)} placeholder={t("collection_rules.folderNamePlaceholder")} className={inputCls} />
           </Field>
           <ModalFooter t={t} saving={saving} disabled={!folderName.trim()} onCancel={() => setFolderModal(false)} onSave={saveFolder} />
+        </Modal>
+      )}
+
+      {/* Hidden file input for import */}
+      <input ref={importInputRef} type="file" accept=".json" onChange={handleImportFileSelect} className="hidden" />
+
+      {/* Import preview modal */}
+      {importFile && (importPreview || importLoading) && (
+        <Modal title={t("collection_rules.importPreviewTitle")} onClose={closeImportModal}>
+          {importLoading && !importPreview ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-900 dark:text-white" />
+            </div>
+          ) : importPreview && (
+            <>
+              <div className="space-y-3">
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-3">
+                  <p className="text-sm font-medium text-slate-900 dark:text-slate-100">{importPreview.folderName}</p>
+                  <div className="flex items-center gap-4 mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span>{importPreview.ruleCount} {t("collection_rules.importCountRules")}</span>
+                    <span>{importPreview.extractCount} {t("collection_rules.importCountExtracts")}</span>
+                    {importPreview.subfolderCount > 0 && <span>{importPreview.subfolderCount} {t("collection_rules.importCountFolders")}</span>}
+                  </div>
+                </div>
+                {importPreview.categories.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                    {importPreview.categories.map((c, i) => (
+                      <div key={i} className="px-4 py-2 flex items-center justify-between">
+                        <span className="text-xs text-slate-700 dark:text-slate-300">{c.name}</span>
+                        {c.exists ? (
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                            <CheckCircle2 className="h-3 w-3" /> {t("collection_rules.importExists")}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                            <Plus className="h-3 w-3" /> {t("collection_rules.importNew")}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800 mt-4">
+                <button onClick={closeImportModal} className="rounded-lg px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">{t("common.cancel")}</button>
+                <button onClick={handleConfirmImportFolder} disabled={importLoading} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                  {importLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {t("collection_rules.importConfirm")}
+                </button>
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </div>
@@ -304,7 +438,7 @@ function countRules(folder: Folder): number {
 }
 
 // --- Folder node ---
-function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, openEditRule, toggleRule, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteRule, deleteFolder }: {
+function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, openEditRule, toggleRule, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteRule, deleteFolder, exportingId, onExport, onImport }: {
   folder: Folder; depth: number; t: (k: string) => string;
   expanded: Set<number>; toggle: (id: number) => void;
   openCreateRule: (folderId: number | null) => void;
@@ -316,6 +450,9 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
   setDeleteConfirm: (v: { type: "rule" | "folder"; id: number } | null) => void;
   deleteRule: (id: number) => void;
   deleteFolder: (id: number) => void;
+  exportingId: number | null;
+  onExport: (id: number, name: string) => void;
+  onImport: (parentId: number) => void;
 }) {
   const isExpanded = expanded.has(folder.id);
   const pl = depth === 0 ? "pl-4" : depth === 1 ? "pl-10" : depth === 2 ? "pl-16" : "pl-22";
@@ -344,6 +481,12 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
           </button>
           {!folder.autoGenerated && (
             <>
+              <button onClick={() => onExport(folder.id, folder.name)} disabled={exportingId === folder.id} className="rounded-lg p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors disabled:opacity-50" title={t("collection_rules.exportFolder")}>
+                {exportingId === folder.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+              </button>
+              <button onClick={() => onImport(folder.id)} className="rounded-lg p-1.5 text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors" title={t("collection_rules.importFolder")}>
+                <Upload className="h-3.5 w-3.5" />
+              </button>
               <button onClick={() => openEditFolder(folder)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors">
                 <Pencil className="h-3.5 w-3.5" />
               </button>
@@ -371,6 +514,7 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
               openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
               deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
               deleteRule={deleteRule} deleteFolder={deleteFolder}
+              exportingId={exportingId} onExport={onExport} onImport={onImport}
             />
           ))}
           {folder.rules.map((rule) => (

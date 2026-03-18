@@ -9,6 +9,9 @@ export interface AppContext {
   name: string;
   description: string | null;
   monitoringEnabled: boolean;
+  snmpRetentionMinutes: number;
+  snmpPollIntervalSeconds: number;
+  icmpPollIntervalSeconds: number;
   isDefault: boolean;
   userCount: number;
   createdAt: string;
