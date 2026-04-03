@@ -1166,6 +1166,8 @@
     "enabled": "Activado",
     "disabled": "Desactivado",
     "phaseCollection": "Recopilacion",
+    "phaseCleanup": "Limpieza",
+    "cleanupDesc": "Elimina recopilaciones sin etiquetas (recopilaciones antiguas cuya etiqueta 'latest' fue eliminada)",
     "phaseCompliance": "Cumplimiento",
     "phaseReport": "Generacion de informes",
     "selectNodes": "Seleccionar nodos",

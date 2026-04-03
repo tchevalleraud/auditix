@@ -28,6 +28,7 @@ class ScheduleController extends AbstractController
             'lastCompletedAt' => $s->getLastCompletedAt()?->format('c'),
             'nextRunAt' => $s->getNextRunAt()?->format('c'),
             'collectionNodeIds' => $s->getCollectionNodeIds(),
+            'cleanupEnabled' => $s->isCleanupEnabled(),
             'complianceNodeIds' => $s->getComplianceNodeIds(),
             'reportIds' => $s->getReportIds(),
             'createdAt' => $s->getCreatedAt()->format('c'),
@@ -100,6 +101,9 @@ class ScheduleController extends AbstractController
         if (array_key_exists('collectionNodeIds', $data)) {
             $schedule->setCollectionNodeIds(!empty($data['collectionNodeIds']) ? $data['collectionNodeIds'] : null);
         }
+        if (array_key_exists('cleanupEnabled', $data)) {
+            $schedule->setCleanupEnabled((bool) $data['cleanupEnabled']);
+        }
         if (array_key_exists('complianceNodeIds', $data)) {
             $schedule->setComplianceNodeIds(!empty($data['complianceNodeIds']) ? $data['complianceNodeIds'] : null);
         }
@@ -140,6 +144,9 @@ class ScheduleController extends AbstractController
         }
         if (array_key_exists('collectionNodeIds', $data)) {
             $schedule->setCollectionNodeIds(!empty($data['collectionNodeIds']) ? $data['collectionNodeIds'] : null);
+        }
+        if (array_key_exists('cleanupEnabled', $data)) {
+            $schedule->setCleanupEnabled((bool) $data['cleanupEnabled']);
         }
         if (array_key_exists('complianceNodeIds', $data)) {
             $schedule->setComplianceNodeIds(!empty($data['complianceNodeIds']) ? $data['complianceNodeIds'] : null);

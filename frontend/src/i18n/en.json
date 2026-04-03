@@ -1166,6 +1166,8 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "phaseCollection": "Collection",
+    "phaseCleanup": "Cleanup",
+    "cleanupDesc": "Deletes collections without tags (old collections whose 'latest' tag was removed)",
     "phaseCompliance": "Compliance",
     "phaseReport": "Report generation",
     "selectNodes": "Select nodes",

@@ -80,7 +80,7 @@ class ScheduleOrchestratorCommand extends Command
     private function processActiveSchedules(\DateTimeImmutable $now, OutputInterface $output): void
     {
         $schedules = $this->em->getRepository(Schedule::class)->findBy([
-            'currentPhase' => [Schedule::PHASE_COLLECTION, Schedule::PHASE_COMPLIANCE, Schedule::PHASE_REPORT],
+            'currentPhase' => [Schedule::PHASE_COLLECTION, Schedule::PHASE_CLEANUP, Schedule::PHASE_COMPLIANCE, Schedule::PHASE_REPORT],
         ]);
 
         foreach ($schedules as $schedule) {
@@ -106,6 +106,9 @@ class ScheduleOrchestratorCommand extends Command
         switch ($phase) {
             case Schedule::PHASE_COLLECTION:
                 $this->dispatchCollection($schedule, $output);
+                break;
+            case Schedule::PHASE_CLEANUP:
+                $this->executeCleanup($schedule, $output);
                 break;
             case Schedule::PHASE_COMPLIANCE:
                 $this->dispatchCompliance($schedule, $output);
@@ -166,6 +169,47 @@ class ScheduleOrchestratorCommand extends Command
         $this->em->flush();
 
         $output->writeln(sprintf('  Dispatched %d collection(s)', count($realIds)));
+    }
+
+    private function executeCleanup(Schedule $schedule, OutputInterface $output): void
+    {
+        $context = $schedule->getContext();
+        $collections = $this->em->getRepository(Collection::class)->findBy(['context' => $context]);
+        $deleted = 0;
+
+        foreach ($collections as $collection) {
+            $tags = $collection->getTags();
+            if (empty($tags)) {
+                // Delete storage files
+                $storageDir = '/var/www/var/' . $collection->getStoragePath();
+                $this->deleteDirectory($storageDir);
+
+                $this->em->remove($collection);
+                $deleted++;
+            }
+        }
+
+        $this->em->flush();
+        $output->writeln(sprintf('  Cleanup: deleted %d collection(s) without tags', $deleted));
+
+        // Cleanup is synchronous, transition immediately
+        $this->transitionToNextPhase($schedule, $output);
+    }
+
+    private function deleteDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) return;
+        $items = scandir($dir);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->deleteDirectory($path);
+            } else {
+                unlink($path);
+            }
+        }
+        rmdir($dir);
     }
 
     private function dispatchCompliance(Schedule $schedule, OutputInterface $output): void

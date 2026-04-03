@@ -1166,6 +1166,8 @@
     "enabled": "Attivato",
     "disabled": "Disattivato",
     "phaseCollection": "Raccolta",
+    "phaseCleanup": "Pulizia",
+    "cleanupDesc": "Elimina le raccolte senza tag (vecchie raccolte il cui tag 'latest' e stato rimosso)",
     "phaseCompliance": "Conformita",
     "phaseReport": "Generazione report",
     "selectNodes": "Seleziona nodi",

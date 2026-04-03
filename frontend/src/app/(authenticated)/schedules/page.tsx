@@ -36,6 +36,7 @@ interface ScheduleItem {
   lastCompletedAt: string | null;
   nextRunAt: string | null;
   collectionNodeIds: number[] | null;
+  cleanupEnabled: boolean;
   complianceNodeIds: number[] | null;
   reportIds: number[] | null;
   createdAt: string;
@@ -69,6 +70,7 @@ export default function SchedulesPage() {
   const [formEnabled, setFormEnabled] = useState(true);
   const [formCollectionEnabled, setFormCollectionEnabled] = useState(false);
   const [formCollectionNodeIds, setFormCollectionNodeIds] = useState<number[]>([]);
+  const [formCleanupEnabled, setFormCleanupEnabled] = useState(false);
   const [formComplianceEnabled, setFormComplianceEnabled] = useState(false);
   const [formComplianceNodeIds, setFormComplianceNodeIds] = useState<number[]>([]);
   const [formReportEnabled, setFormReportEnabled] = useState(false);
@@ -132,6 +134,7 @@ export default function SchedulesPage() {
     setFormEnabled(true);
     setFormCollectionEnabled(false);
     setFormCollectionNodeIds([]);
+    setFormCleanupEnabled(false);
     setFormComplianceEnabled(false);
     setFormComplianceNodeIds([]);
     setFormReportEnabled(false);
@@ -150,6 +153,7 @@ export default function SchedulesPage() {
     setFormEnabled(schedule.enabled);
     setFormCollectionEnabled((schedule.collectionNodeIds ?? []).length > 0);
     setFormCollectionNodeIds(schedule.collectionNodeIds ?? []);
+    setFormCleanupEnabled(schedule.cleanupEnabled ?? false);
     setFormComplianceEnabled((schedule.complianceNodeIds ?? []).length > 0);
     setFormComplianceNodeIds(schedule.complianceNodeIds ?? []);
     setFormReportEnabled((schedule.reportIds ?? []).length > 0);
@@ -170,6 +174,7 @@ export default function SchedulesPage() {
         cronExpression: formCron.trim(),
         enabled: formEnabled,
         collectionNodeIds: formCollectionEnabled ? formCollectionNodeIds : null,
+        cleanupEnabled: formCleanupEnabled,
         complianceNodeIds: formComplianceEnabled ? formComplianceNodeIds : null,
         reportIds: formReportEnabled ? formReportIds : null,
       };
@@ -247,6 +252,13 @@ export default function SchedulesPage() {
       indicators.push(
         <span key="c" className="inline-flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300" title={t("schedules.phaseCollection")}>
           C
+        </span>
+      );
+    }
+    if (schedule.cleanupEnabled) {
+      indicators.push(
+        <span key="cl" className="inline-flex items-center justify-center rounded bg-rose-100 dark:bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:text-rose-300" title={t("schedules.phaseCleanup")}>
+          Cl
         </span>
       );
     }
@@ -516,6 +528,31 @@ export default function SchedulesPage() {
                         </label>
                       ))
                     )}
+                  </div>
+                )}
+              </div>
+
+              {/* Cleanup section */}
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="h-4 w-4 text-rose-500" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("schedules.phaseCleanup")}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setFormCleanupEnabled(!formCleanupEnabled); }}
+                  >
+                    {formCleanupEnabled ? (
+                      <ToggleRight className="h-5 w-5 text-emerald-500" />
+                    ) : (
+                      <ToggleLeft className="h-5 w-5 text-slate-400" />
+                    )}
+                  </button>
+                </div>
+                {formCleanupEnabled && (
+                  <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+                    <p className="text-xs text-slate-400 dark:text-slate-500">{t("schedules.cleanupDesc")}</p>
                   </div>
                 )}
               </div>

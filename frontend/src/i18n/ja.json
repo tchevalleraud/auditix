@@ -1166,6 +1166,8 @@
     "enabled": "有効",
     "disabled": "無効",
     "phaseCollection": "データ収集",
+    "phaseCleanup": "クリーンアップ",
+    "cleanupDesc": "タグのないデータ収集を削除します（'latest'タグが削除された古い収集）",
     "phaseCompliance": "コンプライアンス",
     "phaseReport": "レポート生成",
     "selectNodes": "ノードを選択",

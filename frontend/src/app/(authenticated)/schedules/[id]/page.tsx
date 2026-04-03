@@ -37,6 +37,7 @@ interface ScheduleDetail {
   lastCompletedAt: string | null;
   nextRunAt: string | null;
   collectionNodeIds: number[] | null;
+  cleanupEnabled: boolean;
   complianceNodeIds: number[] | null;
   reportIds: number[] | null;
   createdAt: string;
@@ -78,6 +79,7 @@ export default function ScheduleDetailPage() {
 
   // Phase selections
   const [collectionNodeIds, setCollectionNodeIds] = useState<number[]>([]);
+  const [cleanupEnabled, setCleanupEnabled] = useState(false);
   const [complianceNodeIds, setComplianceNodeIds] = useState<number[]>([]);
   const [reportIds, setReportIds] = useState<number[]>([]);
 
@@ -113,6 +115,7 @@ export default function ScheduleDetailPage() {
     setCronExpression(data.cronExpression);
     setEnabled(data.enabled);
     setCollectionEnabled(data.collectionNodeIds !== null);
+    setCleanupEnabled(data.cleanupEnabled ?? false);
     setComplianceEnabled(data.complianceNodeIds !== null);
     setReportEnabled(data.reportIds !== null);
     setCollectionNodeIds(data.collectionNodeIds || []);
@@ -185,6 +188,7 @@ export default function ScheduleDetailPage() {
           cronExpression: cronExpression.trim(),
           enabled,
           collectionNodeIds: collectionEnabled ? collectionNodeIds : null,
+          cleanupEnabled,
           complianceNodeIds: complianceEnabled ? complianceNodeIds : null,
           reportIds: reportEnabled ? reportIds : null,
         }),
@@ -236,17 +240,19 @@ export default function ScheduleDetailPage() {
 
   const phases = [
     { key: "collection", label: t("schedules.phaseCollection"), icon: Database },
+    { key: "cleanup", label: t("schedules.phaseCleanup"), icon: Trash2 },
     { key: "compliance", label: t("schedules.phaseCompliance"), icon: ShieldCheck },
     { key: "report", label: t("schedules.phaseReport"), icon: FileBarChart },
   ];
 
-  const phaseOrder = ["collection", "compliance", "report"];
+  const phaseOrder = ["collection", "cleanup", "compliance", "report"];
   const currentPhaseIndex = schedule.currentPhase
     ? phaseOrder.indexOf(schedule.currentPhase)
     : -1;
 
   const isPhaseEnabled = (key: string) => {
     if (key === "collection") return collectionEnabled;
+    if (key === "cleanup") return cleanupEnabled;
     if (key === "compliance") return complianceEnabled;
     if (key === "report") return reportEnabled;
     return false;
@@ -413,6 +419,22 @@ export default function ScheduleDetailPage() {
                   {t("schedules.nodeCount", { count: String(collectionNodeIds.length) })}
                 </p>
               </>
+            )}
+          </div>
+
+          {/* Cleanup Phase card */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trash2 className="h-5 w-5 text-rose-500" />
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("schedules.phaseCleanup")}</h2>
+              </div>
+              <button type="button" onClick={() => setCleanupEnabled(!cleanupEnabled)}>
+                {cleanupEnabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
+              </button>
+            </div>
+            {cleanupEnabled && (
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("schedules.cleanupDesc")}</p>
             )}
           </div>
 

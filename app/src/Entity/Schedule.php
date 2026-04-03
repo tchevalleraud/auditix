@@ -9,6 +9,7 @@ use Doctrine\ORM\Mapping as ORM;
 class Schedule
 {
     public const PHASE_COLLECTION = 'collection';
+    public const PHASE_CLEANUP = 'cleanup';
     public const PHASE_COMPLIANCE = 'compliance';
     public const PHASE_REPORT = 'report';
 
@@ -57,6 +58,9 @@ class Schedule
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $reportIds = null;
 
+    #[ORM\Column]
+    private bool $cleanupEnabled = false;
+
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $collectionIds = null;
 
@@ -96,6 +100,8 @@ class Schedule
     public function setComplianceNodeIds(?array $v): static { $this->complianceNodeIds = $v; return $this; }
     public function getReportIds(): ?array { return $this->reportIds; }
     public function setReportIds(?array $v): static { $this->reportIds = $v; return $this; }
+    public function isCleanupEnabled(): bool { return $this->cleanupEnabled; }
+    public function setCleanupEnabled(bool $v): static { $this->cleanupEnabled = $v; return $this; }
     public function getCollectionIds(): ?array { return $this->collectionIds; }
     public function setCollectionIds(?array $v): static { $this->collectionIds = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
@@ -110,6 +116,7 @@ class Schedule
     public function getFirstPhase(): ?string
     {
         if (!empty($this->collectionNodeIds)) return self::PHASE_COLLECTION;
+        if ($this->cleanupEnabled) return self::PHASE_CLEANUP;
         if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
         if (!empty($this->reportIds)) return self::PHASE_REPORT;
         return null;
@@ -118,6 +125,11 @@ class Schedule
     public function getNextPhase(string $completedPhase): ?string
     {
         if ($completedPhase === self::PHASE_COLLECTION) {
+            if ($this->cleanupEnabled) return self::PHASE_CLEANUP;
+            if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
+            if (!empty($this->reportIds)) return self::PHASE_REPORT;
+        }
+        if ($completedPhase === self::PHASE_CLEANUP) {
             if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
             if (!empty($this->reportIds)) return self::PHASE_REPORT;
         }

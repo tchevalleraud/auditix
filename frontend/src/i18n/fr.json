@@ -1166,6 +1166,8 @@
     "enabled": "Active",
     "disabled": "Desactive",
     "phaseCollection": "Collecte",
+    "phaseCleanup": "Nettoyage",
+    "cleanupDesc": "Supprime les collectes sans tag (anciennes collectes dont le tag 'latest' a ete retire)",
     "phaseCompliance": "Conformite",
     "phaseReport": "Generation de rapports",
     "selectNodes": "Selectionner les noeuds",

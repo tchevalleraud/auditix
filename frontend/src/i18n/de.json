@@ -1166,6 +1166,8 @@
     "enabled": "Aktiviert",
     "disabled": "Deaktiviert",
     "phaseCollection": "Datenerfassung",
+    "phaseCleanup": "Bereinigung",
+    "cleanupDesc": "Loescht Datenerfassungen ohne Tags (alte Erfassungen, deren 'latest'-Tag entfernt wurde)",
     "phaseCompliance": "Compliance",
     "phaseReport": "Berichtserstellung",
     "selectNodes": "Knoten auswaehlen",
