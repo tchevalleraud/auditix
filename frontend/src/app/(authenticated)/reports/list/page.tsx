@@ -13,6 +13,8 @@ import {
   Trash2,
   X,
   Globe,
+  Server,
+  FileBarChart,
 } from "lucide-react";
 
 interface ReportItem {
@@ -20,6 +22,7 @@ interface ReportItem {
   name: string;
   description: string | null;
   locale: string;
+  type: string;
   createdAt: string;
 }
 
@@ -44,6 +47,7 @@ export default function ReportsListPage() {
   const [reportName, setReportName] = useState("");
   const [reportDescription, setReportDescription] = useState("");
   const [reportLocale, setReportLocale] = useState("fr");
+  const [reportType, setReportType] = useState<"general" | "node">("general");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<ReportItem | null>(null);
 
@@ -71,6 +75,7 @@ export default function ReportsListPage() {
     setReportName("");
     setReportDescription("");
     setReportLocale("fr");
+    setReportType("general");
     setModal(true);
   };
 
@@ -85,6 +90,7 @@ export default function ReportsListPage() {
           name: reportName.trim(),
           description: reportDescription.trim() || null,
           locale: reportLocale,
+          type: reportType,
         }),
       });
       if (res.ok) {
@@ -154,6 +160,9 @@ export default function ReportsListPage() {
                   {t("reports.colDescription")}
                 </th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                  {t("reports.colType")}
+                </th>
+                <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   {t("reports.colLanguage")}
                 </th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
@@ -167,7 +176,7 @@ export default function ReportsListPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center">
+                  <td colSpan={6} className="px-5 py-12 text-center">
                     <FileText className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
                     <p className="text-sm text-slate-400 dark:text-slate-500">
                       {search ? t("reports.noResult") : t("reports.noReports")}
@@ -188,6 +197,16 @@ export default function ReportsListPage() {
                     </td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400 max-w-xs truncate">
                       {report.description || "\u2014"}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        report.type === "node"
+                          ? "bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                          : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                      }`}>
+                        {report.type === "node" ? <Server className="h-3 w-3" /> : <FileBarChart className="h-3 w-3" />}
+                        {report.type === "node" ? t("reports.typeNode") : t("reports.typeGeneral")}
+                      </span>
                     </td>
                     <td className="px-5 py-3">
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:text-slate-300">
@@ -257,6 +276,41 @@ export default function ReportsListPage() {
                   placeholder={t("reports.descriptionPlaceholder")}
                   className={`${inputClass} resize-none`}
                 />
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("reports.typeLabel")}</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setReportType("general")}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      reportType === "general"
+                        ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    <FileBarChart className={`h-6 w-6 ${reportType === "general" ? "text-slate-900 dark:text-white" : "text-slate-400"}`} />
+                    <span className={`text-sm font-medium ${reportType === "general" ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>
+                      {t("reports.typeGeneral")}
+                    </span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("reports.typeGeneralDesc")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportType("node")}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      reportType === "node"
+                        ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    <Server className={`h-6 w-6 ${reportType === "node" ? "text-slate-900 dark:text-white" : "text-slate-400"}`} />
+                    <span className={`text-sm font-medium ${reportType === "node" ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>
+                      {t("reports.typeNode")}
+                    </span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("reports.typeNodeDesc")}</span>
+                  </button>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className={labelClass}>{t("reports.reportLocale")}</label>

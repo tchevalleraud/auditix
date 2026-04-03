@@ -3,11 +3,16 @@
 namespace App\Entity;
 
 use App\Repository\ReportRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 
 #[ORM\Entity(repositoryClass: ReportRepository::class)]
 class Report
 {
+    public const TYPE_GENERAL = 'general';
+    public const TYPE_NODE = 'node';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -72,6 +77,16 @@ class Report
     #[ORM\Column(length: 500, nullable: true)]
     private ?string $generatedFile = null;
 
+    #[ORM\Column(length: 10)]
+    private string $type = self::TYPE_GENERAL;
+
+    #[ORM\ManyToMany(targetEntity: Node::class)]
+    #[ORM\JoinTable(name: 'report_node')]
+    private Collection $nodes;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $generatedFiles = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -80,6 +95,7 @@ class Report
 
     public function __construct()
     {
+        $this->nodes = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -122,6 +138,14 @@ class Report
     public function setGeneratedAt(?\DateTimeImmutable $v): static { $this->generatedAt = $v; return $this; }
     public function getGeneratedFile(): ?string { return $this->generatedFile; }
     public function setGeneratedFile(?string $v): static { $this->generatedFile = $v; return $this; }
+    public function getType(): string { return $this->type; }
+    public function setType(string $v): static { $this->type = $v; return $this; }
+    /** @return Collection<int, Node> */
+    public function getNodes(): Collection { return $this->nodes; }
+    public function addNode(Node $node): static { if (!$this->nodes->contains($node)) { $this->nodes->add($node); } return $this; }
+    public function removeNode(Node $node): static { $this->nodes->removeElement($node); return $this; }
+    public function getGeneratedFiles(): ?array { return $this->generatedFiles; }
+    public function setGeneratedFiles(?array $v): static { $this->generatedFiles = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getUpdatedAt(): ?\DateTimeImmutable { return $this->updatedAt; }
     public function setUpdatedAt(?\DateTimeImmutable $v): static { $this->updatedAt = $v; return $this; }

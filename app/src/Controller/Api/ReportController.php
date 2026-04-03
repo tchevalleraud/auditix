@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\Context;
+use App\Entity\Node;
 use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
@@ -22,11 +23,21 @@ class ReportController extends AbstractController
     private function serialize(Report $r): array
     {
         $theme = $r->getTheme();
+        $nodes = [];
+        foreach ($r->getNodes() as $node) {
+            $nodes[] = [
+                'id' => $node->getId(),
+                'name' => $node->getName(),
+                'ipAddress' => $node->getIpAddress(),
+                'hostname' => $node->getHostname(),
+            ];
+        }
         return [
             'id' => $r->getId(),
             'name' => $r->getName(),
             'description' => $r->getDescription(),
             'locale' => $r->getLocale(),
+            'type' => $r->getType(),
             'title' => $r->getTitle(),
             'subtitle' => $r->getSubtitle(),
             'showTableOfContents' => $r->getShowTableOfContents(),
@@ -38,10 +49,12 @@ class ReportController extends AbstractController
             'recipients' => $r->getRecipients(),
             'revisions' => $r->getRevisions(),
             'blocks' => $r->getBlocks(),
+            'nodes' => $nodes,
             'theme' => $theme ? ['id' => $theme->getId(), 'name' => $theme->getName()] : null,
             'generatingStatus' => $r->getGeneratingStatus(),
             'generatedAt' => $r->getGeneratedAt()?->format('c'),
             'generatedFile' => $r->getGeneratedFile(),
+            'generatedFiles' => $r->getGeneratedFiles(),
             'createdAt' => $r->getCreatedAt()->format('c'),
             'updatedAt' => $r->getUpdatedAt()?->format('c'),
         ];
@@ -92,6 +105,17 @@ class ReportController extends AbstractController
         }
         if (isset($data['locale'])) {
             $report->setLocale($data['locale']);
+        }
+        if (isset($data['type']) && in_array($data['type'], [Report::TYPE_GENERAL, Report::TYPE_NODE], true)) {
+            $report->setType($data['type']);
+        }
+        if (isset($data['nodeIds']) && is_array($data['nodeIds'])) {
+            foreach ($data['nodeIds'] as $nodeId) {
+                $node = $em->getRepository(Node::class)->find($nodeId);
+                if ($node) {
+                    $report->addNode($node);
+                }
+            }
         }
 
         $em->persist($report);
@@ -161,6 +185,24 @@ class ReportController extends AbstractController
                 $report->setTheme(null);
             }
         }
+        if (isset($data['type']) && in_array($data['type'], [Report::TYPE_GENERAL, Report::TYPE_NODE], true)) {
+            $report->setType($data['type']);
+        }
+        if (array_key_exists('nodeIds', $data)) {
+            // Clear existing nodes
+            foreach ($report->getNodes()->toArray() as $existingNode) {
+                $report->removeNode($existingNode);
+            }
+            // Add new nodes
+            if (is_array($data['nodeIds'])) {
+                foreach ($data['nodeIds'] as $nodeId) {
+                    $node = $em->getRepository(Node::class)->find($nodeId);
+                    if ($node) {
+                        $report->addNode($node);
+                    }
+                }
+            }
+        }
 
         $report->setUpdatedAt(new \DateTimeImmutable());
         $em->flush();
@@ -193,9 +235,21 @@ class ReportController extends AbstractController
     }
 
     #[Route('/{id}/download', methods: ['GET'])]
-    public function download(Report $report): Response
+    public function download(Report $report, Request $request): Response
     {
-        $file = $report->getGeneratedFile();
+        $nodeId = $request->query->get('node');
+
+        if ($report->getType() === Report::TYPE_NODE && $nodeId) {
+            // Download PDF for a specific node
+            $generatedFiles = $report->getGeneratedFiles();
+            if (!$generatedFiles || !isset($generatedFiles[$nodeId])) {
+                return $this->json(['error' => 'No generated file for this node'], Response::HTTP_NOT_FOUND);
+            }
+            $file = $generatedFiles[$nodeId];
+        } else {
+            $file = $report->getGeneratedFile();
+        }
+
         if (!$file) {
             return $this->json(['error' => 'No generated file'], Response::HTTP_NOT_FOUND);
         }

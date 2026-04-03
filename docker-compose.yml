@@ -116,6 +116,15 @@ services:
     deploy:
       replicas: 1
 
+  worker-orchestrator:
+    <<: *worker
+    command: php bin/console app:schedule:orchestrator
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-orchestrator
+    deploy:
+      replicas: 1
+
   mercure:
     image: dunglas/mercure:latest
     environment:

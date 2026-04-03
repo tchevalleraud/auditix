@@ -27,6 +27,9 @@ import {
   History,
   ChevronUp,
   ChevronDown,
+  Server,
+  FileBarChart,
+  Download,
 } from "lucide-react";
 
 import StructureEditor, { type ReportBlock } from "@/components/StructureEditor";
@@ -47,11 +50,19 @@ interface Revision {
   description: string;
 }
 
+interface ReportNodeRef {
+  id: number;
+  name: string | null;
+  ipAddress: string;
+  hostname: string | null;
+}
+
 interface ReportDetail {
   id: number;
   name: string;
   description: string | null;
   locale: string;
+  type: string;
   title: string;
   subtitle: string | null;
   showTableOfContents: boolean;
@@ -63,12 +74,21 @@ interface ReportDetail {
   recipients: Author[];
   revisions: Revision[];
   blocks: ReportBlock[];
+  nodes: ReportNodeRef[];
   theme: { id: number; name: string } | null;
   generatingStatus: string | null;
   generatedAt: string | null;
   generatedFile: string | null;
+  generatedFiles: Record<string, string> | null;
   createdAt: string;
   updatedAt: string | null;
+}
+
+interface ContextNode {
+  id: number;
+  name: string | null;
+  ipAddress: string;
+  hostname: string | null;
 }
 
 interface ThemeOption {
@@ -106,6 +126,9 @@ export default function ReportDetailPage() {
   // Settings tab fields
   const [reportName, setReportName] = useState("");
   const [reportDescription, setReportDescription] = useState("");
+  const [reportType, setReportType] = useState<string>("general");
+  const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
+  const [contextNodes, setContextNodes] = useState<ContextNode[]>([]);
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
 
@@ -141,6 +164,7 @@ export default function ReportDetailPage() {
 
   // PDF cache-bust key
   const [pdfKey, setPdfKey] = useState(0);
+  const [selectedNodePdf, setSelectedNodePdf] = useState<number | null>(null);
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -162,6 +186,8 @@ export default function ReportDetailPage() {
     setSelectedThemeId(data.theme?.id ?? null);
     setReportName(data.name);
     setReportDescription(data.description || "");
+    setReportType(data.type || "general");
+    setSelectedNodeIds(data.nodes?.map((n: ReportNodeRef) => n.id) || []);
     setTags(data.tags || []);
     setAuthors(data.authors || []);
     setRecipients(data.recipients || []);
@@ -184,10 +210,25 @@ export default function ReportDetailPage() {
     }
   }, [current]);
 
+  const loadContextNodes = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/nodes?context=${current.id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setContextNodes(data.map((n: ContextNode) => ({
+        id: n.id,
+        name: n.name,
+        ipAddress: n.ipAddress,
+        hostname: n.hostname,
+      })));
+    }
+  }, [current]);
+
   useEffect(() => {
     loadReport();
     loadThemes();
-  }, [loadReport, loadThemes]);
+    loadContextNodes();
+  }, [loadReport, loadThemes, loadContextNodes]);
 
   // Mercure SSE for generation status
   useEffect(() => {
@@ -202,16 +243,8 @@ export default function ReportDetailPage() {
           setGenerating(true);
         } else if (data.status === "completed") {
           setGenerating(false);
-          setReport((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  generatingStatus: null,
-                  generatedAt: data.generatedAt,
-                  generatedFile: `reports/${reportId}/report.pdf`,
-                }
-              : prev
-          );
+          // Reload the report to get updated generatedFile/generatedFiles
+          loadReport();
           setPdfKey((k) => k + 1);
         } else if (data.status === "failed") {
           setGenerating(false);
@@ -328,6 +361,8 @@ export default function ReportDetailPage() {
           description: reportDescription.trim() || null,
           tags: tags.length > 0 ? tags : null,
           locale: reportLocale,
+          type: reportType,
+          nodeIds: reportType === "node" ? selectedNodeIds : [],
         }),
       });
       if (res.ok) {
@@ -868,6 +903,79 @@ export default function ReportDetailPage() {
                   <Loader2 className="h-10 w-10 animate-spin text-slate-400" />
                   <p className="text-sm text-slate-500 dark:text-slate-400">{t("reports.generatingDesc")}</p>
                 </div>
+              ) : report.type === "node" && report.generatedFiles && Object.keys(report.generatedFiles).length > 0 ? (
+                /* Node-type report: PDF 3/4 left, node list 1/4 right */
+                <div className="flex-1 flex gap-4 min-h-0">
+                  {/* PDF preview - 3/4 */}
+                  <div className="w-3/4 min-w-0 flex flex-col min-h-0">
+                    {selectedNodePdf && report.generatedFiles[String(selectedNodePdf)] ? (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
+                        <iframe
+                          key={`${pdfKey}-${selectedNodePdf}`}
+                          src={`/api/reports/${reportId}/download?node=${selectedNodePdf}#toolbar=1&navpanes=0`}
+                          className="w-full border-0 flex-1"
+                          title="Report PDF"
+                        />
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col items-center justify-center gap-4">
+                        <Server className="h-10 w-10 text-slate-300 dark:text-slate-600" />
+                        <p className="text-sm text-slate-500 dark:text-slate-400">{t("reports.selectNodes")}</p>
+                      </div>
+                    )}
+                  </div>
+                  {/* Node list - 1/4 */}
+                  <div className="w-1/4 min-w-0 flex flex-col min-h-0">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden">
+                      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                          <FileText className="h-4 w-4" />
+                          {t("reports.generatedAt", { date: new Date(report.generatedAt!).toLocaleString() })}
+                        </div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                          {t("reports.generatedForNodes", { count: String(Object.keys(report.generatedFiles).length) })}
+                        </p>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                        {report.nodes.map((node) => {
+                          const nodeLabel = node.name || node.hostname || node.ipAddress;
+                          const hasFile = report.generatedFiles && report.generatedFiles[String(node.id)];
+                          return (
+                            <div
+                              key={node.id}
+                              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 transition-colors cursor-pointer ${
+                                selectedNodePdf === node.id
+                                  ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                                  : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                              }`}
+                              onClick={() => hasFile && setSelectedNodePdf(node.id)}
+                            >
+                              <Server className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate block">{nodeLabel}</span>
+                                {node.name && (
+                                  <span className="text-xs text-slate-400 dark:text-slate-500 truncate block">{node.ipAddress}</span>
+                                )}
+                              </div>
+                              {hasFile && (
+                                <a
+                                  href={`/api/reports/${reportId}/download?node=${node.id}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors shrink-0"
+                                  title={t("reports.downloadForNode", { name: nodeLabel })}
+                                >
+                                  <Download className="h-3.5 w-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ) : hasGeneratedFile ? (
                 <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 flex flex-col min-h-0">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-800">
@@ -925,6 +1033,93 @@ export default function ReportDetailPage() {
                   />
                 </div>
               </div>
+
+              {/* Report Type */}
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.typeLabel")}</h2>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setReportType("general")}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      reportType === "general"
+                        ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    <FileBarChart className={`h-6 w-6 ${reportType === "general" ? "text-slate-900 dark:text-white" : "text-slate-400"}`} />
+                    <span className={`text-sm font-medium ${reportType === "general" ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>
+                      {t("reports.typeGeneral")}
+                    </span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("reports.typeGeneralDesc")}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportType("node")}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                      reportType === "node"
+                        ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                        : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                    }`}
+                  >
+                    <Server className={`h-6 w-6 ${reportType === "node" ? "text-slate-900 dark:text-white" : "text-slate-400"}`} />
+                    <span className={`text-sm font-medium ${reportType === "node" ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>
+                      {t("reports.typeNode")}
+                    </span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 text-center">{t("reports.typeNodeDesc")}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Associated Nodes (only for node type) */}
+              {reportType === "node" && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("reports.associatedNodes")}</h2>
+                  {contextNodes.length === 0 ? (
+                    <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noNodes")}</p>
+                  ) : (
+                    <div className="space-y-2 max-h-60 overflow-y-auto">
+                      {contextNodes.map((node) => {
+                        const isSelected = selectedNodeIds.includes(node.id);
+                        const nodeLabel = node.name || node.hostname || node.ipAddress;
+                        return (
+                          <label
+                            key={node.id}
+                            className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+                              isSelected
+                                ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                                : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedNodeIds([...selectedNodeIds, node.id]);
+                                } else {
+                                  setSelectedNodeIds(selectedNodeIds.filter((id) => id !== node.id));
+                                }
+                              }}
+                              className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-500"
+                            />
+                            <Server className="h-4 w-4 text-slate-400" />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{nodeLabel}</span>
+                              {node.name && (
+                                <span className="ml-2 text-xs text-slate-400 dark:text-slate-500">{node.ipAddress}</span>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-400 dark:text-slate-500">
+                    {t("reports.nodeCount", { count: String(selectedNodeIds.length) })}
+                  </p>
+                </div>
+              )}
 
               {/* Language */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">

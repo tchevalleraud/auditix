@@ -24,6 +24,7 @@ import {
   BookOpen,
   FileBarChart,
   Palette,
+  Calendar,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -77,6 +78,12 @@ const contextNav: NavCategory[] = [
     items: [
       { key: "sidebar.reports", href: "/reports/list", icon: FileBarChart },
       { key: "sidebar.reportThemes", href: "/reports/themes", icon: Palette },
+    ],
+  },
+  {
+    label: "sidebar.catAutomation",
+    items: [
+      { key: "sidebar.schedules", href: "/schedules", icon: Calendar },
     ],
   },
 ];

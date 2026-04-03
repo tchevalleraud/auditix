@@ -26,6 +26,9 @@ upgrade: ## Pull latest version, rebuild and apply migrations
 	docker compose exec php php bin/console cache:clear --no-interaction
 	@echo "\033[36m[4/5]\033[0m Applying database migrations..."
 	docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction
-	@echo "\033[36m[5/5]\033[0m Restarting services..."
-	docker compose restart php node worker-scheduler worker-monitoring worker-collector worker-generator worker-compliance
+	@echo "\033[36m[5/6]\033[0m Restarting services..."
+	docker compose restart php node worker-scheduler worker-monitoring worker-collector worker-generator worker-cleanup worker-compliance
+	@echo "\033[36m[6/6]\033[0m Waiting for frontend and reloading nginx..."
+	@docker compose exec -T node sh -c 'while ! wget -q --spider http://localhost:3000 2>/dev/null; do sleep 3; done'
+	docker compose restart nginx
 	@echo "\033[32mUpgrade complete!\033[0m"

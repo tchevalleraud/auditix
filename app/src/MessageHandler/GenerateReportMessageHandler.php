@@ -38,13 +38,34 @@ class GenerateReportMessageHandler
                 mkdir($dir, 0775, true);
             }
 
-            $filePath = $dir . '/report.pdf';
-            $this->generatePdf($report, $filePath);
+            if ($report->getType() === Report::TYPE_NODE) {
+                // Generate one PDF per associated node
+                $generatedFiles = [];
+                foreach ($report->getNodes() as $node) {
+                    $nodeDir = $dir . '/node_' . $node->getId();
+                    if (!is_dir($nodeDir)) {
+                        mkdir($nodeDir, 0775, true);
+                    }
+                    $filePath = $nodeDir . '/report.pdf';
+                    $this->generatePdf($report, $filePath, $node);
+                    $generatedFiles[(string) $node->getId()] = sprintf('reports/%d/node_%d/report.pdf', $report->getId(), $node->getId());
+                }
 
-            $report->setGeneratingStatus(null);
-            $report->setGeneratedAt(new \DateTimeImmutable());
-            $report->setGeneratedFile(sprintf('reports/%d/report.pdf', $report->getId()));
-            $this->em->flush();
+                $report->setGeneratingStatus(null);
+                $report->setGeneratedAt(new \DateTimeImmutable());
+                $report->setGeneratedFile(null);
+                $report->setGeneratedFiles($generatedFiles);
+                $this->em->flush();
+            } else {
+                $filePath = $dir . '/report.pdf';
+                $this->generatePdf($report, $filePath);
+
+                $report->setGeneratingStatus(null);
+                $report->setGeneratedAt(new \DateTimeImmutable());
+                $report->setGeneratedFile(sprintf('reports/%d/report.pdf', $report->getId()));
+                $report->setGeneratedFiles(null);
+                $this->em->flush();
+            }
 
             $this->publish($report, 'completed');
         } catch (\Throwable $e) {
@@ -154,7 +175,7 @@ class GenerateReportMessageHandler
         ],
     ];
 
-    private function generatePdf(Report $report, string $filePath): void
+    private function generatePdf(Report $report, string $filePath, ?Node $forNode = null): void
     {
         $locale = $report->getLocale() ?: 'fr';
         $t = self::PDF_TRANSLATIONS[$locale] ?? self::PDF_TRANSLATIONS['fr'];
@@ -173,12 +194,29 @@ class GenerateReportMessageHandler
         $subtitle = $report->getSubtitle() ?? '';
         $contextName = $report->getContext()->getName() ?? '';
 
+        // Resolve {{node...}} variables in title and subtitle
+        $title = $this->resolveNodeVariables($title, $forNode, $report);
+        $subtitle = $this->resolveNodeVariables($subtitle, $forNode, $report);
+
+        // For node-type reports, add node info to variables
+        $nodeName = '';
+        $nodeIp = '';
+        $nodeHostname = '';
+        if ($forNode) {
+            $nodeName = $forNode->getName() ?? $forNode->getHostname() ?? $forNode->getIpAddress();
+            $nodeIp = $forNode->getIpAddress() ?? '';
+            $nodeHostname = $forNode->getHostname() ?? '';
+        }
+
         $variables = [
             'title' => $title,
             'subtitle' => $subtitle,
             'date' => (new \DateTime())->format('d/m/Y'),
             'author' => 'Auditix',
             'context' => $contextName,
+            'nodeName' => $nodeName,
+            'nodeIp' => $nodeIp,
+            'nodeHostname' => $nodeHostname,
         ];
 
         // Index heading styles by level
@@ -227,7 +265,7 @@ class GenerateReportMessageHandler
                 if ($block['type'] === 'heading') {
                     $tocEntries[] = [
                         'level' => $block['level'] ?? 1,
-                        'title' => $block['content'] ?? '',
+                        'title' => $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report),
                         'page' => $pageNum,
                     ];
                 }
@@ -239,7 +277,7 @@ class GenerateReportMessageHandler
                 }
                 $tocEntries[] = [
                     'level' => $block['level'] ?? 1,
-                    'title' => $block['content'] ?? '',
+                    'title' => $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report),
                     'page' => $pageNum,
                 ];
             }
@@ -257,7 +295,7 @@ class GenerateReportMessageHandler
         $pdf->SetMargins(0, 0, 0);
         $pdf->SetAutoPageBreak(false);
         $pdf->AddPage();
-        $this->renderCoverPage($pdf, $coverPage, $variables, $colors);
+        $this->renderCoverPage($pdf, $coverPage, $variables, $colors, $forNode, $report);
 
         // Authors / Diffusion
         if ($report->getShowAuthorsPage()) {
@@ -283,7 +321,7 @@ class GenerateReportMessageHandler
         }
 
         // Render structure blocks
-        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom);
+        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report);
 
         // Post-processing: render headers and footers on all pages except cover (page 1)
         $totalPages = $pdf->getNumPages();
@@ -453,7 +491,7 @@ class GenerateReportMessageHandler
         }
     }
 
-    private function renderCoverPage(TCPDF $pdf, array $coverPage, array $variables, array $colors): void
+    private function renderCoverPage(TCPDF $pdf, array $coverPage, array $variables, array $colors, ?Node $forNode = null, ?Report $report = null): void
     {
         $pageW = $pdf->getPageWidth();
         $pageH = $pdf->getPageHeight();
@@ -484,7 +522,11 @@ class GenerateReportMessageHandler
                 if ($type === 'variable') {
                     $text = htmlspecialchars($variables[$el['variable'] ?? ''] ?? '', ENT_QUOTES, 'UTF-8');
                 } else {
-                    $text = $this->sanitizeHtml(str_replace("\n", '<br>', $el['content'] ?? ''));
+                    $rawContent = $el['content'] ?? '';
+                    if ($report) {
+                        $rawContent = $this->resolveNodeVariables($rawContent, $forNode, $report);
+                    }
+                    $text = $this->sanitizeHtml(str_replace("\n", '<br>', $rawContent));
                 }
 
                 $font = $this->mapFont($style['fontFamily'] ?? 'Helvetica');
@@ -580,6 +622,8 @@ class GenerateReportMessageHandler
         float $mTop,
         float $mRight,
         float $mBottom,
+        ?Node $forNode = null,
+        ?Report $report = null,
     ): void {
         if (empty($blocks)) return;
 
@@ -622,7 +666,7 @@ class GenerateReportMessageHandler
 
             if ($type === 'heading') {
                 $level = $block['level'] ?? 1;
-                $content = $block['content'] ?? '';
+                $content = $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report);
                 $pageBreakBefore = !empty($block['pageBreakBefore']);
 
                 // Update numbering counters
@@ -685,7 +729,7 @@ class GenerateReportMessageHandler
                 $prevType = 'heading';
 
             } elseif ($type === 'paragraph') {
-                $content = $block['content'] ?? '';
+                $content = $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report);
                 $align = $block['align'] ?? $pAlign;
 
                 // --- Page / spacing ---
@@ -980,7 +1024,7 @@ class GenerateReportMessageHandler
 
             } elseif ($type === 'inventory_table') {
                 $columns = $block['columns'] ?? [];
-                $nodeIds = $block['nodeIds'] ?? [];
+                $nodeIds = $forNode ? [$forNode->getId()] : ($block['nodeIds'] ?? []);
                 $showHeader = !empty($block['showHeader']);
                 $invTableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
                 $invThemeFontSize = !empty($invTableStyle['fontSize']) ? (int) $invTableStyle['fontSize'] : $bodySize;
@@ -1339,8 +1383,8 @@ class GenerateReportMessageHandler
             } elseif ($type === 'cli_command') {
                 $dataSource = $block['dataSource'] ?? 'none';
                 $commandName = $block['commandName'] ?? '';
-                $cliNodeIds = $block['nodeIds'] ?? [];
-                $cliTagIds = $block['tagIds'] ?? [];
+                $cliNodeIds = $forNode ? [$forNode->getId()] : ($block['nodeIds'] ?? []);
+                $cliTagIds = $forNode ? [] : ($block['tagIds'] ?? []);
                 $conditionalRules = $block['conditionalRules'] ?? [];
                 $lineFilter = $block['lineFilter'] ?? '';
                 $showEllipsis = !empty($block['showEllipsis']);
@@ -2112,6 +2156,103 @@ class GenerateReportMessageHandler
         $lineH = $size * 0.3528 + 0.5; // pt to mm
         $pdf->SetXY($x, $y + ($h - $lineH) / 2);
         $pdf->Cell($w, $lineH, $text, 0, 0, $align);
+    }
+
+    /**
+     * Resolve {{node.category.key}} or {{node.category.key.colLabel}} for node-type reports,
+     * and {{node[ip].category.key}} or {{node[ip].category.key.colLabel}} for general reports.
+     * Lookups are case-insensitive on category, key, and colLabel.
+     */
+    private function resolveNodeVariables(string $text, ?Node $forNode, Report $report): string
+    {
+        if (strpos($text, '{{') === false) {
+            return $text;
+        }
+
+        $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
+        $nodeRepo = $this->em->getRepository(Node::class);
+        $cache = [];
+
+        // Helper: load inventory data for a node (cached), keyed by lowercase
+        $getNodeData = function (int $nodeId) use ($invRepo, &$cache): array {
+            if (isset($cache[$nodeId])) {
+                return $cache[$nodeId];
+            }
+            $entries = $invRepo->findBy(['node' => $nodeId]);
+            // Build two maps: lowercased keys for lookup, original values
+            $data = [];       // lcCat -> lcKey -> lcCol -> value
+            foreach ($entries as $entry) {
+                $cat = mb_strtolower($entry->getCategoryName());
+                $key = mb_strtolower($entry->getEntryKey());
+                $col = mb_strtolower($entry->getColLabel());
+                $data[$cat][$key][$col] = $entry->getValue() ?? '';
+            }
+            $cache[$nodeId] = $data;
+            return $data;
+        };
+
+        // Helper: resolve a value from inventory data (case-insensitive)
+        $resolve = function (array $data, array $parts): string {
+            if (count($parts) === 2) {
+                // {{node.category.key}} — return first colLabel value
+                $cat = mb_strtolower($parts[0]);
+                $key = mb_strtolower($parts[1]);
+                if (isset($data[$cat][$key])) {
+                    $cols = $data[$cat][$key];
+                    return (string) reset($cols);
+                }
+            } elseif (count($parts) === 3) {
+                // {{node.category.key.colLabel}}
+                $cat = mb_strtolower($parts[0]);
+                $key = mb_strtolower($parts[1]);
+                $col = mb_strtolower($parts[2]);
+                return (string) ($data[$cat][$key][$col] ?? '');
+            }
+            return '';
+        };
+
+        // Pattern for node-type reports: {{node.category.key}} or {{node.category.key.colLabel}}
+        // Must NOT match {{node[...].xxx}} — so require the char after "node" to be a dot, not a bracket
+        if ($forNode) {
+            $text = preg_replace_callback(
+                '/\{\{node\.([^}\[]+)\}\}/',
+                function ($matches) use ($forNode, $getNodeData, $resolve) {
+                    $parts = explode('.', $matches[1]);
+                    if (count($parts) < 2 || count($parts) > 3) {
+                        return $matches[0];
+                    }
+                    $data = $getNodeData($forNode->getId());
+                    return $resolve($data, $parts);
+                },
+                $text
+            );
+        }
+
+        // Pattern for general reports (or also in node reports for cross-node reference):
+        // {{node[10.201.100.41].category.key}} or {{node[10.201.100.41].category.key.colLabel}}
+        $text = preg_replace_callback(
+            '/\{\{node\[([^\]]+)\]\.([^}]+)\}\}/',
+            function ($matches) use ($nodeRepo, $report, $getNodeData, $resolve) {
+                $identifier = $matches[1];
+                $parts = explode('.', $matches[2]);
+                if (count($parts) < 2 || count($parts) > 3) {
+                    return $matches[0];
+                }
+                // Find node by IP in the report's context
+                $node = $nodeRepo->findOneBy([
+                    'ipAddress' => $identifier,
+                    'context' => $report->getContext(),
+                ]);
+                if (!$node) {
+                    return '';
+                }
+                $data = $getNodeData($node->getId());
+                return $resolve($data, $parts);
+            },
+            $text
+        );
+
+        return $text;
     }
 
     private function publish(Report $report, string $status): void
