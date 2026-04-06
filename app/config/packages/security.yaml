@@ -30,6 +30,7 @@ security:
         - { path: ^/api/avatars, roles: PUBLIC_ACCESS }
         - { path: ^/api/logos, roles: PUBLIC_ACCESS }
         - { path: ^/api/block-images/.+, methods: [GET], roles: PUBLIC_ACCESS }
+        - { path: ^/api/public/, roles: PUBLIC_ACCESS }
         - { path: ^/api/contexts/\d+/users, roles: ROLE_USER }
         - { path: ^/api/manufacturers, roles: ROLE_USER }
         - { path: ^/api/models, roles: ROLE_USER }

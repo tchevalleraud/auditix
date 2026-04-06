@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -145,6 +145,13 @@ export default function NodeDetailPage() {
   const [expandedRules, setExpandedRules] = useState<Set<string>>(new Set());
   const [newTag, setNewTag] = useState("");
   const [selectedCollections, setSelectedCollections] = useState<Set<number>>(new Set());
+  // Manual import
+  const [importModal, setImportModal] = useState(false);
+  const [importCommands, setImportCommands] = useState<{ name: string; commands: string }[]>([]);
+  const [importConnectionScript, setImportConnectionScript] = useState("");
+  const [importRawOutput, setImportRawOutput] = useState("");
+  const [importing, setImporting] = useState(false);
+  const [commandsCopied, setCommandsCopied] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
   const [downloading, setDownloading] = useState(false);
 
@@ -202,6 +209,55 @@ export default function NodeDetailPage() {
   }, [nodeId, current]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const openImportModal = async () => {
+    if (!node?.model) return;
+    const [cmdsRes, modelRes] = await Promise.all([
+      fetch(`/api/collection-commands/by-model/${node.model.id}`),
+      fetch(`/api/models/${node.model.id}`),
+    ]);
+    if (cmdsRes.ok) {
+      const cmds = await cmdsRes.json();
+      setImportCommands(cmds.map((c: { name: string; commands: string }) => ({ name: c.name, commands: c.commands })));
+    }
+    if (modelRes.ok) {
+      const m = await modelRes.json();
+      setImportConnectionScript(m.connectionScript || "");
+    }
+    setImportRawOutput("");
+    setImporting(false);
+    setCommandsCopied(false);
+    setImportModal(true);
+  };
+
+  const handleImport = async () => {
+    if (!importRawOutput.trim()) return;
+    setImporting(true);
+    try {
+      const res = await fetch("/api/collections/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeId: Number(nodeId), rawOutput: importRawOutput, tags: ["latest", "manual"] }),
+      });
+      if (res.ok) {
+        setImportModal(false);
+        loadCollections();
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const getAllCommandLines = (): string => {
+    const lines: string[] = [];
+    if (importConnectionScript) {
+      importConnectionScript.split("\n").filter((l) => l.trim()).forEach((l) => lines.push(l.trim()));
+    }
+    importCommands.forEach((cmd) => {
+      cmd.commands.split("\n").filter((l) => l.trim()).forEach((l) => lines.push(l.trim()));
+    });
+    return lines.join("\n");
+  };
 
   const loadCollections = useCallback(async () => {
     setCollectionsLoading(true);
@@ -982,6 +1038,15 @@ export default function NodeDetailPage() {
 
       {tab === "collections" && (
         <div className="space-y-3">
+          {/* Import button */}
+          {node?.model && (
+            <div className="flex justify-end">
+              <button onClick={openImportModal} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                <Upload className="h-4 w-4" />
+                {t("nodes.importCollection")}
+              </button>
+            </div>
+          )}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
             {collectionsLoading ? (
               <div className="flex items-center justify-center py-12">
@@ -1759,6 +1824,98 @@ export default function NodeDetailPage() {
                 </div>
               </>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Import collection modal */}
+      {importModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("nodes.importCollectionTitle")}</h3>
+              <button onClick={() => setImportModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-6">
+              <div className="grid grid-cols-2 gap-6">
+                {/* Left: commands to execute */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("nodes.importCommandsList")}</label>
+                    <button
+                      onClick={() => {
+                        const text = getAllCommandLines();
+                        if (navigator.clipboard && window.isSecureContext) {
+                          navigator.clipboard.writeText(text);
+                        } else {
+                          const ta = document.createElement("textarea");
+                          ta.value = text;
+                          ta.style.position = "fixed";
+                          ta.style.left = "-9999px";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(ta);
+                        }
+                        setCommandsCopied(true);
+                        setTimeout(() => setCommandsCopied(false), 2000);
+                      }}
+                      className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-400 transition-colors"
+                    >
+                      {commandsCopied ? <CheckCircle2 className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      {commandsCopied ? t("nodes.copied") : t("nodes.copyAll")}
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-slate-800 dark:border-slate-600 bg-slate-900 dark:bg-slate-950 max-h-[50vh] overflow-y-auto p-3 font-mono text-xs leading-relaxed">
+                    {/* Connection script */}
+                    {importConnectionScript && importConnectionScript.split("\n").filter((l) => l.trim()).map((line, li) => (
+                      <div key={`cs-${li}`} className="text-emerald-400">
+                        <span className="text-slate-500 select-none">$ </span>{line.trim()}
+                      </div>
+                    ))}
+                    {/* Commands grouped */}
+                    {importCommands.map((cmd, ci) => (
+                      <div key={ci} className="mt-2">
+                        <div className="text-slate-500 select-none"># {cmd.name}</div>
+                        {cmd.commands.split("\n").filter((l) => l.trim()).map((line, li) => (
+                          <div key={li} className="text-emerald-400">
+                            <span className="text-slate-500 select-none">$ </span>{line.trim()}
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {importCommands.length === 0 && !importConnectionScript && (
+                      <div className="text-slate-500">{t("nodes.noCommands")}</div>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("nodes.importCommandsHelp")}</p>
+                </div>
+
+                {/* Right: paste output */}
+                <div className="space-y-3">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("nodes.importRawOutput")}</label>
+                  <textarea
+                    value={importRawOutput}
+                    onChange={(e) => setImportRawOutput(e.target.value)}
+                    rows={20}
+                    placeholder={t("nodes.importRawOutputPlaceholder")}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none resize-none"
+                  />
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("nodes.importRawOutputHelp")}</p>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800 shrink-0">
+              <button onClick={() => setImportModal(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">{t("common.cancel")}</button>
+              <button
+                onClick={handleImport}
+                disabled={importing || !importRawOutput.trim()}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {importing && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("nodes.importSubmit")}
+              </button>
+            </div>
           </div>
         </div>
       )}

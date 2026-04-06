@@ -21,7 +21,7 @@ interface ContextUser {
   avatar: string | null;
 }
 
-type TabKey = "general" | "monitoring" | "retention" | "members";
+type TabKey = "general" | "monitoring" | "retention" | "members" | "lab";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -47,6 +47,13 @@ export default function SettingsPage() {
   const [retentionSaving, setRetentionSaving] = useState(false);
   const [retentionSaved, setRetentionSaved] = useState(false);
 
+  // Lab
+  const [publicEnabled, setPublicEnabled] = useState(false);
+  const [publicToken, setPublicToken] = useState<string | null>(null);
+  const [labCopied, setLabCopied] = useState(false);
+  const [labSaving, setLabSaving] = useState(false);
+  const [labSaved, setLabSaved] = useState(false);
+
   // Members
   const [allUsers, setAllUsers] = useState<ContextUser[]>([]);
   const [memberIds, setMemberIds] = useState<Set<number>>(new Set());
@@ -64,6 +71,8 @@ export default function SettingsPage() {
       setSnmpPollIntervalSeconds(current.snmpPollIntervalSeconds ?? 60);
       setIcmpPollIntervalSeconds(current.icmpPollIntervalSeconds ?? 60);
       setIsDefault(current.isDefault);
+      setPublicEnabled(current.publicEnabled ?? false);
+      setPublicToken(current.publicToken ?? null);
     }
   }, [current]);
 
@@ -167,6 +176,48 @@ export default function SettingsPage() {
     }
   };
 
+  const handleSaveLab = async () => {
+    if (!current) return;
+    setLabSaving(true);
+    setLabSaved(false);
+    try {
+      const res = await fetch(`/api/contexts/${current.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name, description: description || null, monitoringEnabled,
+          publicEnabled,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPublicToken(data.publicToken);
+        await reload();
+        setLabSaved(true);
+        setTimeout(() => setLabSaved(false), 2000);
+      }
+    } finally {
+      setLabSaving(false);
+    }
+  };
+
+  const regenerateToken = async () => {
+    if (!current) return;
+    const res = await fetch(`/api/contexts/${current.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name, description: description || null, monitoringEnabled,
+        regenerateToken: true,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setPublicToken(data.publicToken);
+      await reload();
+    }
+  };
+
   const filteredUsers = allUsers.filter(
     (u) =>
       u.username.toLowerCase().includes(memberSearch.toLowerCase()) ||
@@ -179,6 +230,7 @@ export default function SettingsPage() {
     { key: "monitoring", label: t("settings.tabMonitoring") },
     { key: "retention", label: t("settings.tabRetention") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
+    { key: "lab" as TabKey, label: t("settings.tabLab") },
   ];
 
   if (!current) {
@@ -465,6 +517,105 @@ export default function SettingsPage() {
                   </div>
                 );
               })
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "lab" && (
+        <div className="space-y-6">
+          {/* Enable/Disable */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.labTitle")}</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.labDesc")}</p>
+              </div>
+              <button
+                onClick={() => setPublicEnabled(!publicEnabled)}
+                className="p-1"
+              >
+                {publicEnabled ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                    <Check className="h-3 w-3" />
+                    {t("settings.labActive")}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+                    {t("settings.labInactive")}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {publicEnabled && (
+            <>
+              {/* Public URL */}
+              {publicToken && (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("settings.labUrl")}</h2>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${typeof window !== "undefined" ? window.location.origin : ""}/lab/${publicToken}`}
+                      className={`${inputClass} font-mono text-xs`}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      onClick={() => {
+                        const url = `${window.location.origin}/lab/${publicToken}`;
+                        if (navigator.clipboard && window.isSecureContext) {
+                          navigator.clipboard.writeText(url).then(() => {
+                            setLabCopied(true);
+                            setTimeout(() => setLabCopied(false), 2000);
+                          });
+                        } else {
+                          // Fallback for non-HTTPS contexts
+                          const textArea = document.createElement("textarea");
+                          textArea.value = url;
+                          textArea.style.position = "fixed";
+                          textArea.style.left = "-9999px";
+                          document.body.appendChild(textArea);
+                          textArea.select();
+                          document.execCommand("copy");
+                          document.body.removeChild(textArea);
+                          setLabCopied(true);
+                          setTimeout(() => setLabCopied(false), 2000);
+                        }
+                      }}
+                      className="shrink-0 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    >
+                      {labCopied ? <Check className="h-4 w-4 text-emerald-500" /> : t("settings.labCopy")}
+                    </button>
+                  </div>
+                  <button
+                    onClick={regenerateToken}
+                    className="text-xs text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                  >
+                    {t("settings.labRegenerate")}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Save */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveLab}
+              disabled={labSaving}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+            >
+              {labSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("common.save")}
+            </button>
+            {labSaved && (
+              <span className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+                <Check className="h-4 w-4" />
+                {t("settings.saved")}
+              </span>
             )}
           </div>
         </div>

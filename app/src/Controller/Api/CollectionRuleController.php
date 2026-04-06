@@ -118,32 +118,26 @@ class CollectionRuleController extends AbstractController
 
         $result = [];
 
-        // Rules in manufacturer folder (inherited)
-        if ($manFolder) {
-            $inherited = $em->getRepository(CollectionRule::class)->findBy(
-                ['folder' => $manFolder],
-                ['name' => 'ASC']
-            );
-            foreach ($inherited as $r) {
+        $collectRecursive = function (CollectionRuleFolder $folder, bool $inherited, bool $skipModelFolders = false) use ($em, &$result, &$collectRecursive): void {
+            $rules = $em->getRepository(CollectionRule::class)->findBy(['folder' => $folder], ['name' => 'ASC']);
+            foreach ($rules as $r) {
                 $entry = $this->serializeRule($r);
-                $entry['inherited'] = true;
+                $entry['inherited'] = $inherited;
                 $entry['association'] = 'auto';
                 $result[] = $entry;
             }
-        }
+            $children = $em->getRepository(CollectionRuleFolder::class)->findBy(['parent' => $folder], ['name' => 'ASC']);
+            foreach ($children as $child) {
+                if ($skipModelFolders && $child->getType() === CollectionRuleFolder::TYPE_MODEL) continue;
+                $collectRecursive($child, $inherited, $skipModelFolders);
+            }
+        };
 
-        // Rules in model folder (direct)
+        if ($manFolder) {
+            $collectRecursive($manFolder, true, true);
+        }
         if ($modelFolder) {
-            $direct = $em->getRepository(CollectionRule::class)->findBy(
-                ['folder' => $modelFolder],
-                ['name' => 'ASC']
-            );
-            foreach ($direct as $r) {
-                $entry = $this->serializeRule($r);
-                $entry['inherited'] = false;
-                $entry['association'] = 'auto';
-                $result[] = $entry;
-            }
+            $collectRecursive($modelFolder, false);
         }
 
         // Manually associated rules

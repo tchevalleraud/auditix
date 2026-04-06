@@ -131,6 +131,7 @@ export default function CollectionRuleEditPage() {
   const [extractRegex, setExtractRegex] = useState("");
   const [extractMultiline, setExtractMultiline] = useState(false);
   const [extractGroups, setExtractGroups] = useState<{ isKey: boolean; label: string }[]>([]);
+  const [extractKeyTemplate, setExtractKeyTemplate] = useState("");
   const [extractCategoryId, setExtractCategoryId] = useState<number | null>(null);
   const [extractCategoryKeyLabel, setExtractCategoryKeyLabel] = useState("");
   const [extractNodeField, setExtractNodeField] = useState<string>("");
@@ -322,12 +323,13 @@ export default function CollectionRuleEditPage() {
       .filter((g) => !g.isKey)
       .map((g) => ({ label: g.label.trim() || `Value#${++valueNum}`, group: g.group }));
 
+    const hasKeyTemplate = keyIdx < 0 && extractKeyTemplate.trim();
     const payload = {
       name: extractName,
       regex: extractRegex,
       multiline: extractMultiline,
       keyMode: keyIdx >= 0 ? "extract" as const : "manual" as const,
-      keyManual: null,
+      keyManual: hasKeyTemplate ? extractKeyTemplate.trim() : null,
       keyExtractId: null,
       keyGroup: keyIdx >= 0 ? keyIdx + 1 : null,
       valueGroup: null,
@@ -369,6 +371,7 @@ export default function CollectionRuleEditPage() {
     setExtractRegex("");
     setExtractMultiline(false);
     setExtractGroups([]);
+    setExtractKeyTemplate("");
     setExtractCategoryId(null);
     setExtractCategoryKeyLabel("");
     setExtractNodeField("");
@@ -488,10 +491,13 @@ export default function CollectionRuleEditPage() {
 
     const groups: { isKey: boolean; label: string }[] = Array.from({ length: groupCount }, () => ({ isKey: false, label: "" }));
 
-    // Mark key group
+    // Mark key group or load key template
     if (e.keyMode === "extract" && e.keyGroup) {
       const ki = e.keyGroup - 1;
       if (ki >= 0 && ki < groups.length) groups[ki].isKey = true;
+      setExtractKeyTemplate("");
+    } else {
+      setExtractKeyTemplate(e.keyManual || "");
     }
 
     // Fill value map labels
@@ -587,7 +593,12 @@ export default function CollectionRuleEditPage() {
           if (ext.keyMode === "extract" && ext.keyGroup) {
             key = match[ext.keyGroup] ?? null;
           } else if (ext.keyMode === "manual") {
-            key = ext.keyManual || ext.name;
+            let k = ext.keyManual || ext.name;
+            // Resolve template variables $1, $2, etc.
+            if (k && /\$\d/.test(k)) {
+              k = k.replace(/\$(\d+)/g, (_, n) => match[Number(n)] ?? "");
+            }
+            key = k;
           }
 
           matchDetails.push({
@@ -693,6 +704,9 @@ export default function CollectionRuleEditPage() {
           key = m[kg] ?? m[0];
         } else {
           key = ext.keyManual || ext.name;
+          if (/\$\d/.test(key)) {
+            key = key.replace(/\$(\d+)/g, (_, n) => m[Number(n)] ?? "");
+          }
         }
         const columns: Record<string, string> = {};
         if (hasValueMap) {
@@ -1303,6 +1317,24 @@ export default function CollectionRuleEditPage() {
                               </tbody>
                             </table>
                           </div>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              type="radio"
+                              name="keyGroup"
+                              checked={!extractGroups.some((g) => g.isKey)}
+                              onChange={() => setExtractGroups(extractGroups.map((g) => ({ ...g, isKey: false })))}
+                              className="h-4 w-4 text-slate-900 dark:text-white border-slate-300 dark:border-slate-600 focus:ring-slate-500 cursor-pointer"
+                            />
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.extractKeyTemplate")}</span>
+                            <input
+                              type="text"
+                              value={extractKeyTemplate}
+                              onChange={(e) => { setExtractKeyTemplate(e.target.value); setExtractGroups(extractGroups.map((g) => ({ ...g, isKey: false }))); }}
+                              placeholder="$1-$2"
+                              className="flex-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors"
+                            />
+                          </div>
+                          <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.extractKeyTemplateHelp")}</p>
                           <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.extractCaptureGroupsHelp")}</p>
                         </div>
                       )}

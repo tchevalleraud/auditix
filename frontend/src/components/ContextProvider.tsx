@@ -13,6 +13,7 @@ export interface AppContext {
   snmpPollIntervalSeconds: number;
   icmpPollIntervalSeconds: number;
   isDefault: boolean;
+  publicEnabled: boolean;
   userCount: number;
   createdAt: string;
 }

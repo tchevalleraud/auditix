@@ -32,7 +32,20 @@ import {
   FolderOpen,
   HelpCircle,
   Rows3,
+  Pencil,
+  Copy,
 } from "lucide-react";
+
+interface DataSource {
+  name: string;
+  type: "collection" | "ssh";
+  command: string;
+  tag?: string | null;
+  regex?: string | null;
+  resultMode?: "capture" | "match" | "count" | null;
+  valueMap?: { group: number; label: string }[] | null;
+  keyGroup?: number | null;
+}
 
 interface RuleDetail {
   id: number;
@@ -40,17 +53,7 @@ interface RuleDetail {
   name: string;
   description: string | null;
   enabled: boolean;
-  sourceType: string;
-  sourceCategoryId: number | null;
-  sourceCategoryName: string | null;
-  sourceKey: string | null;
-  sourceValue: string | null;
-  sourceCommand: string | null;
-  sourceTag: string | null;
-  sourceRegex: string | null;
-  sourceResultMode: string | null;
-  sourceValueMap: { group: number; label: string }[] | null;
-  sourceKeyGroup: number | null;
+  dataSources: DataSource[];
   conditionTree: ConditionTree | null;
   multiRowMessages: Record<string, string> | null;
   folderId: number | null;
@@ -66,18 +69,37 @@ interface ConditionBlock {
   result: ConditionResult | null;
 }
 interface ConditionItem {
-  field: string;
+  type: "source" | "inventory";
+  // Source fields
+  source?: string;
+  field?: string;
+  // Inventory fields
+  inventoryCategoryId?: number | null;
+  inventoryKey?: string;
+  inventoryColumn?: string;
+  // Common
   operator: string;
   value: string | null;
+  nodeId?: number | null;
+  nodeTagId?: number | null;
+  nodeManufacturerId?: number | null;
+  nodeModelId?: number | null;
 }
 interface ConditionResult {
   status: "compliant" | "non_compliant" | "error" | "not_applicable";
   message: string;
   severity?: "info" | "low" | "medium" | "high" | "critical";
+  recommendation?: string;
 }
 
+interface NodeTagItem { id: number; name: string; color: string; }
 interface CategoryItem { id: number; name: string; keyLabel: string | null; }
-interface NodeItem { id: number; name: string | null; ipAddress: string; hostname: string | null; manufacturer: { id: number; name: string; logo: string | null } | null; }
+interface InventoryStructure {
+  categoryId: number | null;
+  categoryName: string;
+  entries: { key: string; columns: string[] }[];
+}
+interface NodeItem { id: number; name: string | null; ipAddress: string; hostname: string | null; manufacturer: { id: number; name: string; logo: string | null } | null; model: { id: number; name: string } | null; }
 interface FolderOption { id: number; name: string; depth: number; }
 
 const tabKeys = ["general", "datasource", "conditions"] as const;
@@ -112,17 +134,63 @@ interface BlockListProps {
   operators: { key: string; noValue: boolean }[];
   statuses: { key: ConditionResult["status"]; color: string }[];
   severities: { key: NonNullable<ConditionResult["severity"]>; color: string }[];
-  availableFields: { key: string; label: string }[];
+  sourceFieldOptions: { source: string; field: string; label: string }[];
+  categories: CategoryItem[];
+  inventoryStructure: InventoryStructure[];
+  nodes: NodeItem[];
+  nodeTags: NodeTagItem[];
   inputCls: string;
+  makeEmptyCondition: () => ConditionItem;
   onUpdate: (path: number[], updater: (b: ConditionBlock) => ConditionBlock) => void;
   onRemove: (path: number[]) => void;
   onAddSibling: (parentPath: number[], type: "else_if" | "else") => void;
   onAddNestedIf: (path: number[]) => void;
+  onReorder: (parentPath: number[], fromIdx: number, toIdx: number) => void;
+  onDuplicate: (path: number[]) => void;
 }
 
-function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, availableFields, inputCls, onUpdate, onRemove, onAddSibling, onAddNestedIf }: BlockListProps) {
+function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, sourceFieldOptions, categories, inventoryStructure, nodes, nodeTags, inputCls, makeEmptyCondition, onUpdate, onRemove, onAddSibling, onAddNestedIf, onReorder, onDuplicate }: BlockListProps) {
+  const getInventoryKeys = (catId: number | null | undefined): string[] => {
+    if (!catId) return [];
+    const cat = inventoryStructure.find((c) => c.categoryId === catId);
+    return cat ? cat.entries.map((e) => e.key) : [];
+  };
+  const getInventoryColumns = (catId: number | null | undefined, key: string | undefined): string[] => {
+    if (!catId || !key) return [];
+    const cat = inventoryStructure.find((c) => c.categoryId === catId);
+    const entry = cat?.entries.find((e) => e.key === key);
+    return entry ? entry.columns : [];
+  };
   const hasElse = blocks.some((b) => b.type === "else");
   const smallInput = "rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  // Track which condition/result is being edited
+  const [editingCond, setEditingCond] = useState<string | null>(null);
+  const [editingResult, setEditingResult] = useState<string | null>(null);
+
+  // Build a one-line summary for a condition
+  const condSummary = (cond: ConditionItem): string => {
+    const parts: string[] = [];
+    if (cond.nodeId) {
+      const n = nodes.find((nd) => nd.id === cond.nodeId);
+      parts.push(n ? (n.name || n.hostname || n.ipAddress) : `#${cond.nodeId}`);
+    }
+    const ct = cond.type || "source";
+    if (ct === "source") {
+      parts.push(`${cond.source || "?"}.${ cond.field || "$value"}`);
+    } else {
+      const cat = inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId);
+      parts.push(`${cat?.categoryName || "?"} / ${cond.inventoryKey || "?"}`);
+      if (cond.inventoryColumn && cond.inventoryColumn !== "Value#1") parts.push(`[${cond.inventoryColumn}]`);
+    }
+    const opLabel = cond.operator.replace(/_/g, " ");
+    parts.push(opLabel);
+    if (cond.value !== null && cond.value !== undefined && !["exists", "not_exists", "is_empty", "is_not_empty"].includes(cond.operator)) {
+      parts.push(`"${cond.value}"`);
+    }
+    return parts.join("  ");
+  };
 
   return (
     <div className="space-y-2">
@@ -132,9 +200,18 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
         const noValueOps = new Set(operators.filter((o) => o.noValue).map((o) => o.key));
 
         return (
-          <div key={bIdx} className={`border-l-4 ${colors.border} rounded-lg border border-slate-200 dark:border-slate-700 ${colors.bg}`}>
+          <div
+            key={bIdx}
+            className={`border-l-4 ${colors.border} rounded-lg border border-slate-200 dark:border-slate-700 ${colors.bg} ${dragOverIdx === bIdx && dragIdx !== bIdx ? "ring-2 ring-blue-400" : ""}`}
+            draggable
+            onDragStart={(e) => { setDragIdx(bIdx); e.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverIdx(bIdx); }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={(e) => { e.preventDefault(); setDragOverIdx(null); if (dragIdx !== null && dragIdx !== bIdx) onReorder(parentPath, dragIdx, bIdx); setDragIdx(null); }}
+            onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+          >
             {/* Block header */}
-            <div className="flex items-center justify-between px-4 py-2.5">
+            <div className="flex items-center justify-between px-4 py-2.5 cursor-grab active:cursor-grabbing">
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${colors.badge}`}>
                   {t(`compliance_rules.block${block.type === "else_if" ? "ElseIf" : block.type.charAt(0).toUpperCase() + block.type.slice(1)}`)}
@@ -149,6 +226,15 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                 )}
               </div>
               <div className="flex items-center gap-1">
+                {block.type !== "else" && (
+                  <button
+                    onClick={() => { onUpdate(path, (b) => ({ ...b, conditions: [...b.conditions, makeEmptyCondition()] })); setEditingCond(`${bIdx}-${block.conditions.length}`); }}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
+                    title={t("compliance_rules.addConditionRow")}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
                 {!block.children.length && block.result && (
                   <button
                     onClick={() => onAddNestedIf(path)}
@@ -156,6 +242,15 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                     title={t("compliance_rules.addNestedIf")}
                   >
                     <GitBranch className="h-3 w-3" />
+                  </button>
+                )}
+                {(block.type === "if" || block.type === "else_if") && (
+                  <button
+                    onClick={() => onDuplicate(path)}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
+                    title={t("compliance_rules.duplicateBlock")}
+                  >
+                    <Copy className="h-3 w-3" />
                   </button>
                 )}
                 <button
@@ -170,68 +265,185 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
             {/* Conditions */}
             {block.type !== "else" && (
               <div className="px-4 pb-3 space-y-2">
-                {block.conditions.map((cond, cIdx) => (
-                  <div key={cIdx} className="flex items-center gap-2">
-                    {cIdx > 0 && (
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${block.logic === "and" ? "text-indigo-500" : "text-violet-500"}`}>
-                        {t(`compliance_rules.logic${block.logic === "and" ? "And" : "Or"}`)}
-                      </span>
-                    )}
-                    <select
-                      value={cond.field}
-                      onChange={(e) => onUpdate(path, (b) => {
-                        const cs = [...b.conditions];
-                        cs[cIdx] = { ...cs[cIdx], field: e.target.value };
-                        return { ...b, conditions: cs };
-                      })}
-                      className={`${smallInput} min-w-[120px]`}
-                    >
-                      {availableFields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-                    </select>
-                    <select
-                      value={cond.operator}
-                      onChange={(e) => onUpdate(path, (b) => {
-                        const cs = [...b.conditions];
-                        cs[cIdx] = { ...cs[cIdx], operator: e.target.value, value: noValueOps.has(e.target.value) ? null : cs[cIdx].value };
-                        return { ...b, conditions: cs };
-                      })}
-                      className={`${smallInput} min-w-[140px]`}
-                    >
-                      {operators.map((o) => <option key={o.key} value={o.key}>{t(`compliance_rules.operator_${o.key}`)}</option>)}
-                    </select>
-                    {!noValueOps.has(cond.operator) && (
-                      <input
-                        type="text"
-                        value={cond.value ?? ""}
-                        onChange={(e) => onUpdate(path, (b) => {
-                          const cs = [...b.conditions];
-                          cs[cIdx] = { ...cs[cIdx], value: e.target.value };
-                          return { ...b, conditions: cs };
-                        })}
-                        placeholder="..."
-                        className={`${smallInput} flex-1 font-mono`}
-                      />
-                    )}
-                    {block.conditions.length > 1 && (
-                      <button
-                        onClick={() => onUpdate(path, (b) => ({ ...b, conditions: b.conditions.filter((_, i) => i !== cIdx) }))}
-                        className="p-1 rounded text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors shrink-0"
+                {block.conditions.map((cond, cIdx) => {
+                  const condType = cond.type || "source";
+                  const condKey = `${bIdx}-${cIdx}`;
+                  const isEditing = editingCond === condKey;
+                  const updateCond = (patch: Partial<ConditionItem>) => onUpdate(path, (b) => { const cs = [...b.conditions]; cs[cIdx] = { ...cs[cIdx], ...patch }; return { ...b, conditions: cs }; });
+                  const invKeys = condType === "inventory" ? getInventoryKeys(cond.inventoryCategoryId) : [];
+                  const invCols = condType === "inventory" ? getInventoryColumns(cond.inventoryCategoryId, cond.inventoryKey) : [];
+
+                  return (
+                  <div key={cIdx}>
+                    {/* Compact view */}
+                    {!isEditing && (
+                      <div
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+                        onClick={() => setEditingCond(condKey)}
                       >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
+                        {cIdx > 0 && (
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${block.logic === "and" ? "text-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "text-violet-500 bg-violet-50 dark:bg-violet-500/10"}`}>
+                            {t(`compliance_rules.logic${block.logic === "and" ? "And" : "Or"}`)}
+                          </span>
+                        )}
+                        {cond.nodeId && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-400 shrink-0">
+                            <Server className="h-2.5 w-2.5" />
+                            {(() => { const n = nodes.find((nd) => nd.id === cond.nodeId); return n ? (n.name || n.hostname || n.ipAddress) : `#${cond.nodeId}`; })()}
+                          </span>
+                        )}
+                        {cond.nodeTagId && (
+                          <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0" style={{ backgroundColor: `${nodeTags.find((tg) => tg.id === cond.nodeTagId)?.color || "#6b7280"}20`, color: nodeTags.find((tg) => tg.id === cond.nodeTagId)?.color || "#6b7280" }}>
+                            {nodeTags.find((tg) => tg.id === cond.nodeTagId)?.name || `tag#${cond.nodeTagId}`}
+                          </span>
+                        )}
+                        {cond.nodeManufacturerId && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 dark:bg-orange-500/10 px-2 py-0.5 text-[10px] font-semibold text-orange-600 dark:text-orange-400 shrink-0">
+                            {nodes.find((n) => n.manufacturer?.id === cond.nodeManufacturerId)?.manufacturer?.name || `mfr#${cond.nodeManufacturerId}`}
+                          </span>
+                        )}
+                        {cond.nodeModelId && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-cyan-50 dark:bg-cyan-500/10 px-2 py-0.5 text-[10px] font-semibold text-cyan-600 dark:text-cyan-400 shrink-0">
+                            {nodes.find((n) => n.model?.id === cond.nodeModelId)?.model?.name || `model#${cond.nodeModelId}`}
+                          </span>
+                        )}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${condType === "source" ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                          {condType === "source" ? "SRC" : "INV"}
+                        </span>
+                        <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
+                          {condType === "source"
+                            ? `${cond.source || "?"}.${cond.field || "$value"}`
+                            : `${inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId)?.categoryName || "?"} / ${cond.inventoryKey || "?"}`}
+                        </span>
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">{cond.operator.replace(/_/g, " ")}</span>
+                        {cond.value !== null && cond.value !== undefined && !noValueOps.has(cond.operator) && (
+                          <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{cond.value}&quot;</span>
+                        )}
+                        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                          <Pencil className="h-3 w-3 text-slate-400" />
+                          {block.conditions.length > 1 && (
+                            <button onClick={(e) => { e.stopPropagation(); onUpdate(path, (b) => ({ ...b, conditions: b.conditions.filter((_, i) => i !== cIdx) })); }} className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Expanded edit view */}
+                    {isEditing && (
+                      <div className="rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                        {/* Row 1: Logic + Node filter + Data type */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {cIdx > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${block.logic === "and" ? "text-indigo-500 bg-indigo-50 dark:bg-indigo-500/10" : "text-violet-500 bg-violet-50 dark:bg-violet-500/10"}`}>
+                              {t(`compliance_rules.logic${block.logic === "and" ? "And" : "Or"}`)}
+                            </span>
+                          )}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Node</span>
+                            {(() => {
+                              const currentVal = cond.nodeModelId ? `model:${cond.nodeModelId}` : cond.nodeManufacturerId ? `mfr:${cond.nodeManufacturerId}` : cond.nodeTagId ? `tag:${cond.nodeTagId}` : cond.nodeId ? `node:${cond.nodeId}` : "";
+                              const uniqueMfrs = [...new Map(nodes.filter((n) => n.manufacturer).map((n) => [n.manufacturer!.id, n.manufacturer!])).values()];
+                              const uniqueModels = [...new Map(nodes.filter((n) => n.model).map((n) => [n.model!.id, n.model!])).values()];
+                              return (
+                                <select
+                                  value={currentVal}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    const reset = { nodeId: null, nodeTagId: null, nodeManufacturerId: null, nodeModelId: null };
+                                    if (!v) updateCond(reset);
+                                    else if (v.startsWith("tag:")) updateCond({ ...reset, nodeTagId: Number(v.slice(4)) });
+                                    else if (v.startsWith("mfr:")) updateCond({ ...reset, nodeManufacturerId: Number(v.slice(4)) });
+                                    else if (v.startsWith("model:")) updateCond({ ...reset, nodeModelId: Number(v.slice(6)) });
+                                    else if (v.startsWith("node:")) updateCond({ ...reset, nodeId: Number(v.slice(5)) });
+                                  }}
+                                  className={`${smallInput} max-w-[220px] ${currentVal ? "!border-blue-400 dark:!border-blue-500" : ""}`}
+                                >
+                                  <option value="">{t("compliance_rules.allNodes")}</option>
+                                  {nodeTags.length > 0 && <optgroup label={t("compliance_rules.filterByTag")}>{nodeTags.map((tg) => <option key={`tag:${tg.id}`} value={`tag:${tg.id}`}>{tg.name}</option>)}</optgroup>}
+                                  {uniqueMfrs.length > 0 && <optgroup label={t("compliance_rules.filterByManufacturer")}>{uniqueMfrs.map((m) => <option key={`mfr:${m.id}`} value={`mfr:${m.id}`}>{m.name}</option>)}</optgroup>}
+                                  {uniqueModels.length > 0 && <optgroup label={t("compliance_rules.filterByModel")}>{uniqueModels.map((m) => <option key={`model:${m.id}`} value={`model:${m.id}`}>{m.name}</option>)}</optgroup>}
+                                  <optgroup label={t("compliance_rules.filterByNode")}>{nodes.map((n) => <option key={`node:${n.id}`} value={`node:${n.id}`}>{n.name || n.hostname || n.ipAddress}</option>)}</optgroup>
+                                </select>
+                              );
+                            })()}
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Type</span>
+                            <select value={condType} onChange={(e) => { const nt = e.target.value as "source" | "inventory"; if (nt === "inventory") updateCond({ type: "inventory", inventoryCategoryId: inventoryStructure[0]?.categoryId || null, inventoryKey: "", inventoryColumn: "Value#1", source: undefined, field: undefined }); else updateCond({ type: "source", source: sourceFieldOptions[0]?.source || "", field: sourceFieldOptions[0]?.field || "$value", inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined }); }} className={`${smallInput} w-[110px]`}>
+                              <option value="source">{t("compliance_rules.conditionTypeSource")}</option>
+                              <option value="inventory">{t("compliance_rules.conditionTypeInventory")}</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Row 2: Data source details */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {condType === "source" && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Var</span>
+                              <select value={`${cond.source || ""}.${cond.field || "$value"}`} onChange={(e) => { const [s, ...fParts] = e.target.value.split("."); updateCond({ source: s, field: fParts.join(".") }); }} className={`${smallInput} min-w-[160px] font-mono`}>
+                                {sourceFieldOptions.length === 0 && <option value="">--</option>}
+                                {sourceFieldOptions.map((o) => <option key={o.label} value={`${o.source}.${o.field}`}>{o.label}</option>)}
+                              </select>
+                            </div>
+                          )}
+                          {condType === "inventory" && (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Cat.</span>
+                                <select value={cond.inventoryCategoryId ?? ""} onChange={(e) => updateCond({ inventoryCategoryId: e.target.value ? Number(e.target.value) : null, inventoryKey: "", inventoryColumn: "Value#1" })} className={`${smallInput} max-w-[160px]`}>
+                                  <option value="">--</option>
+                                  {inventoryStructure.map((c) => <option key={c.categoryId ?? c.categoryName} value={c.categoryId ?? ""}>{c.categoryName}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Cle</span>
+                                <select value={cond.inventoryKey || ""} onChange={(e) => updateCond({ inventoryKey: e.target.value, inventoryColumn: "Value#1" })} className={`${smallInput} max-w-[160px] font-mono`}>
+                                  <option value="">--</option>
+                                  {invKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+                                </select>
+                              </div>
+                              {invCols.length > 1 && (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Col.</span>
+                                  <select value={cond.inventoryColumn || "Value#1"} onChange={(e) => updateCond({ inventoryColumn: e.target.value })} className={`${smallInput} max-w-[120px] font-mono`}>
+                                    {invCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                                  </select>
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
+
+                        {/* Row 3: Operator + Value */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Test</span>
+                          <select value={cond.operator} onChange={(e) => updateCond({ operator: e.target.value, value: noValueOps.has(e.target.value) ? null : cond.value })} className={`${smallInput} min-w-[140px]`}>
+                            {operators.map((o) => <option key={o.key} value={o.key}>{t(`compliance_rules.operator_${o.key}`)}</option>)}
+                          </select>
+                          {!noValueOps.has(cond.operator) && (
+                            <input type="text" value={cond.value ?? ""} onChange={(e) => updateCond({ value: e.target.value })} placeholder="..." className={`${smallInput} flex-1 font-mono`} />
+                          )}
+                        </div>
+
+                        {/* Close button */}
+                        <div className="flex items-center justify-between pt-1">
+                          {block.conditions.length > 1 && (
+                            <button onClick={() => { setEditingCond(null); onUpdate(path, (b) => ({ ...b, conditions: b.conditions.filter((_, i) => i !== cIdx) })); }} className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 transition-colors">
+                              <Trash2 className="h-3 w-3" />
+                              {t("common.delete")}
+                            </button>
+                          )}
+                          <button onClick={() => setEditingCond(null)} className="ml-auto flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                            <CheckCircle2 className="h-3 w-3" />
+                            OK
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                ))}
-                <button
-                  onClick={() => onUpdate(path, (b) => ({
-                    ...b,
-                    conditions: [...b.conditions, { field: availableFields[0]?.key || "$value", operator: "equals", value: "" }],
-                  }))}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
-                >
-                  <Plus className="h-3 w-3" />
-                  {t("compliance_rules.addConditionRow")}
-                </button>
+                  );
+                })}
               </div>
             )}
 
@@ -246,8 +458,13 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                   operators={operators}
                   statuses={statuses}
                   severities={severities}
-                  availableFields={availableFields}
+                  sourceFieldOptions={sourceFieldOptions}
+                  categories={categories}
+                  inventoryStructure={inventoryStructure}
+                  nodes={nodes}
+                  nodeTags={nodeTags}
                   inputCls={inputCls}
+                  makeEmptyCondition={makeEmptyCondition}
                   onUpdate={onUpdate}
                   onRemove={(childPath) => {
                     onUpdate(path, (b) => {
@@ -263,7 +480,7 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                       const newBlock: ConditionBlock = {
                         type,
                         logic: "and",
-                        conditions: type === "else" ? [] : [{ field: availableFields[0]?.key || "$value", operator: "equals", value: "" }],
+                        conditions: type === "else" ? [] : [makeEmptyCondition()],
                         children: [],
                         result: { status: "compliant", message: "" },
                       };
@@ -275,59 +492,116 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                       const newIf: ConditionBlock = {
                         type: "if",
                         logic: "and",
-                        conditions: [{ field: availableFields[0]?.key || "$value", operator: "equals", value: "" }],
+                        conditions: [makeEmptyCondition()],
                         children: [],
                         result: { status: "compliant", message: "" },
                       };
                       return { ...b, children: [...b.children, newIf], result: null };
                     });
                   }}
+                  onReorder={onReorder}
+                  onDuplicate={onDuplicate}
                 />
               </div>
             )}
 
             {/* Result (terminal block) */}
-            {block.result && (
-              <div className="mx-4 mb-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 space-y-3">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {statuses.map((s) => (
-                    <button
-                      key={s.key}
-                      onClick={() => onUpdate(path, (b) => ({
-                        ...b,
-                        result: { ...b.result!, status: s.key, severity: s.key === "non_compliant" ? (b.result?.severity || "medium") : undefined },
-                      }))}
-                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${block.result?.status === s.key ? statusColors[s.key] : "border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600"}`}
-                    >
-                      {t(`compliance_rules.status_${s.key}`)}
-                    </button>
-                  ))}
-                </div>
+            {block.result && (() => {
+              const resultKey = path.join("-");
+              const isEditingResult = editingResult === resultKey;
+              const st = block.result.status;
+              const sev = block.result.severity;
+              const msg = block.result.message;
 
-                {block.result.status === "non_compliant" && (
+              return isEditingResult ? (
+                <div className="mx-4 mb-3 p-3 rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 space-y-3">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">{t("compliance_rules.resultSeverity")}:</span>
-                    {severities.map((s) => (
+                    {statuses.map((s) => (
                       <button
                         key={s.key}
-                        onClick={() => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, severity: s.key } }))}
-                        className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${block.result?.severity === s.key ? severityColors[s.key] : "border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600"}`}
+                        onClick={() => onUpdate(path, (b) => ({
+                          ...b,
+                          result: { ...b.result!, status: s.key, severity: s.key === "non_compliant" ? (b.result?.severity || "medium") : undefined },
+                        }))}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${st === s.key ? statusColors[s.key] : "border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600"}`}
                       >
-                        {t(`compliance_rules.severity_${s.key}`)}
+                        {t(`compliance_rules.status_${s.key}`)}
                       </button>
                     ))}
                   </div>
-                )}
 
-                <input
-                  type="text"
-                  value={block.result.message}
-                  onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, message: e.target.value } }))}
-                  placeholder={t("compliance_rules.resultMessagePlaceholder")}
-                  className={`${smallInput} w-full`}
-                />
-              </div>
-            )}
+                  {st === "non_compliant" && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs text-slate-500 dark:text-slate-400 mr-1">{t("compliance_rules.resultSeverity")}:</span>
+                      {severities.map((s) => (
+                        <button
+                          key={s.key}
+                          onClick={() => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, severity: s.key } }))}
+                          className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${sev === s.key ? severityColors[s.key] : "border-slate-200 dark:border-slate-700 text-slate-400 dark:text-slate-500 hover:border-slate-300 dark:hover:border-slate-600"}`}
+                        >
+                          {t(`compliance_rules.severity_${s.key}`)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <input
+                    type="text"
+                    value={msg}
+                    onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, message: e.target.value } }))}
+                    placeholder={t("compliance_rules.resultMessagePlaceholder")}
+                    className={`${smallInput} w-full`}
+                  />
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.recommendation")}</label>
+                    <textarea
+                      value={block.result.recommendation || ""}
+                      onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, recommendation: e.target.value || undefined } }))}
+                      placeholder={t("compliance_rules.recommendationPlaceholder")}
+                      rows={3}
+                      className={`${smallInput} w-full font-mono text-xs resize-none`}
+                    />
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("compliance_rules.recommendationHelp")}</p>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button onClick={() => setEditingResult(null)} className="flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                      <CheckCircle2 className="h-3 w-3" />
+                      OK
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="mx-4 mb-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group space-y-1"
+                  onClick={() => setEditingResult(resultKey)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border shrink-0 ${statusColors[st] || "border-slate-200 text-slate-400"}`}>
+                      {t(`compliance_rules.status_${st}`)}
+                    </span>
+                    {st === "non_compliant" && sev && (
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border shrink-0 ${severityColors[sev] || ""}`}>
+                        {t(`compliance_rules.severity_${sev}`)}
+                      </span>
+                    )}
+                    {msg ? (
+                      <span className="text-xs text-slate-600 dark:text-slate-400 truncate">{msg}</span>
+                    ) : (
+                      <span className="text-xs text-slate-400 dark:text-slate-500 italic">{t("compliance_rules.resultMessagePlaceholder")}</span>
+                    )}
+                    <Pencil className="h-3 w-3 text-slate-400 ml-auto opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                  </div>
+                  {block.result.recommendation && (
+                    <div className="flex items-start gap-1.5 pl-1">
+                      <FileText className="h-3 w-3 text-amber-500 shrink-0 mt-0.5" />
+                      <span className="text-[10px] font-mono text-amber-700 dark:text-amber-400 truncate">{block.result.recommendation.split("\n")[0]}{block.result.recommendation.includes("\n") ? " ..." : ""}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         );
       })}
@@ -378,19 +652,14 @@ export default function ComplianceRuleEditPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // Source fields
-  const [sourceType, setSourceType] = useState("none");
-  const [sourceCategoryId, setSourceCategoryId] = useState<number | null>(null);
-  const [sourceKey, setSourceKey] = useState("");
-  const [sourceValue, setSourceValue] = useState("");
-  const [sourceCommand, setSourceCommand] = useState("");
-  const [sourceTag, setSourceTag] = useState("");
-  const [sourceRegex, setSourceRegex] = useState("");
-  const [sourceResultMode, setSourceResultMode] = useState("capture");
-  const [captureGroups, setCaptureGroups] = useState<{ isKey: boolean; label: string }[]>([]);
+  // Data sources
+  const [dataSources, setDataSources] = useState<DataSource[]>([]);
+  const [editingSourceIdx, setEditingSourceIdx] = useState<number | null>(null);
   const [savingSource, setSavingSource] = useState(false);
   const [savedSource, setSavedSource] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [inventoryStructure, setInventoryStructure] = useState<InventoryStructure[]>([]);
+  const [nodeTags, setNodeTags] = useState<NodeTagItem[]>([]);
 
   // Test
   const [nodes, setNodes] = useState<NodeItem[]>([]);
@@ -399,31 +668,6 @@ export default function ComplianceRuleEditPage() {
   const [showNodeDropdown, setShowNodeDropdown] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null);
-
-  // Capture groups detection
-  const detectedGroupCount = useMemo(() => {
-    if (!sourceRegex) return 0;
-    let count = 0, escaped = false, inCharClass = false;
-    for (let i = 0; i < sourceRegex.length; i++) {
-      const ch = sourceRegex[i];
-      if (escaped) { escaped = false; continue; }
-      if (ch === "\\") { escaped = true; continue; }
-      if (ch === "[") { inCharClass = true; continue; }
-      if (ch === "]") { inCharClass = false; continue; }
-      if (inCharClass) continue;
-      if (ch === "(" && sourceRegex[i + 1] !== "?") count++;
-    }
-    return count;
-  }, [sourceRegex]);
-
-  useEffect(() => {
-    setCaptureGroups((prev) => {
-      if (detectedGroupCount === 0) return [];
-      return Array.from({ length: detectedGroupCount }, (_, i) =>
-        i < prev.length ? prev[i] : { isKey: false, label: "" }
-      );
-    });
-  }, [detectedGroupCount]);
 
   // Conditions
   const [conditionTree, setConditionTree] = useState<ConditionTree | null>(null);
@@ -457,38 +701,7 @@ export default function ComplianceRuleEditPage() {
       setDescription(data.description || "");
       setEnabled(data.enabled);
       setFolderId(data.folderId);
-      setSourceType(data.sourceType || "none");
-      setSourceCategoryId(data.sourceCategoryId);
-      setSourceKey(data.sourceKey || "");
-      setSourceValue(data.sourceValue || "");
-      setSourceCommand(data.sourceCommand || "");
-      setSourceTag(data.sourceTag || "");
-      setSourceRegex(data.sourceRegex || "");
-      setSourceResultMode(data.sourceResultMode || "capture");
-      // Reconstruct captureGroups from saved valueMap
-      const regex = data.sourceRegex || "";
-      let groupCount = 0, esc = false, inCC = false;
-      for (let i = 0; i < regex.length; i++) {
-        const ch = regex[i];
-        if (esc) { esc = false; continue; }
-        if (ch === "\\") { esc = true; continue; }
-        if (ch === "[") { inCC = true; continue; }
-        if (ch === "]") { inCC = false; continue; }
-        if (inCC) continue;
-        if (ch === "(" && regex[i + 1] !== "?") groupCount++;
-      }
-      const groups = Array.from({ length: groupCount }, () => ({ isKey: false, label: "" }));
-      if (data.sourceKeyGroup !== null && data.sourceKeyGroup !== undefined) {
-        const ki = data.sourceKeyGroup - 1;
-        if (ki >= 0 && ki < groups.length) groups[ki].isKey = true;
-      }
-      if (data.sourceValueMap) {
-        data.sourceValueMap.forEach((vm: { group: number; label: string }) => {
-          const vi = vm.group - 1;
-          if (vi >= 0 && vi < groups.length) groups[vi].label = vm.label;
-        });
-      }
-      setCaptureGroups(groups);
+      setDataSources(data.dataSources || []);
       setConditionTree(data.conditionTree || null);
       setMultiRowMessages(data.multiRowMessages || {});
     }
@@ -499,6 +712,12 @@ export default function ComplianceRuleEditPage() {
     if (!current) return;
     const res = await fetch(`/api/inventory-categories?context=${current.id}`);
     if (res.ok) setCategories(await res.json());
+  }, [current]);
+
+  const loadInventoryStructure = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/inventory-categories/structure?context=${current.id}`);
+    if (res.ok) setInventoryStructure(await res.json());
   }, [current]);
 
   const loadNodes = useCallback(async () => {
@@ -536,7 +755,11 @@ export default function ComplianceRuleEditPage() {
     if (activeTab === "datasource") {
       loadCategories();
     }
-  }, [activeTab, loadCategories, loadNodes]);
+    if (activeTab === "conditions") {
+      loadInventoryStructure();
+      if (current) fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setNodeTags);
+    }
+  }, [activeTab, loadCategories, loadNodes, loadInventoryStructure]);
 
   const saveGeneral = async () => {
     if (!name.trim()) return;
@@ -559,49 +782,15 @@ export default function ComplianceRuleEditPage() {
   const saveSource = async () => {
     setSavingSource(true);
     try {
-      const body: Record<string, unknown> = { sourceType };
-      if (sourceType === "inventory") {
-        body.sourceCategoryId = sourceCategoryId;
-        body.sourceKey = sourceKey || null;
-        body.sourceValue = sourceValue || null;
-      } else if (sourceType === "collection" || sourceType === "ssh") {
-        body.sourceCommand = sourceCommand || null;
-        body.sourceTag = sourceType === "collection" ? (sourceTag || null) : null;
-        body.sourceRegex = sourceRegex || null;
-        body.sourceResultMode = sourceResultMode;
-        // Build valueMap from captureGroups (exclude key group)
-        if (sourceResultMode === "capture" && captureGroups.length > 0) {
-          const keyIdx = captureGroups.findIndex((g) => g.isKey);
-          let valNum = 0;
-          const vm = captureGroups
-            .map((g, i) => ({ group: i + 1, label: g.label, isKey: g.isKey }))
-            .filter((g) => !g.isKey)
-            .map((g) => ({ group: g.group, label: g.label.trim() || `Value#${++valNum}` }));
-          body.sourceValueMap = vm.length > 0 ? vm : null;
-          body.sourceKeyGroup = keyIdx >= 0 ? keyIdx + 1 : null;
-        } else {
-          body.sourceValueMap = null;
-          body.sourceKeyGroup = null;
-        }
-      }
-      if (sourceType === "none") {
-        body.sourceCategoryId = null;
-        body.sourceKey = null;
-        body.sourceValue = null;
-        body.sourceCommand = null;
-        body.sourceTag = null;
-        body.sourceRegex = null;
-        body.sourceResultMode = null;
-        body.sourceValueMap = null;
-      }
       const res = await fetch(`/api/compliance-rules/${ruleId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ dataSources }),
       });
       if (res.ok) {
         const data = await res.json();
         setRule(data);
+        setEditingSourceIdx(null);
         setSavedSource(true);
         setTimeout(() => setSavedSource(false), 2000);
       }
@@ -691,28 +880,40 @@ export default function ComplianceRuleEditPage() {
     { key: "critical", color: "red" },
   ];
 
-  const availableFields = useMemo(() => {
-    const st = rule?.sourceType || sourceType;
-    const rm = rule?.sourceResultMode || sourceResultMode;
-    if (st === "none") return [];
-    if (st === "inventory") return [{ key: "$value", label: t("compliance_rules.fieldValue") }];
-    if (rm === "match") return [{ key: "$match", label: t("compliance_rules.fieldMatch") }];
-    if (rm === "count") return [{ key: "$count", label: t("compliance_rules.fieldCount") }];
-    const fields = [{ key: "$value", label: t("compliance_rules.fieldValue") }];
-    const vm = rule?.sourceValueMap;
-    if (vm) {
-      vm.forEach((m) => fields.push({ key: m.label, label: m.label }));
+  // Build available source fields for conditions from dataSources
+  const sourceFieldOptions = useMemo(() => {
+    const options: { source: string; field: string; label: string }[] = [];
+    for (const src of dataSources) {
+      options.push({ source: src.name, field: "$value", label: `${src.name}.$value` });
+      if (src.resultMode === "match") {
+        options.push({ source: src.name, field: "$match", label: `${src.name}.$match` });
+      }
+      if (src.resultMode === "count" || src.resultMode === "capture") {
+        options.push({ source: src.name, field: "$count", label: `${src.name}.$count` });
+      }
+      if (src.resultMode === "capture" && src.valueMap) {
+        for (const vm of src.valueMap) {
+          options.push({ source: src.name, field: vm.label, label: `${src.name}.${vm.label}` });
+        }
+        if (src.keyGroup) {
+          options.push({ source: src.name, field: "$key", label: `${src.name}.$key` });
+        }
+      }
     }
-    if (rule?.sourceKeyGroup) {
-      fields.push({ key: "$key", label: t("compliance_rules.fieldKey") });
+    return options;
+  }, [dataSources]);
+
+  const makeEmptyCondition = (): ConditionItem => {
+    if (sourceFieldOptions.length > 0) {
+      return { type: "source", source: sourceFieldOptions[0].source, field: sourceFieldOptions[0].field, operator: "equals", value: "" };
     }
-    return fields;
-  }, [rule, sourceType, sourceResultMode, t]);
+    return { type: "inventory", inventoryCategoryId: null, inventoryKey: "", inventoryColumn: "Value#1", operator: "equals", value: "" };
+  };
 
   const makeEmptyBlock = (type: ConditionBlock["type"]): ConditionBlock => ({
     type,
     logic: "and",
-    conditions: type === "else" ? [] : [{ field: availableFields[0]?.key || "$value", operator: "equals", value: "" }],
+    conditions: type === "else" ? [] : [makeEmptyCondition()],
     children: [],
     result: { status: "compliant", message: "" },
   });
@@ -882,190 +1083,181 @@ export default function ComplianceRuleEditPage() {
       {/* Data source tab */}
       {activeTab === "datasource" && (
         <div className="space-y-6">
-          {/* Source type selector */}
+          {/* Info banner */}
+          <div className="rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 px-4 py-3 text-xs text-blue-700 dark:text-blue-300">
+            {t("compliance_rules.inventoryHint")}
+          </div>
+
+          {/* Sources list */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
             <div className="p-6 space-y-5">
               <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance_rules.tabDatasource")}</h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_rules.datasourceHelp")}</p>
-                </div>
-                <button onClick={saveSource} disabled={savingSource} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
-                  {savingSource ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {t("common.save")}
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance_rules.dataSources")}</h3>
+                <button
+                  onClick={() => {
+                    setDataSources([...dataSources, { name: "", type: "collection", command: "", regex: "", resultMode: "capture" }]);
+                    setEditingSourceIdx(dataSources.length);
+                  }}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("compliance_rules.addSource")}
                 </button>
               </div>
 
-              <div className="flex gap-3">
-                {[
-                  { key: "none", icon: <Ban className="h-4 w-4" />, label: t("compliance_rules.datasourceNone") },
-                  { key: "inventory", icon: <Package className="h-4 w-4" />, label: t("compliance_rules.dsInventory") },
-                  { key: "collection", icon: <FileText className="h-4 w-4" />, label: t("compliance_rules.dsCollection") },
-                  { key: "ssh", icon: <Terminal className="h-4 w-4" />, label: t("compliance_rules.dsSSH") },
-                ].map((opt) => (
-                  <button key={opt.key} onClick={() => setSourceType(opt.key)}
-                    className={`flex-1 flex items-center gap-3 p-4 rounded-lg border transition-colors ${sourceType === opt.key ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800" : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"}`}
-                  >
-                    <span className={sourceType === opt.key ? "text-slate-900 dark:text-white" : "text-slate-400"}>{opt.icon}</span>
-                    <span className={`text-sm font-medium ${sourceType === opt.key ? "text-slate-900 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}>{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Inventory fields */}
-              {sourceType === "inventory" && (
-                <div className="space-y-4 pt-2">
-                  <div className="space-y-1.5">
-                    <label className={labelCls}>{t("compliance_rules.dsCategory")}</label>
-                    <select value={sourceCategoryId ?? ""} onChange={(e) => setSourceCategoryId(e.target.value ? Number(e.target.value) : null)} className={inputCls}>
-                      <option value="">{t("compliance_rules.dsCategorySelect")}</option>
-                      {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className={labelCls}>{t("compliance_rules.dsKey")}</label>
-                    <input type="text" value={sourceKey} onChange={(e) => setSourceKey(e.target.value)} placeholder={t("compliance_rules.dsKeyPlaceholder")} className={`${inputCls} font-mono`} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className={labelCls}>{t("compliance_rules.dsValue")}</label>
-                    <input type="text" value={sourceValue} onChange={(e) => setSourceValue(e.target.value)} placeholder="Value#1" className={inputCls} />
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsValueHelp")}</p>
-                  </div>
+              {dataSources.length === 0 && (
+                <div className="text-center py-8">
+                  <Database className="h-8 w-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
+                  <p className="text-sm text-slate-400 dark:text-slate-500">{t("compliance_rules.noSources")}</p>
                 </div>
               )}
 
-              {/* Collection / SSH fields — two-column layout */}
-              {(sourceType === "collection" || sourceType === "ssh") && (
-                <div className="grid grid-cols-5 gap-6 pt-2">
-                  {/* Left column 60% — configuration */}
-                  <div className="col-span-3 space-y-4">
-                    {sourceType === "ssh" && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsSSHDesc")}</p>
-                    )}
-                    <div className="space-y-1.5">
-                      <label className={labelCls}>{t("compliance_rules.dsCommand")}</label>
-                      <input type="text" value={sourceCommand} onChange={(e) => setSourceCommand(e.target.value)} placeholder={t("compliance_rules.dsCommandPlaceholder")} className={`${inputCls} font-mono`} />
+              {dataSources.map((src, idx) => (
+                <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                  {/* Source header */}
+                  <div className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-800/50">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${src.type === "ssh" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300" : "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"}`}>
+                        {src.type}
+                      </span>
+                      <span className="text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">{src.name || "(sans nom)"}</span>
+                      {src.command && <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[300px]">{src.command}</span>}
                     </div>
-                    {sourceType === "collection" && (
-                      <div className="space-y-1.5">
-                        <label className={labelCls}>{t("compliance_rules.dsTag")}</label>
-                        <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsTagHelp")}</p>
-                        <input type="text" value={sourceTag} onChange={(e) => setSourceTag(e.target.value)} placeholder="latest" className={inputCls} />
-                      </div>
-                    )}
-                    <div className="space-y-1.5">
-                      <label className={labelCls}>{t("compliance_rules.dsRegex")}</label>
-                      <input type="text" value={sourceRegex} onChange={(e) => setSourceRegex(e.target.value)} placeholder={t("compliance_rules.dsRegexPlaceholder")} className={`${inputCls} font-mono`} />
-                      {detectedGroupCount > 0 && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">{detectedGroupCount} groupe{detectedGroupCount > 1 ? "s" : ""} de capture</p>
-                      )}
-                    </div>
-                    <div className="space-y-1.5">
-                      <label className={labelCls}>{t("compliance_rules.dsResultMode")}</label>
-                      <div className="flex gap-3">
-                        {[
-                          { key: "capture", label: t("compliance_rules.dsCapture") },
-                          { key: "match", label: t("compliance_rules.dsMatch") },
-                          { key: "count", label: t("compliance_rules.dsCount") },
-                        ].map((opt) => (
-                          <button key={opt.key} onClick={() => setSourceResultMode(opt.key)}
-                            className={`flex-1 px-4 py-2.5 rounded-lg border text-sm font-medium transition-colors ${sourceResultMode === opt.key ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white" : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"}`}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setEditingSourceIdx(editingSourceIdx === idx ? null : idx)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+                        <Pencil className="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                      <button onClick={() => { setDataSources(dataSources.filter((_, i) => i !== idx)); if (editingSourceIdx === idx) setEditingSourceIdx(null); }} className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
+                        <Trash2 className="h-3.5 w-3.5 text-slate-400 hover:text-red-500" />
+                      </button>
                     </div>
                   </div>
 
-                  {/* Right column 40% — capture groups */}
-                  <div className="col-span-2">
-                    <div className="space-y-2">
-                      <label className={labelCls}>{t("compliance_rules.dsValueMap")}</label>
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsValueMapHelp")}</p>
-                      {detectedGroupCount > 0 && sourceResultMode === "capture" ? (
-                        <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="bg-slate-50 dark:bg-slate-800/50">
-                                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 w-12">#</th>
-                                <th className="px-3 py-2 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 w-14">{t("compliance_rules.dsGroupKey")}</th>
-                                <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{t("compliance_rules.dsMappingLabel")}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                              {captureGroups.map((g, gIdx) => (
-                                <tr key={gIdx} className={g.isKey ? "bg-amber-50/50 dark:bg-amber-500/5" : ""}>
-                                  <td className="px-3 py-2">
-                                    <code className="text-xs font-mono text-slate-500 dark:text-slate-400">${gIdx + 1}</code>
-                                  </td>
-                                  <td className="px-3 py-2 text-center">
+                  {/* Source edit form */}
+                  {editingSourceIdx === idx && (
+                    <div className="p-4 space-y-4 border-t border-slate-200 dark:border-slate-700">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>{t("compliance_rules.sourceName")}</label>
+                          <input type="text" value={src.name} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], name: e.target.value.replace(/[^a-zA-Z0-9_]/g, "") }; setDataSources(ns); }} placeholder={t("compliance_rules.sourceNamePlaceholder")} className={`${inputCls} font-mono`} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>{t("compliance_rules.sourceType")}</label>
+                          <div className="flex gap-2">
+                            {(["collection", "ssh"] as const).map((tp) => (
+                              <button key={tp} onClick={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], type: tp }; setDataSources(ns); }}
+                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${src.type === tp ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                                {tp === "collection" ? "Collection" : "SSH"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className={labelCls}>{t("compliance_rules.command")}</label>
+                        <input type="text" value={src.command} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], command: e.target.value }; setDataSources(ns); }} placeholder="show hostname" className={`${inputCls} font-mono`} />
+                      </div>
+                      {src.type === "collection" && (
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>Tag</label>
+                          <input type="text" value={src.tag || ""} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], tag: e.target.value || null }; setDataSources(ns); }} placeholder="latest" className={inputCls} />
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <label className={labelCls}>Regex</label>
+                        <input type="text" value={src.regex || ""} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], regex: e.target.value || null }; setDataSources(ns); }} placeholder="^(.+)$" className={`${inputCls} font-mono`} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className={labelCls}>{t("compliance_rules.resultMode")}</label>
+                        <div className="flex gap-2">
+                          {(["capture", "match", "count"] as const).map((rm) => (
+                            <button key={rm} onClick={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], resultMode: rm }; setDataSources(ns); }}
+                              className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${src.resultMode === rm ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                              {rm}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {src.resultMode === "capture" && src.regex && (() => {
+                        let gc = 0, esc2 = false, inCC2 = false;
+                        for (let i = 0; i < (src.regex || "").length; i++) {
+                          const ch = (src.regex || "")[i];
+                          if (esc2) { esc2 = false; continue; }
+                          if (ch === "\\") { esc2 = true; continue; }
+                          if (ch === "[") { inCC2 = true; continue; }
+                          if (ch === "]") { inCC2 = false; continue; }
+                          if (inCC2) continue;
+                          if (ch === "(" && (src.regex || "")[i + 1] !== "?") gc++;
+                        }
+                        if (gc === 0) return null;
+                        const vm = src.valueMap || [];
+                        return (
+                          <div className="space-y-1.5">
+                            <label className={labelCls}>{t("compliance_rules.captureGroups")} ({gc})</label>
+                            <div className="rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                              {Array.from({ length: gc }, (_, gi) => {
+                                const existing = vm.find((v) => v.group === gi + 1);
+                                const isKey = src.keyGroup === gi + 1;
+                                return (
+                                  <div key={gi} className="flex items-center gap-3 px-3 py-2">
+                                    <span className="text-xs text-slate-400 font-mono w-6">${gi + 1}</span>
                                     <input
                                       type="radio"
-                                      name="captureKeyGroup"
-                                      checked={g.isKey}
-                                      onChange={() => {
-                                        setCaptureGroups(captureGroups.map((gr, i) => ({
-                                          ...gr,
-                                          isKey: i === gIdx,
-                                        })));
-                                      }}
-                                      className="h-3.5 w-3.5 accent-amber-500 cursor-pointer"
+                                      name={`keygroup-${idx}`}
+                                      checked={isKey}
+                                      onChange={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], keyGroup: isKey ? null : gi + 1 }; setDataSources(ns); }}
+                                      className="h-3.5 w-3.5"
+                                      title="Key"
                                     />
-                                  </td>
-                                  <td className="px-3 py-2">
+                                    <span className="text-[10px] text-slate-400 w-6">{isKey ? "Key" : ""}</span>
                                     <input
                                       type="text"
-                                      value={g.label}
+                                      value={existing?.label || ""}
                                       onChange={(e) => {
-                                        const next = [...captureGroups];
-                                        next[gIdx] = { ...next[gIdx], label: e.target.value };
-                                        setCaptureGroups(next);
+                                        const ns = [...dataSources];
+                                        const newVm = [...(ns[idx].valueMap || [])];
+                                        const eidx = newVm.findIndex((v) => v.group === gi + 1);
+                                        if (eidx >= 0) newVm[eidx] = { ...newVm[eidx], label: e.target.value };
+                                        else newVm.push({ group: gi + 1, label: e.target.value });
+                                        ns[idx] = { ...ns[idx], valueMap: newVm };
+                                        setDataSources(ns);
                                       }}
-                                      disabled={g.isKey}
-                                      placeholder={g.isKey ? t("compliance_rules.dsGroupKeyPlaceholder") : `Value#${gIdx + 1}`}
-                                      className={`w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors ${g.isKey ? "opacity-50 cursor-not-allowed" : ""}`}
+                                      placeholder={`Value#${gi + 1}`}
+                                      className="flex-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs text-slate-900 dark:text-slate-100 font-mono"
                                     />
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          <p className="px-3 py-2 text-xs text-slate-400 dark:text-slate-500 border-t border-slate-100 dark:border-slate-800">{t("compliance_rules.dsGroupKeyHelp")}</p>
-                        </div>
-                      ) : detectedGroupCount === 0 ? (
-                        <div className="flex items-center gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-                          <Hash className="h-4 w-4 text-slate-400 shrink-0" />
-                          <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsNoGroups")}</p>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-                          <Hash className="h-4 w-4 text-slate-400 shrink-0" />
-                          <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.dsCaptureOnly")}</p>
-                        </div>
-                      )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
-                  </div>
+                  )}
                 </div>
-              )}
+              ))}
+
+              {/* Save button */}
+              <div className="flex items-center justify-end gap-2 pt-2">
+                {savedSource && <span className="text-xs text-emerald-600 dark:text-emerald-400">{t("common.saved")}</span>}
+                <button onClick={saveSource} disabled={savingSource} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                  {savingSource && <Loader2 className="h-4 w-4 animate-spin" />}
+                  {t("common.save")}
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Test section */}
-          {sourceType !== "none" && (
+          {dataSources.length > 0 && (
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
               <div className="p-6 space-y-4">
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance_rules.testTitle")}</h3>
                 <div className="flex items-center gap-3">
-                  {/* Node selector */}
                   <div className="relative flex-1">
-                    <button onClick={() => setShowNodeDropdown(!showNodeDropdown)}
-                      className={`${inputCls} flex items-center justify-between text-left`}
-                    >
+                    <button onClick={() => setShowNodeDropdown(!showNodeDropdown)} className={`${inputCls} flex items-center justify-between text-left`}>
                       <span className={selectedNode ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500"}>
-                        {selectedNode
-                          ? `${selectedNode.name || selectedNode.hostname || selectedNode.ipAddress}${(selectedNode.name || selectedNode.hostname) ? ` — ${selectedNode.ipAddress}` : ""}`
-                          : t("compliance_rules.testSelectNode")}
+                        {selectedNode ? `${selectedNode.name || selectedNode.hostname || selectedNode.ipAddress}${(selectedNode.name || selectedNode.hostname) ? ` — ${selectedNode.ipAddress}` : ""}` : t("compliance_rules.testSelectNode")}
                       </span>
                       <ChevronDown className="h-4 w-4 text-slate-400 shrink-0" />
                     </button>
@@ -1074,41 +1266,24 @@ export default function ComplianceRuleEditPage() {
                         <div className="p-2">
                           <div className="relative">
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                            <input type="text" value={testNodeSearch} onChange={(e) => setTestNodeSearch(e.target.value)}
-                              placeholder={t("compliance_rules.testSearchNode")}
-                              className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1.5 pl-8 pr-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
-                            />
+                            <input type="text" value={testNodeSearch} onChange={(e) => setTestNodeSearch(e.target.value)} placeholder={t("compliance_rules.testSearchNode")} className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1.5 pl-8 pr-3 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none" />
                           </div>
                         </div>
-                        {filteredNodes.length === 0 ? (
-                          <div className="px-3 py-4 text-center text-sm text-slate-400">{t("compliance_rules.testNoNodes")}</div>
-                        ) : (
-                          filteredNodes.slice(0, 20).map((n) => (
-                            <button key={n.id} onClick={() => { setTestNodeId(n.id); setShowNodeDropdown(false); setTestNodeSearch(""); }}
-                              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                            >
-                              {n.manufacturer?.logo ? (
-                                <img src={`/api/logos/${n.manufacturer.logo}`} alt={n.manufacturer.name} className="h-4 w-4 object-contain shrink-0" />
-                              ) : (
-                                <Server className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                              )}
-                              <span className="truncate">{n.name || n.hostname || n.ipAddress}</span>
-                              {(n.name || n.hostname) && <span className="text-xs text-slate-400 truncate">{n.ipAddress}</span>}
-                            </button>
-                          ))
-                        )}
+                        {filteredNodes.slice(0, 20).map((n) => (
+                          <button key={n.id} onClick={() => { setTestNodeId(n.id); setShowNodeDropdown(false); setTestNodeSearch(""); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                            <Server className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                            <span className="truncate">{n.name || n.hostname || n.ipAddress}</span>
+                            {(n.name || n.hostname) && <span className="text-xs text-slate-400 truncate">{n.ipAddress}</span>}
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
-                  <button onClick={runTest} disabled={!testNodeId || testing}
-                    className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors shrink-0"
-                  >
+                  <button onClick={runTest} disabled={!testNodeId || testing} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors shrink-0">
                     {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                     {t("compliance_rules.testExecute")}
                   </button>
                 </div>
-
-                {/* Test result */}
                 {testResult && (
                   <div className="space-y-3">
                     {!(testResult as Record<string, unknown>).success ? (
@@ -1117,121 +1292,22 @@ export default function ComplianceRuleEditPage() {
                         <p className="text-sm text-red-700 dark:text-red-400">{String((testResult as Record<string, unknown>).error)}</p>
                       </div>
                     ) : (
-                      <div className="space-y-3">
-                        <div className="flex items-center gap-2 flex-wrap">
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
                           <CheckCircle className="h-4 w-4 text-emerald-500" />
                           <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{t("compliance_rules.testSuccess")}</span>
-                          {selectedNode && (
-                            <span className="text-xs text-slate-400">
-                              {selectedNode.name || selectedNode.hostname || selectedNode.ipAddress}{(selectedNode.name || selectedNode.hostname) ? ` — ${selectedNode.ipAddress}` : ""}
-                            </span>
-                          )}
-                          {Boolean((testResult as Record<string, unknown>).collectionId) && (
-                            <span className="text-xs text-slate-400">Collection #{String((testResult as Record<string, unknown>).collectionId)}</span>
-                          )}
                         </div>
-
-                        {/* Result display */}
-                        {(testResult as Record<string, unknown>).resultMode === "match" && (
-                          <div className={`flex items-center gap-3 p-4 rounded-lg border ${(testResult as Record<string, unknown>).result ? "border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5" : "border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/5"}`}>
-                            {(testResult as Record<string, unknown>).result
-                              ? <CheckCircle className="h-5 w-5 text-emerald-500" />
-                              : <AlertCircle className="h-5 w-5 text-red-500" />}
-                            <span className={`text-sm font-medium ${(testResult as Record<string, unknown>).result ? "text-emerald-700 dark:text-emerald-400" : "text-red-700 dark:text-red-400"}`}>
-                              {(testResult as Record<string, unknown>).result ? "True" : "False"}
-                            </span>
+                        {(testResult as Record<string, unknown>).fields && (
+                          <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead><tr className="bg-slate-50 dark:bg-slate-800/50"><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Variable</th><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{t("compliance_rules.fieldValue")}</th></tr></thead>
+                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {Object.entries((testResult as Record<string, unknown>).fields as Record<string, unknown>).map(([k, v]) => (
+                                  <tr key={k}><td className="px-3 py-2 font-mono text-xs text-blue-600 dark:text-blue-400">{k}</td><td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-md truncate">{String(v ?? "null")}</td></tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
-                        )}
-
-                        {(testResult as Record<string, unknown>).resultMode === "count" && (
-                          <div className="flex items-center gap-3 p-4 rounded-lg border border-blue-200 dark:border-blue-500/20 bg-blue-50 dark:bg-blue-500/5">
-                            <Hash className="h-5 w-5 text-blue-500" />
-                            <span className="text-sm font-medium text-blue-700 dark:text-blue-400">
-                              {t("compliance_rules.testCount")}: {String((testResult as Record<string, unknown>).result)}
-                            </span>
-                          </div>
-                        )}
-
-                        {(testResult as Record<string, unknown>).resultMode === "capture" && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-slate-400">{t("compliance_rules.testCaptured")}: {String((testResult as Record<string, unknown>).matchCount)}</p>
-                            {Array.isArray((testResult as Record<string, unknown>).result) && (
-                              (() => {
-                                const results = (testResult as Record<string, unknown>).result as unknown[];
-                                if (results.length === 0) return <p className="text-sm text-slate-400">{t("compliance_rules.testNoMatch")}</p>;
-                                const first = results[0];
-                                if (typeof first === "object" && first !== null) {
-                                  const keys = Object.keys(first as Record<string, unknown>);
-                                  return (
-                                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                                      <table className="w-full text-sm">
-                                        <thead>
-                                          <tr className="bg-slate-50 dark:bg-slate-800/50">
-                                            {keys.map((k) => <th key={k} className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">{k}</th>)}
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                          {results.map((row, i) => (
-                                            <tr key={i}>
-                                              {keys.map((k) => <td key={k} className="px-3 py-2 text-slate-700 dark:text-slate-300 font-mono text-xs">{String((row as Record<string, unknown>)[k] ?? "")}</td>)}
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
-                                  );
-                                }
-                                return (
-                                  <div className="space-y-1">
-                                    {results.map((v, i) => (
-                                      <div key={i} className="px-3 py-1.5 rounded bg-slate-50 dark:bg-slate-800 text-sm font-mono text-slate-700 dark:text-slate-300">{String(v)}</div>
-                                    ))}
-                                  </div>
-                                );
-                              })()
-                            )}
-                          </div>
-                        )}
-
-                        {/* Inventory result */}
-                        {String((testResult as Record<string, unknown>).sourceType) === "inventory" && (
-                          <div className="p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
-                            <p className="text-sm font-mono text-slate-700 dark:text-slate-300">
-                              {(testResult as Record<string, unknown>).result !== null
-                                ? (Array.isArray((testResult as Record<string, unknown>).result)
-                                  ? ((testResult as Record<string, unknown>).result as string[]).join(", ")
-                                  : String((testResult as Record<string, unknown>).result))
-                                : t("compliance_rules.testNoMatch")}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Raw output */}
-                        {Boolean((testResult as Record<string, unknown>).rawOutput) && (
-                          <details className="group">
-                            <summary className="text-xs text-slate-400 dark:text-slate-500 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">{t("compliance_rules.testRawOutput")}</summary>
-                            <pre className="mt-2 p-3 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 overflow-x-auto max-h-60 overflow-y-auto font-mono whitespace-pre-wrap">
-                              {(() => {
-                                const raw = String((testResult as Record<string, unknown>).rawOutput);
-                                if (!sourceRegex) return raw;
-                                try {
-                                  const re = new RegExp(sourceRegex, "gm");
-                                  const parts: React.ReactNode[] = [];
-                                  let lastIndex = 0;
-                                  let match: RegExpExecArray | null;
-                                  let key = 0;
-                                  while ((match = re.exec(raw)) !== null) {
-                                    if (match.index > lastIndex) parts.push(raw.slice(lastIndex, match.index));
-                                    parts.push(<mark key={key++} className="bg-amber-200 dark:bg-amber-500/30 text-amber-900 dark:text-amber-200 rounded-sm px-0.5">{match[0]}</mark>);
-                                    lastIndex = re.lastIndex;
-                                    if (match[0].length === 0) re.lastIndex++;
-                                  }
-                                  if (lastIndex < raw.length) parts.push(raw.slice(lastIndex));
-                                  return parts.length > 0 ? parts : raw;
-                                } catch { return raw; }
-                              })()}
-                            </pre>
-                          </details>
                         )}
                       </div>
                     )}
@@ -1261,22 +1337,13 @@ export default function ComplianceRuleEditPage() {
                   >
                     <HelpCircle className="h-4 w-4" />
                   </button>
-                  {conditionTree && sourceType !== "none" && (
+                  {conditionTree && (
                     <button
                       onClick={() => { setShowEvalModal(true); setEvalResult(null); setEvalNodeSearch(""); }}
                       className="flex items-center gap-2 rounded-lg bg-indigo-600 dark:bg-indigo-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-colors"
                     >
                       <Play className="h-4 w-4" />
                       {t("compliance_rules.evaluateRule")}
-                    </button>
-                  )}
-                  {conditionTree && (rule?.sourceType === "collection" || rule?.sourceType === "ssh") && rule?.sourceResultMode === "capture" && rule?.sourceValueMap && rule.sourceValueMap.length >= 2 && (
-                    <button
-                      onClick={() => setShowMultiRowModal(true)}
-                      className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                    >
-                      <Rows3 className="h-4 w-4" />
-                      {t("compliance_rules.multiRowBtn")}
                     </button>
                   )}
                   {conditionTree && (
@@ -1312,12 +1379,7 @@ export default function ComplianceRuleEditPage() {
                 </div>
               </div>
 
-              {sourceType === "none" ? (
-                <div className="flex items-center gap-3 p-4 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/5">
-                  <AlertCircle className="h-5 w-5 text-amber-500 shrink-0" />
-                  <p className="text-sm text-amber-700 dark:text-amber-400">{t("compliance_rules.noSourceWarning")}</p>
-                </div>
-              ) : !conditionTree ? (
+              {!conditionTree ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
                     <Filter className="h-5 w-5 text-slate-400 shrink-0" />
@@ -1344,8 +1406,13 @@ export default function ComplianceRuleEditPage() {
                     operators={operators}
                     statuses={statuses}
                     severities={severities}
-                    availableFields={availableFields}
+                    sourceFieldOptions={sourceFieldOptions}
+                    categories={categories}
+                    inventoryStructure={inventoryStructure}
+                    nodes={nodes}
+                    nodeTags={nodeTags}
                     inputCls={inputCls}
+                    makeEmptyCondition={makeEmptyCondition}
                     onUpdate={(path, updater) => setConditionTree((prev) => prev ? updateBlockAtPath(prev, path, updater) : prev)}
                     onRemove={(path) => {
                       setConditionTree((prev) => {
@@ -1357,6 +1424,36 @@ export default function ComplianceRuleEditPage() {
                     }}
                     onAddSibling={(parentPath, type) => setConditionTree((prev) => prev ? addBlockAtPath(prev, parentPath, type) : prev)}
                     onAddNestedIf={(path) => setConditionTree((prev) => prev ? addNestedIfAtPath(prev, path) : prev)}
+                    onReorder={(parentPath, fromIdx, toIdx) => {
+                      setConditionTree((prev) => {
+                        if (!prev) return prev;
+                        const t2 = JSON.parse(JSON.stringify(prev)) as ConditionTree;
+                        let blocks = t2.blocks;
+                        for (const idx of parentPath) blocks = blocks[idx].children;
+                        const [moved] = blocks.splice(fromIdx, 1);
+                        blocks.splice(toIdx, 0, moved);
+                        blocks.forEach((b, i) => {
+                          if (i === 0) b.type = "if";
+                          else if (b.type === "if") b.type = "else_if";
+                        });
+                        return t2;
+                      });
+                    }}
+                    onDuplicate={(path) => {
+                      setConditionTree((prev) => {
+                        if (!prev) return prev;
+                        const t2 = JSON.parse(JSON.stringify(prev)) as ConditionTree;
+                        let blocks = t2.blocks;
+                        for (let i = 0; i < path.length - 1; i++) blocks = blocks[path[i]].children;
+                        const idx = path[path.length - 1];
+                        const clone = JSON.parse(JSON.stringify(blocks[idx])) as ConditionBlock;
+                        clone.type = "else_if";
+                        // Clear nodeId on cloned conditions so user can reassign
+                        clone.conditions.forEach((c) => { c.nodeId = null; });
+                        blocks.splice(idx + 1, 0, clone);
+                        return t2;
+                      });
+                    }}
                   />
                 </div>
               )}
@@ -1540,8 +1637,6 @@ export default function ComplianceRuleEditPage() {
                   const er = evalResult as Record<string, unknown>;
                   const nodeInfo = er.node as Record<string, unknown> | undefined;
                   const evaluation = er.evaluation as Record<string, unknown> | null;
-                  const isMultiRow = Boolean(er.multiRow);
-                  const rowResults = (er.rowResults || []) as { row: number; fields: Record<string, unknown>; evaluation: Record<string, unknown> | null }[];
                   const status = evaluation?.status as string | undefined;
                   const severity = evaluation?.severity as string | undefined;
                   const message = evaluation?.message as string | undefined;
@@ -1587,11 +1682,17 @@ export default function ComplianceRuleEditPage() {
                                 {t(`compliance_rules.severity_${severity}`)}
                               </span>
                             )}
-                            {isMultiRow && (
-                              <span className="text-xs text-slate-400 ml-auto">{t("compliance_rules.evaluateRowCount", { count: String(er.rowCount) })}</span>
-                            )}
                           </div>
                           {message && <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>}
+                          {(evaluation.recommendation as string | undefined) && (
+                            <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/5 overflow-hidden">
+                              <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-200 dark:border-amber-500/20">
+                                <FileText className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">{t("compliance_rules.recommendation")}</span>
+                              </div>
+                              <pre className="px-3 py-2 text-xs font-mono text-amber-900 dark:text-amber-200 whitespace-pre-wrap">{String(evaluation.recommendation)}</pre>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
@@ -1600,32 +1701,6 @@ export default function ComplianceRuleEditPage() {
                         </div>
                       )}
 
-                      {/* Per-row details */}
-                      {isMultiRow && rowResults.length > 0 && (
-                        <details className="group">
-                          <summary className="text-xs text-slate-400 dark:text-slate-500 cursor-pointer hover:text-slate-600 dark:hover:text-slate-300">{t("compliance_rules.evaluateDetails")}</summary>
-                          <div className="mt-2 space-y-1.5">
-                            {rowResults.map((rr) => {
-                              const keyVal = rr.fields?.["$key"] as string | undefined;
-                              const label = keyVal || `#${rr.row + 1}`;
-                              const rowMsg = rr.evaluation?.message as string | undefined;
-                              return (
-                                <div key={rr.row} className={`px-3 py-2 rounded-lg border text-sm ${
-                                  rr.evaluation?.status === "compliant" ? "border-emerald-200 dark:border-emerald-500/20 bg-emerald-50/50 dark:bg-emerald-500/5" :
-                                  rr.evaluation?.status === "non_compliant" ? "border-red-200 dark:border-red-500/20 bg-red-50/50 dark:bg-red-500/5" :
-                                  "border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50"
-                                }`}>
-                                  <div className="flex items-center justify-between">
-                                    <span className="font-mono text-xs text-slate-600 dark:text-slate-300">{label}</span>
-                                    {renderEvalBadge(rr.evaluation)}
-                                  </div>
-                                  {rowMsg && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{rowMsg}</p>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      )}
                     </div>
                   );
                 })()}

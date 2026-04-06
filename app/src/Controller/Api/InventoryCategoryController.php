@@ -110,12 +110,12 @@ class InventoryCategoryController extends AbstractController
 
         // Get all unique category/entryKey/colLabel combinations for this context
         $qb = $em->createQueryBuilder();
-        $rows = $qb->select('e.categoryName, e.entryKey, e.colLabel')
+        $rows = $qb->select('IDENTITY(e.category) as categoryId, e.categoryName, e.entryKey, e.colLabel')
             ->from(NodeInventoryEntry::class, 'e')
             ->join('e.node', 'n')
             ->where('n.context = :context')
             ->setParameter('context', $context)
-            ->groupBy('e.categoryName, e.entryKey, e.colLabel')
+            ->groupBy('e.category, e.categoryName, e.entryKey, e.colLabel')
             ->orderBy('e.categoryName', 'ASC')
             ->addOrderBy('e.entryKey', 'ASC')
             ->addOrderBy('e.colLabel', 'ASC')
@@ -125,17 +125,19 @@ class InventoryCategoryController extends AbstractController
         // Group: category → entries[key → columns[]]
         $categories = [];
         foreach ($rows as $row) {
-            $cat = $row['categoryName'];
+            $catName = $row['categoryName'];
+            $catId = $row['categoryId'];
             $key = $row['entryKey'];
             $col = $row['colLabel'];
 
-            if (!isset($categories[$cat])) {
-                $categories[$cat] = ['categoryName' => $cat, 'entries' => []];
+            $catKey = $catId ?: '__' . $catName;
+            if (!isset($categories[$catKey])) {
+                $categories[$catKey] = ['categoryId' => $catId ? (int)$catId : null, 'categoryName' => $catName, 'entries' => []];
             }
-            if (!isset($categories[$cat]['entries'][$key])) {
-                $categories[$cat]['entries'][$key] = ['key' => $key, 'columns' => []];
+            if (!isset($categories[$catKey]['entries'][$key])) {
+                $categories[$catKey]['entries'][$key] = ['key' => $key, 'columns' => []];
             }
-            $categories[$cat]['entries'][$key]['columns'][] = $col;
+            $categories[$catKey]['entries'][$key]['columns'][] = $col;
         }
 
         // Convert to indexed arrays

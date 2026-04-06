@@ -20,6 +20,10 @@ import {
   Ban,
   Minus,
   AlertTriangle,
+  ChevronDown,
+  Trash2,
+  Upload,
+  Pencil,
 } from "lucide-react";
 
 interface NodeTag {
@@ -64,6 +68,30 @@ export default function NodesPage() {
   const [complianceHelpOpen, setComplianceHelpOpen] = useState(false);
   // Compliance evaluation status per node: pending | running
   const [complianceStatus, setComplianceStatus] = useState<Record<number, string>>({});
+
+  // Action dropdown, bulk delete, bulk add
+  const [actionMenuOpen, setActionMenuOpen] = useState<false | "actions" | "add" | "edit">(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [bulkAddModal, setBulkAddModal] = useState(false);
+  const [bulkAddInput, setBulkAddInput] = useState("");
+  const [bulkAdding, setBulkAdding] = useState(false);
+  const [bulkManufacturerId, setBulkManufacturerId] = useState<number | null>(null);
+  const [bulkModelId, setBulkModelId] = useState<number | null>(null);
+  const [bulkProfileId, setBulkProfileId] = useState<number | null>(null);
+  const [bulkPolicy, setBulkPolicy] = useState<string>("audit");
+  const [manufacturers, setManufacturers] = useState<{ id: number; name: string }[]>([]);
+  const [models, setModels] = useState<{ id: number; name: string; manufacturer: { id: number } }[]>([]);
+  const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
+  const [allTags, setAllTags] = useState<NodeTag[]>([]);
+  // Bulk edit
+  const [bulkEditModal, setBulkEditModal] = useState(false);
+  const [editManufacturerId, setEditManufacturerId] = useState<number | null | undefined>(undefined);
+  const [editModelId, setEditModelId] = useState<number | null | undefined>(undefined);
+  const [editProfileId, setEditProfileId] = useState<number | null | undefined>(undefined);
+  const [editPolicy, setEditPolicy] = useState<string | undefined>(undefined);
+  const [editTagIds, setEditTagIds] = useState<number[]>([]);
+  const [editTagMode, setEditTagMode] = useState<"add" | "replace">("add");
+  const [bulkEditing, setBulkEditing] = useState(false);
 
   // Collection status indicators per node: pending | running | completed | failed
   const [collectStatus, setCollectStatus] = useState<Record<number, string>>({});
@@ -290,6 +318,107 @@ export default function NodesPage() {
     }
   };
 
+  const loadEditLists = () => {
+    if (!current) return;
+    fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers);
+    fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels);
+    fetch(`/api/profiles?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setProfiles);
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setAllTags);
+  };
+
+  const openBulkEdit = () => {
+    setEditManufacturerId(undefined);
+    setEditModelId(undefined);
+    setEditProfileId(undefined);
+    setEditPolicy(undefined);
+    setEditTagIds([]);
+    setEditTagMode("add");
+    loadEditLists();
+    setBulkEditModal(true);
+  };
+
+  const handleBulkEdit = async () => {
+    if (selected.size === 0) return;
+    setBulkEditing(true);
+    try {
+      for (const id of selected) {
+        const body: Record<string, unknown> = {};
+        if (editManufacturerId !== undefined) body.manufacturerId = editManufacturerId;
+        if (editModelId !== undefined) body.modelId = editModelId;
+        if (editProfileId !== undefined) body.profileId = editProfileId;
+        if (editPolicy !== undefined) body.policy = editPolicy;
+        if (editTagIds.length > 0) body.tagIds = editTagIds;
+        if (editTagIds.length > 0) body.tagMode = editTagMode;
+        if (Object.keys(body).length > 0) {
+          await fetch(`/api/nodes/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+        }
+      }
+      setBulkEditModal(false);
+      setSelected(new Set());
+      loadNodes();
+    } finally {
+      setBulkEditing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    for (const id of selected) {
+      await fetch(`/api/nodes/${id}`, { method: "DELETE" });
+    }
+    setSelected(new Set());
+    setDeleteConfirm(false);
+    loadNodes();
+  };
+
+  const parseBulkIps = (input: string): string[] => {
+    const ips: string[] = [];
+    for (const line of input.split(/[\n,;]+/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      // Range: 10.201.100.41-45
+      const rangeMatch = trimmed.match(/^(\d+\.\d+\.\d+\.)(\d+)-(\d+)$/);
+      if (rangeMatch) {
+        const prefix = rangeMatch[1];
+        const start = parseInt(rangeMatch[2], 10);
+        const end = parseInt(rangeMatch[3], 10);
+        for (let i = start; i <= end; i++) ips.push(prefix + i);
+      } else if (/^\d+\.\d+\.\d+\.\d+$/.test(trimmed)) {
+        ips.push(trimmed);
+      }
+    }
+    return ips;
+  };
+
+  const handleBulkAdd = async () => {
+    if (!current) return;
+    const ips = parseBulkIps(bulkAddInput);
+    if (ips.length === 0) return;
+    setBulkAdding(true);
+    try {
+      for (const ip of ips) {
+        const body: Record<string, unknown> = { ipAddress: ip, policy: bulkPolicy };
+        if (bulkManufacturerId) body.manufacturerId = bulkManufacturerId;
+        if (bulkModelId) body.modelId = bulkModelId;
+        if (bulkProfileId) body.profileId = bulkProfileId;
+        await fetch(`/api/nodes?context=${current.id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+      setBulkAddModal(false);
+      setBulkAddInput("");
+      loadNodes();
+    } finally {
+      setBulkAdding(false);
+    }
+  };
+
   const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
@@ -320,37 +449,80 @@ export default function NodesPage() {
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
             <>
+              {/* Actions dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setActionMenuOpen(actionMenuOpen === "actions" ? false : "actions")}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Play className="h-4 w-4" />
+                  {t("nodes.actions")} ({selected.size})
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                {actionMenuOpen === "actions" && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setActionMenuOpen(false)} />
+                    <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
+                      <button onClick={() => { handlePing(); setActionMenuOpen(false); }} disabled={pinging} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50">
+                        {pinging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4 text-blue-500" />}
+                        {t("nodes.pingSelected", { count: String(selected.size) })}
+                      </button>
+                      <button onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                        <Play className="h-4 w-4 text-emerald-500" />
+                        {t("nodes.collectSelected", { count: String(selected.size) })}
+                      </button>
+                      <button onClick={() => { handleEvaluateCompliance(); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                        <ShieldCheck className="h-4 w-4 text-violet-500" />
+                        {t("nodes.evaluateSelected", { count: String(selected.size) })}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Bulk edit */}
               <button
-                onClick={handleEvaluateCompliance}
+                onClick={openBulkEdit}
                 className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
-                <ShieldCheck className="h-4 w-4" />
-                {t("nodes.evaluateSelected", { count: String(selected.size) })}
+                <Pencil className="h-4 w-4" />
+                {t("nodes.editSelected", { count: String(selected.size) })}
               </button>
+              {/* Delete selected */}
               <button
-                onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
-                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                onClick={() => setDeleteConfirm(true)}
+                className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
               >
-                <Play className="h-4 w-4" />
-                {t("nodes.collectSelected", { count: String(selected.size) })}
-              </button>
-              <button
-                onClick={handlePing}
-                disabled={pinging}
-                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors"
-              >
-                {pinging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
-                {t("nodes.pingSelected", { count: String(selected.size) })}
+                <Trash2 className="h-4 w-4" />
+                {t("nodes.deleteSelected", { count: String(selected.size) })}
               </button>
             </>
           )}
-          <Link
-            href="/nodes/new"
-            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            {t("nodes.newNode")}
-          </Link>
+          <div className="relative flex">
+            <Link
+              href="/nodes/new"
+              className="flex items-center gap-2 rounded-l-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              {t("nodes.newNode")}
+            </Link>
+            <button
+              onClick={() => setActionMenuOpen(actionMenuOpen === "add" ? false : "add")}
+              className="flex items-center rounded-r-lg border-l border-slate-700 dark:border-slate-300 bg-slate-900 dark:bg-white px-2 py-2.5 text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+            {actionMenuOpen === "add" && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setActionMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 w-48 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
+                  <button onClick={() => { setActionMenuOpen(false); setBulkAddModal(true); setBulkAddInput(""); setBulkManufacturerId(null); setBulkModelId(null); setBulkProfileId(null); setBulkPolicy("audit"); if (current) { fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers); fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels); fetch(`/api/profiles?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setProfiles); } }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                    <Upload className="h-4 w-4 text-blue-500" />
+                    {t("nodes.bulkAdd")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -765,6 +937,190 @@ export default function NodesPage() {
               >
                 {collecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                 {t("nodes.collectStart")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 space-y-4">
+            <p className="text-sm text-slate-700 dark:text-slate-300">
+              {t("nodes.confirmBulkDelete", { count: String(selected.size) })}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setDeleteConfirm(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                {t("common.cancel")}
+              </button>
+              <button onClick={handleBulkDelete} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors">
+                {t("common.delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk edit modal */}
+      {bulkEditModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("nodes.editSelectedTitle", { count: String(selected.size) })}</h3>
+              <button onClick={() => setBulkEditModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"><X className="h-5 w-5 text-slate-400" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-slate-400 dark:text-slate-500">{t("nodes.editSelectedHelp")}</p>
+              {/* Manufacturer + Model */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.manufacturer")}</label>
+                  <select value={editManufacturerId === undefined ? "__unchanged__" : (editManufacturerId ?? "")} onChange={(e) => { const v = e.target.value; if (v === "__unchanged__") { setEditManufacturerId(undefined); setEditModelId(undefined); } else { setEditManufacturerId(v ? Number(v) : null); setEditModelId(undefined); } }} className={inputClass}>
+                    <option value="__unchanged__">— {t("nodes.unchanged")} —</option>
+                    <option value="">{t("nodes.none")}</option>
+                    {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.model")}</label>
+                  <select value={editModelId === undefined ? "__unchanged__" : (editModelId ?? "")} onChange={(e) => { const v = e.target.value; setEditModelId(v === "__unchanged__" ? undefined : v ? Number(v) : null); }} className={inputClass}>
+                    <option value="__unchanged__">— {t("nodes.unchanged")} —</option>
+                    <option value="">{t("nodes.none")}</option>
+                    {(editManufacturerId ? models.filter((m) => m.manufacturer?.id === editManufacturerId) : models).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              {/* Profile + Policy */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.profile")}</label>
+                  <select value={editProfileId === undefined ? "__unchanged__" : (editProfileId ?? "")} onChange={(e) => { const v = e.target.value; setEditProfileId(v === "__unchanged__" ? undefined : v ? Number(v) : null); }} className={inputClass}>
+                    <option value="__unchanged__">— {t("nodes.unchanged")} —</option>
+                    <option value="">{t("nodes.none")}</option>
+                    {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.policy")}</label>
+                  <select value={editPolicy === undefined ? "__unchanged__" : editPolicy} onChange={(e) => { const v = e.target.value; setEditPolicy(v === "__unchanged__" ? undefined : v); }} className={inputClass}>
+                    <option value="__unchanged__">— {t("nodes.unchanged")} —</option>
+                    <option value="audit">Audit</option>
+                    <option value="enforce">Enforce</option>
+                  </select>
+                </div>
+              </div>
+              {/* Tags */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className={labelClass}>{t("nodes.tags")}</label>
+                  <div className="flex gap-1">
+                    <button onClick={() => setEditTagMode("add")} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${editTagMode === "add" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" : "text-slate-400 hover:text-slate-600"}`}>{t("nodes.tagsAdd")}</button>
+                    <button onClick={() => setEditTagMode("replace")} className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${editTagMode === "replace" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" : "text-slate-400 hover:text-slate-600"}`}>{t("nodes.tagsReplace")}</button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {allTags.map((tag) => {
+                    const active = editTagIds.includes(tag.id);
+                    return (
+                      <button key={tag.id} onClick={() => setEditTagIds(active ? editTagIds.filter((id) => id !== tag.id) : [...editTagIds, tag.id])}
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors border ${active ? "" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}
+                        style={active ? { backgroundColor: tag.color + "20", color: tag.color, borderColor: tag.color + "40" } : {}}
+                      >
+                        <Tag className="h-3 w-3" />
+                        {tag.name}
+                      </button>
+                    );
+                  })}
+                  {allTags.length === 0 && <span className="text-xs text-slate-400">{t("nodes.noTags")}</span>}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={() => setBulkEditModal(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">{t("common.cancel")}</button>
+              <button onClick={handleBulkEdit} disabled={bulkEditing} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                {bulkEditing && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("nodes.applyChanges")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk add modal */}
+      {bulkAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{t("nodes.bulkAddTitle")}</h3>
+              <button onClick={() => setBulkAddModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <X className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {/* Manufacturer + Model */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.manufacturer")}</label>
+                  <select value={bulkManufacturerId ?? ""} onChange={(e) => { setBulkManufacturerId(e.target.value ? Number(e.target.value) : null); setBulkModelId(null); }} className={inputClass}>
+                    <option value="">--</option>
+                    {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.model")}</label>
+                  <select value={bulkModelId ?? ""} onChange={(e) => setBulkModelId(e.target.value ? Number(e.target.value) : null)} className={inputClass}>
+                    <option value="">--</option>
+                    {(bulkManufacturerId ? models.filter((m) => m.manufacturer?.id === bulkManufacturerId) : models).map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                </div>
+              </div>
+              {/* Profile + Policy */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.profile")}</label>
+                  <select value={bulkProfileId ?? ""} onChange={(e) => setBulkProfileId(e.target.value ? Number(e.target.value) : null)} className={inputClass}>
+                    <option value="">--</option>
+                    {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("nodes.policy")}</label>
+                  <select value={bulkPolicy} onChange={(e) => setBulkPolicy(e.target.value)} className={inputClass}>
+                    <option value="audit">Audit</option>
+                    <option value="enforce">Enforce</option>
+                  </select>
+                </div>
+              </div>
+              {/* IPs */}
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("nodes.bulkAddLabel")}</label>
+                <textarea
+                  value={bulkAddInput}
+                  onChange={(e) => setBulkAddInput(e.target.value)}
+                  rows={6}
+                  placeholder={t("nodes.bulkAddPlaceholder")}
+                  className={`${inputClass} font-mono resize-none`}
+                />
+                <p className="text-xs text-slate-400 dark:text-slate-500">{t("nodes.bulkAddHelp")}</p>
+              </div>
+              {bulkAddInput.trim() && (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {t("nodes.bulkAddPreview", { count: String(parseBulkIps(bulkAddInput).length) })}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={() => setBulkAddModal(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={handleBulkAdd}
+                disabled={bulkAdding || !bulkAddInput.trim()}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {bulkAdding && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("nodes.bulkAddSubmit")}
               </button>
             </div>
           </div>

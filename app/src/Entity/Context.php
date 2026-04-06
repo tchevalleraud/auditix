@@ -37,6 +37,12 @@ class Context
     private bool $isDefault = false;
 
     #[ORM\Column]
+    private bool $publicEnabled = false;
+
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $publicToken = null;
+
+    #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
     /** @var Collection<int, User> */
@@ -155,5 +161,16 @@ class Context
     {
         $this->users->removeElement($user);
         return $this;
+    }
+
+    public function isPublicEnabled(): bool { return $this->publicEnabled; }
+    public function setPublicEnabled(bool $v): static { $this->publicEnabled = $v; return $this; }
+    public function getPublicToken(): ?string { return $this->publicToken; }
+    public function setPublicToken(?string $v): static { $this->publicToken = $v; return $this; }
+
+    public function generatePublicToken(): string
+    {
+        $this->publicToken = bin2hex(random_bytes(32));
+        return $this->publicToken;
     }
 }

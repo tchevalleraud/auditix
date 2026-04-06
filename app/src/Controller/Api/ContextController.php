@@ -27,6 +27,8 @@ class ContextController extends AbstractController
             'snmpPollIntervalSeconds' => $c->getSnmpPollIntervalSeconds(),
             'icmpPollIntervalSeconds' => $c->getIcmpPollIntervalSeconds(),
             'isDefault' => $c->isDefault(),
+            'publicEnabled' => $c->isPublicEnabled(),
+            'publicToken' => $c->getPublicToken(),
             'userCount' => $c->getUsers()->count(),
             'createdAt' => $c->getCreatedAt()->format('c'),
         ];
@@ -108,6 +110,15 @@ class ContextController extends AbstractController
         }
         if (array_key_exists('icmpPollIntervalSeconds', $data)) {
             $context->setIcmpPollIntervalSeconds(max(5, (int) $data['icmpPollIntervalSeconds']));
+        }
+        if (array_key_exists('publicEnabled', $data)) {
+            $context->setPublicEnabled((bool) $data['publicEnabled']);
+            if ($data['publicEnabled'] && !$context->getPublicToken()) {
+                $context->generatePublicToken();
+            }
+        }
+        if (isset($data['regenerateToken']) && $data['regenerateToken']) {
+            $context->generatePublicToken();
         }
 
         $em->flush();

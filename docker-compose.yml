@@ -78,7 +78,7 @@ services:
       <<: *worker-env
       WORKER_SERVICE_NAME: worker-monitoring
     deploy:
-      replicas: ${WORKER_MONITORING_REPLICAS:-1}
+      replicas: ${WORKER_MONITORING_REPLICAS:-3}
 
   worker-collector:
     <<: *worker
@@ -91,7 +91,7 @@ services:
 
   worker-generator:
     <<: *worker
-    command: php bin/console messenger:consume generator --time-limit=3600 --memory-limit=256M
+    command: php -d memory_limit=512M bin/console messenger:consume generator --time-limit=3600 --memory-limit=512M
     environment:
       <<: *worker-env
       WORKER_SERVICE_NAME: worker-generator

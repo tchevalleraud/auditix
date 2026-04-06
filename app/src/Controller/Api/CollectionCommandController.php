@@ -97,32 +97,28 @@ class CollectionCommandController extends AbstractController
 
         $result = [];
 
-        // Commands in manufacturer folder (inherited)
-        if ($manFolder) {
-            $inherited = $em->getRepository(CollectionCommand::class)->findBy(
-                ['folder' => $manFolder],
-                ['name' => 'ASC']
-            );
-            foreach ($inherited as $c) {
+        $collectRecursive = function (CollectionFolder $folder, bool $inherited, bool $skipModelFolders = false) use ($em, &$result, &$collectRecursive): void {
+            $cmds = $em->getRepository(CollectionCommand::class)->findBy(['folder' => $folder], ['name' => 'ASC']);
+            foreach ($cmds as $c) {
                 $entry = $this->serializeCommand($c);
-                $entry['inherited'] = true;
+                $entry['inherited'] = $inherited;
                 $entry['association'] = 'auto';
+                $entry['folderName'] = $folder->getName();
                 $result[] = $entry;
             }
-        }
+            $children = $em->getRepository(CollectionFolder::class)->findBy(['parent' => $folder], ['name' => 'ASC']);
+            foreach ($children as $child) {
+                // Skip model-type subfolders when traversing manufacturer folder (they're handled separately)
+                if ($skipModelFolders && $child->getType() === CollectionFolder::TYPE_MODEL) continue;
+                $collectRecursive($child, $inherited, $skipModelFolders);
+            }
+        };
 
-        // Commands in model folder (direct)
+        if ($manFolder) {
+            $collectRecursive($manFolder, true, true);
+        }
         if ($modelFolder) {
-            $direct = $em->getRepository(CollectionCommand::class)->findBy(
-                ['folder' => $modelFolder],
-                ['name' => 'ASC']
-            );
-            foreach ($direct as $c) {
-                $entry = $this->serializeCommand($c);
-                $entry['inherited'] = false;
-                $entry['association'] = 'auto';
-                $result[] = $entry;
-            }
+            $collectRecursive($modelFolder, false);
         }
 
         // Manually associated commands

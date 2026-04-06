@@ -2,18 +2,14 @@
 
 namespace App\Controller\Api;
 
-use App\Entity\Collection;
 use App\Entity\CompliancePolicy;
 use App\Entity\ComplianceRule;
 use App\Entity\ComplianceRuleFolder;
 use App\Entity\Context;
-use App\Entity\InventoryCategory;
 use App\Entity\Node;
-use App\Entity\NodeInventoryEntry;
+use App\Service\ComplianceEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
-use phpseclib3\Net\SSH2;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,14 +18,8 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/compliance-rules')]
 class ComplianceRuleController extends AbstractController
 {
-    private const SSH_TIMEOUT = 30;
-    private const READ_TIMEOUT = 30;
-    private const PROMPT_REGEX = '/[#>\$\]]\s*$/';
-    private const STABLE_WAIT = 2;
-
     public function __construct(
-        #[Autowire('%kernel.project_dir%')]
-        private readonly string $projectDir,
+        private readonly ComplianceEvaluator $evaluator,
     ) {}
 
     private function serializeRule(ComplianceRule $r): array
@@ -40,17 +30,7 @@ class ComplianceRuleController extends AbstractController
             'name' => $r->getName(),
             'description' => $r->getDescription(),
             'enabled' => $r->isEnabled(),
-            'sourceType' => $r->getSourceType(),
-            'sourceCategoryId' => $r->getSourceCategory()?->getId(),
-            'sourceCategoryName' => $r->getSourceCategory()?->getName(),
-            'sourceKey' => $r->getSourceKey(),
-            'sourceValue' => $r->getSourceValue(),
-            'sourceCommand' => $r->getSourceCommand(),
-            'sourceTag' => $r->getSourceTag(),
-            'sourceRegex' => $r->getSourceRegex(),
-            'sourceResultMode' => $r->getSourceResultMode(),
-            'sourceValueMap' => $r->getSourceValueMap(),
-            'sourceKeyGroup' => $r->getSourceKeyGroup(),
+            'dataSources' => $r->getDataSources(),
             'conditionTree' => $r->getConditionTree(),
             'multiRowMessages' => $r->getMultiRowMessages(),
             'folderId' => $r->getFolder()?->getId(),
@@ -256,21 +236,26 @@ class ComplianceRuleController extends AbstractController
             return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
         }
 
-        $sourceType = $rule->getSourceType();
-
-        if ($sourceType === ComplianceRule::SOURCE_INVENTORY) {
-            return $this->testInventory($rule, $node, $em);
+        $sources = $rule->getDataSources();
+        if (empty($sources)) {
+            return $this->json([
+                'success' => true,
+                'node' => ['id' => $node->getId(), 'name' => $node->getName() ?? $node->getIpAddress()],
+                'sources' => [],
+                'message' => 'No data sources configured',
+            ]);
         }
 
-        if ($sourceType === ComplianceRule::SOURCE_COLLECTION) {
-            return $this->testCollection($rule, $node, $em);
+        $fields = $this->evaluator->getAllSourceFields($rule, $node);
+        if (isset($fields['_error'])) {
+            return $this->json(['success' => false, 'error' => $fields['_error']]);
         }
 
-        if ($sourceType === ComplianceRule::SOURCE_SSH) {
-            return $this->testSSH($rule, $node, $em);
-        }
-
-        return $this->json(['error' => 'No data source configured'], Response::HTTP_BAD_REQUEST);
+        return $this->json([
+            'success' => true,
+            'node' => ['id' => $node->getId(), 'name' => $node->getName() ?? $node->getHostname() ?? $node->getIpAddress()],
+            'fields' => $fields,
+        ]);
     }
 
     #[Route('/{id}/evaluate', methods: ['POST'])]
@@ -288,77 +273,7 @@ class ComplianceRuleController extends AbstractController
             return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
         }
 
-        $conditionTree = $rule->getConditionTree();
-        if (!$conditionTree) {
-            return $this->json(['error' => 'No conditions configured'], Response::HTTP_BAD_REQUEST);
-        }
-
-        // Get source data
-        $sourceData = $this->getSourceData($rule, $node, $em);
-        if (isset($sourceData['error'])) {
-            return $this->json([
-                'success' => false,
-                'error' => $sourceData['error'],
-            ]);
-        }
-
-        // Evaluate conditions
-        if (isset($sourceData['rows']) && count($sourceData['rows']) > 1) {
-            // Multi-row: evaluate each row independently
-            $rowResults = [];
-            $worstEval = null;
-            $severityOrder = ['info' => 0, 'low' => 1, 'medium' => 2, 'high' => 3, 'critical' => 4];
-            $statusOrder = ['not_applicable' => 0, 'compliant' => 1, 'error' => 2, 'non_compliant' => 3];
-
-            foreach ($sourceData['rows'] as $i => $rowFields) {
-                $eval = $this->evaluateBlocks($conditionTree['blocks'], $rowFields);
-                $rowResults[] = [
-                    'row' => $i,
-                    'fields' => $rowFields,
-                    'evaluation' => $eval,
-                ];
-
-                if ($eval === null) continue;
-                if ($worstEval === null) {
-                    $worstEval = $eval;
-                } else {
-                    $curStatus = $statusOrder[$worstEval['status'] ?? ''] ?? -1;
-                    $newStatus = $statusOrder[$eval['status'] ?? ''] ?? -1;
-                    if ($newStatus > $curStatus) {
-                        $worstEval = $eval;
-                    } elseif ($newStatus === $curStatus && ($eval['status'] ?? '') === 'non_compliant') {
-                        $curSev = $severityOrder[$worstEval['severity'] ?? ''] ?? -1;
-                        $newSev = $severityOrder[$eval['severity'] ?? ''] ?? -1;
-                        if ($newSev > $curSev) $worstEval = $eval;
-                    }
-                }
-            }
-
-            // Override message with multiRowMessages if configured
-            $mrm = $rule->getMultiRowMessages();
-            if ($worstEval && $mrm) {
-                $status = $worstEval['status'] ?? '';
-                if (isset($mrm[$status]) && !empty($mrm[$status])) {
-                    $worstEval['message'] = $mrm[$status];
-                }
-            }
-
-            return $this->json([
-                'success' => true,
-                'node' => [
-                    'id' => $node->getId(),
-                    'name' => $node->getName() ?? $node->getHostname() ?? $node->getIpAddress(),
-                    'ipAddress' => $node->getIpAddress(),
-                ],
-                'sourceData' => $sourceData['summary'],
-                'multiRow' => true,
-                'rowCount' => count($sourceData['rows']),
-                'rowResults' => $rowResults,
-                'evaluation' => $worstEval,
-            ]);
-        }
-
-        $evaluation = $this->evaluateBlocks($conditionTree['blocks'], $sourceData['fields']);
+        $result = $this->evaluator->evaluateRule($rule, $node);
 
         return $this->json([
             'success' => true,
@@ -367,563 +282,16 @@ class ComplianceRuleController extends AbstractController
                 'name' => $node->getName() ?? $node->getHostname() ?? $node->getIpAddress(),
                 'ipAddress' => $node->getIpAddress(),
             ],
-            'sourceData' => $sourceData['summary'],
-            'evaluation' => $evaluation,
+            'evaluation' => $result,
         ]);
     }
 
-    private function getSourceData(ComplianceRule $rule, Node $node, EntityManagerInterface $em): array
-    {
-        $sourceType = $rule->getSourceType();
-
-        if ($sourceType === ComplianceRule::SOURCE_INVENTORY) {
-            $category = $rule->getSourceCategory();
-            $key = $rule->getSourceKey();
-            $valueLabel = $rule->getSourceValue() ?: 'Value#1';
-
-            if (!$category || !$key) {
-                return ['error' => 'Incomplete inventory source configuration'];
-            }
-
-            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                'node' => $node, 'category' => $category, 'entryKey' => $key, 'colLabel' => $valueLabel,
-            ]);
-
-            $values = array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
-            $value = empty($values) ? null : (count($values) === 1 ? $values[0] : implode(', ', $values));
-
-            return [
-                'fields' => ['$value' => $value],
-                'summary' => ['sourceType' => 'inventory', 'value' => $value],
-            ];
-        }
-
-        // Collection or SSH — get raw content
-        $foundContent = null;
-        $summaryExtra = [];
-
-        if ($sourceType === ComplianceRule::SOURCE_COLLECTION) {
-            $command = $rule->getSourceCommand();
-            if (!$command) return ['error' => 'No command configured'];
-
-            $tag = $rule->getSourceTag();
-            $commandSlug = $this->slugify($command);
-            $conn = $em->getConnection();
-            $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status';
-            $params = ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED];
-            if ($tag) { $sql .= ' AND tags::text LIKE :tag'; $params['tag'] = '%"' . $tag . '"%'; }
-            $sql .= ' ORDER BY completed_at DESC LIMIT 1';
-            $row = $conn->fetchAssociative($sql, $params);
-            $collection = $row ? $em->getRepository(Collection::class)->find($row['id']) : null;
-
-            if (!$collection) return ['error' => 'No completed collection found'];
-
-            $baseDir = $this->projectDir . '/var/' . $collection->getStoragePath();
-            if (is_dir($baseDir)) {
-                foreach (scandir($baseDir) as $dir) {
-                    if ($dir === '.' || $dir === '..') continue;
-                    $filePath = $baseDir . '/' . $dir . '/' . $commandSlug . '.txt';
-                    if (file_exists($filePath)) { $foundContent = file_get_contents($filePath); break; }
-                }
-            }
-            if ($foundContent === null) return ['error' => 'No collected file found for command "' . $command . '"'];
-            $summaryExtra['collectionId'] = $collection->getId();
-
-        } elseif ($sourceType === ComplianceRule::SOURCE_SSH) {
-            $command = $rule->getSourceCommand();
-            if (!$command) return ['error' => 'No command configured'];
-
-            $profile = $node->getProfile();
-            $cliCred = $profile?->getCliCredential();
-            if (!$cliCred || !$cliCred->getUsername()) return ['error' => 'No CLI credentials configured'];
-
-            try {
-                $ssh = new SSH2($node->getIpAddress(), $cliCred->getPort() ?: 22, self::SSH_TIMEOUT);
-                $ssh->enablePTY();
-                if (!$ssh->login($cliCred->getUsername(), $cliCred->getPassword() ?? '')) return ['error' => 'SSH authentication failed'];
-                $ssh->setTimeout(self::READ_TIMEOUT);
-                $this->readFullResponse($ssh);
-                $connectionScript = $node->getModel()?->getConnectionScript();
-                if ($connectionScript) {
-                    foreach (array_filter(array_map('trim', explode("\n", $connectionScript)), fn($l) => $l !== '') as $line) {
-                        $ssh->write($line . "\n");
-                        $this->readFullResponse($ssh);
-                    }
-                }
-                $ssh->write($command . "\n");
-                $response = $this->readFullResponse($ssh);
-                $responseLines = explode("\n", $response);
-                if (!empty($responseLines) && str_contains($responseLines[0], trim($command))) array_shift($responseLines);
-                if (!empty($responseLines) && preg_match(self::PROMPT_REGEX, end($responseLines))) array_pop($responseLines);
-                $ssh->disconnect();
-                $foundContent = implode("\n", $responseLines);
-            } catch (\Throwable $e) {
-                return ['error' => 'SSH error: ' . $e->getMessage()];
-            }
-        } else {
-            return ['error' => 'No data source configured'];
-        }
-
-        // Apply regex
-        $regex = $rule->getSourceRegex();
-        $resultMode = $rule->getSourceResultMode();
-        $fields = ['$value' => $foundContent];
-
-        if ($regex && $resultMode) {
-            $pattern = '~' . str_replace('~', '\\~', $regex) . '~m';
-
-            if ($resultMode === ComplianceRule::RESULT_MATCH) {
-                $fields['$match'] = (bool) @preg_match($pattern, $foundContent);
-            } elseif ($resultMode === ComplianceRule::RESULT_COUNT) {
-                $fields['$count'] = (int) @preg_match_all($pattern, $foundContent);
-            } else {
-                // capture
-                $allMatches = $this->extractCapture($rule, $pattern, $foundContent);
-                $fields['$count'] = count($allMatches);
-
-                if (!empty($allMatches) && is_array($allMatches[0])) {
-                    // Multi-row: build per-row field sets
-                    $rows = [];
-                    foreach ($allMatches as $match) {
-                        $rowFields = [];
-                        foreach ($match as $label => $val) {
-                            if ($label === '_key') {
-                                $rowFields['$key'] = $val;
-                            } else {
-                                $rowFields[$label] = $val;
-                            }
-                        }
-                        $rowFields['$count'] = count($allMatches);
-                        $rows[] = $rowFields;
-                    }
-                    // Set first row fields as default (backward compat)
-                    foreach ($rows[0] as $k => $v) $fields[$k] = $v;
-
-                    return [
-                        'fields' => $fields,
-                        'rows' => $rows,
-                        'summary' => array_merge(['sourceType' => $sourceType, 'resultMode' => $resultMode], $summaryExtra),
-                    ];
-                } elseif (!empty($allMatches)) {
-                    $fields['$value'] = $allMatches[0];
-                }
-            }
-        }
-
-        return [
-            'fields' => $fields,
-            'summary' => array_merge(['sourceType' => $sourceType, 'resultMode' => $resultMode], $summaryExtra),
-        ];
-    }
-
-    private function evaluateBlocks(array $blocks, array $fields): ?array
-    {
-        foreach ($blocks as $block) {
-            if ($block['type'] === 'else' || $this->evaluateConditions($block, $fields)) {
-                if (!empty($block['children'])) {
-                    return $this->evaluateBlocks($block['children'], $fields);
-                }
-                return $block['result'] ?? null;
-            }
-        }
-        return null;
-    }
-
-    private function evaluateConditions(array $block, array $fields): bool
-    {
-        $logic = $block['logic'] ?? 'and';
-        $conditions = $block['conditions'] ?? [];
-        if (empty($conditions)) return true;
-
-        foreach ($conditions as $cond) {
-            $result = $this->evaluateSingle($cond, $fields);
-            if ($logic === 'or' && $result) return true;
-            if ($logic === 'and' && !$result) return false;
-        }
-        return $logic === 'and';
-    }
-
-    private function evaluateSingle(array $cond, array $fields): bool
-    {
-        $field = $cond['field'] ?? '';
-        $fieldValue = $fields[$field] ?? null;
-        $compareValue = $cond['value'] ?? null;
-
-        // Handle array values (capture mode) — stringify for comparison
-        if (is_array($fieldValue)) {
-            $fieldValue = json_encode($fieldValue);
-        }
-
-        return match ($cond['operator'] ?? '') {
-            'equals' => (string) $fieldValue === (string) $compareValue,
-            'not_equals' => (string) $fieldValue !== (string) $compareValue,
-            'exists' => $fieldValue !== null,
-            'not_exists' => $fieldValue === null,
-            'contains' => is_string($fieldValue) && str_contains($fieldValue, (string) $compareValue),
-            'not_contains' => !is_string($fieldValue) || !str_contains($fieldValue, (string) $compareValue),
-            'matches' => is_string($fieldValue) && (bool) @preg_match('~' . str_replace('~', '\\~', (string) $compareValue) . '~', $fieldValue),
-            'greater_than' => is_numeric($fieldValue) && is_numeric($compareValue) && (float) $fieldValue > (float) $compareValue,
-            'less_than' => is_numeric($fieldValue) && is_numeric($compareValue) && (float) $fieldValue < (float) $compareValue,
-            'is_empty' => $fieldValue === null || $fieldValue === '' || $fieldValue === '[]',
-            'is_not_empty' => $fieldValue !== null && $fieldValue !== '' && $fieldValue !== '[]',
-            default => false,
-        };
-    }
-
-    private function testInventory(ComplianceRule $rule, Node $node, EntityManagerInterface $em): JsonResponse
-    {
-        $category = $rule->getSourceCategory();
-        $key = $rule->getSourceKey();
-        $valueLabel = $rule->getSourceValue() ?: 'Value#1';
-
-        if (!$category || !$key) {
-            return $this->json([
-                'success' => false,
-                'error' => 'Incomplete inventory source configuration (category and key are required)',
-            ]);
-        }
-
-        $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-            'node' => $node,
-            'category' => $category,
-            'entryKey' => $key,
-            'colLabel' => $valueLabel,
-        ]);
-
-        if (empty($entries)) {
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'inventory',
-                'result' => null,
-                'details' => [
-                    'category' => $category->getName(),
-                    'key' => $key,
-                    'valueLabel' => $valueLabel,
-                    'message' => 'No inventory entry found',
-                ],
-            ]);
-        }
-
-        $values = array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
-
-        return $this->json([
-            'success' => true,
-            'sourceType' => 'inventory',
-            'result' => count($values) === 1 ? $values[0] : $values,
-            'details' => [
-                'category' => $category->getName(),
-                'key' => $key,
-                'valueLabel' => $valueLabel,
-                'count' => count($values),
-            ],
-        ]);
-    }
-
-    private function testCollection(ComplianceRule $rule, Node $node, EntityManagerInterface $em): JsonResponse
-    {
-        $command = $rule->getSourceCommand();
-        if (!$command) {
-            return $this->json(['success' => false, 'error' => 'No command configured']);
-        }
-
-        $tag = $rule->getSourceTag();
-        $commandSlug = $this->slugify($command);
-
-        $conn = $em->getConnection();
-        $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status';
-        $params = ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED];
-
-        if ($tag) {
-            $sql .= ' AND tags::text LIKE :tag';
-            $params['tag'] = '%"' . $tag . '"%';
-        }
-
-        $sql .= ' ORDER BY completed_at DESC LIMIT 1';
-        $row = $conn->fetchAssociative($sql, $params);
-        $collection = $row ? $em->getRepository(Collection::class)->find($row['id']) : null;
-
-        if (!$collection) {
-            return $this->json([
-                'success' => false,
-                'error' => $tag
-                    ? 'No completed collection found for this node with tag "' . $tag . '"'
-                    : 'No completed collection found for this node',
-            ]);
-        }
-
-        $baseDir = $this->projectDir . '/var/' . $collection->getStoragePath();
-        $foundContent = null;
-        if (is_dir($baseDir)) {
-            $dirs = scandir($baseDir);
-            foreach ($dirs as $dir) {
-                if ($dir === '.' || $dir === '..') continue;
-                $filePath = $baseDir . '/' . $dir . '/' . $commandSlug . '.txt';
-                if (file_exists($filePath)) {
-                    $foundContent = file_get_contents($filePath);
-                    break;
-                }
-            }
-        }
-
-        if ($foundContent === null) {
-            return $this->json([
-                'success' => false,
-                'error' => 'No collected file found for command "' . $command . '" in collection #' . $collection->getId(),
-            ]);
-        }
-
-        $regex = $rule->getSourceRegex();
-        $resultMode = $rule->getSourceResultMode();
-
-        if (!$regex || !$resultMode) {
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'collection',
-                'rawOutput' => $foundContent,
-                'collectionId' => $collection->getId(),
-                'result' => null,
-                'details' => ['message' => 'No regex or result mode configured'],
-            ]);
-        }
-
-        $pattern = '~' . str_replace('~', '\\~', $regex) . '~m';
-
-        if ($resultMode === ComplianceRule::RESULT_MATCH) {
-            $matched = (bool) @preg_match($pattern, $foundContent);
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'collection',
-                'collectionId' => $collection->getId(),
-                'resultMode' => 'match',
-                'result' => $matched,
-                'rawOutput' => $foundContent,
-            ]);
-        }
-
-        if ($resultMode === ComplianceRule::RESULT_COUNT) {
-            $count = (int) @preg_match_all($pattern, $foundContent);
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'collection',
-                'collectionId' => $collection->getId(),
-                'resultMode' => 'count',
-                'result' => $count,
-                'rawOutput' => $foundContent,
-            ]);
-        }
-
-        // capture mode
-        $allMatches = $this->extractCapture($rule, $pattern, $foundContent);
-
-        return $this->json([
-            'success' => true,
-            'sourceType' => 'collection',
-            'collectionId' => $collection->getId(),
-            'resultMode' => 'capture',
-            'result' => $allMatches,
-            'matchCount' => count($allMatches),
-            'rawOutput' => $foundContent,
-        ]);
-    }
-
-    private function testSSH(ComplianceRule $rule, Node $node, EntityManagerInterface $em): JsonResponse
-    {
-        $command = $rule->getSourceCommand();
-        if (!$command) {
-            return $this->json(['success' => false, 'error' => 'No command configured']);
-        }
-
-        $profile = $node->getProfile();
-        $cliCred = $profile?->getCliCredential();
-
-        if (!$cliCred || !$cliCred->getUsername()) {
-            return $this->json([
-                'success' => false,
-                'error' => 'No CLI credentials configured on this node\'s profile',
-            ]);
-        }
-
-        $ip = $node->getIpAddress();
-        $port = $cliCred->getPort() ?: 22;
-        $model = $node->getModel();
-
-        try {
-            $ssh = new SSH2($ip, $port, self::SSH_TIMEOUT);
-            $ssh->enablePTY();
-
-            if (!$ssh->login($cliCred->getUsername(), $cliCred->getPassword() ?? '')) {
-                return $this->json([
-                    'success' => false,
-                    'error' => 'SSH authentication failed for ' . $cliCred->getUsername() . '@' . $ip . ':' . $port,
-                ]);
-            }
-
-            $ssh->setTimeout(self::READ_TIMEOUT);
-
-            // Read initial prompt/banner
-            $this->readFullResponse($ssh);
-
-            // Execute connection script
-            $connectionScript = $model?->getConnectionScript();
-            if ($connectionScript) {
-                $scriptLines = array_filter(array_map('trim', explode("\n", $connectionScript)), fn($l) => $l !== '');
-                foreach ($scriptLines as $line) {
-                    $ssh->write($line . "\n");
-                    $this->readFullResponse($ssh);
-                }
-            }
-
-            // Execute the command
-            $ssh->write($command . "\n");
-            $response = $this->readFullResponse($ssh);
-
-            // Clean up response
-            $responseLines = explode("\n", $response);
-            if (!empty($responseLines) && str_contains($responseLines[0], trim($command))) {
-                array_shift($responseLines);
-            }
-            if (!empty($responseLines) && preg_match(self::PROMPT_REGEX, end($responseLines))) {
-                array_pop($responseLines);
-            }
-
-            $ssh->disconnect();
-
-            $foundContent = implode("\n", $responseLines);
-        } catch (\Throwable $e) {
-            return $this->json([
-                'success' => false,
-                'error' => 'SSH error: ' . $e->getMessage(),
-            ]);
-        }
-
-        $regex = $rule->getSourceRegex();
-        $resultMode = $rule->getSourceResultMode();
-
-        if (!$regex || !$resultMode) {
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'ssh',
-                'rawOutput' => $foundContent,
-                'result' => null,
-                'details' => ['message' => 'No regex or result mode configured'],
-            ]);
-        }
-
-        $pattern = '~' . str_replace('~', '\\~', $regex) . '~m';
-
-        if ($resultMode === ComplianceRule::RESULT_MATCH) {
-            $matched = (bool) @preg_match($pattern, $foundContent);
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'ssh',
-                'resultMode' => 'match',
-                'result' => $matched,
-                'rawOutput' => $foundContent,
-            ]);
-        }
-
-        if ($resultMode === ComplianceRule::RESULT_COUNT) {
-            $count = (int) @preg_match_all($pattern, $foundContent);
-            return $this->json([
-                'success' => true,
-                'sourceType' => 'ssh',
-                'resultMode' => 'count',
-                'result' => $count,
-                'rawOutput' => $foundContent,
-            ]);
-        }
-
-        // capture mode
-        $allMatches = $this->extractCapture($rule, $pattern, $foundContent);
-
-        return $this->json([
-            'success' => true,
-            'sourceType' => 'ssh',
-            'resultMode' => 'capture',
-            'result' => $allMatches,
-            'matchCount' => count($allMatches),
-            'rawOutput' => $foundContent,
-        ]);
-    }
-
-    private function extractCapture(ComplianceRule $rule, string $pattern, string $content): array
-    {
-        $valueMap = $rule->getSourceValueMap();
-        $keyGroup = $rule->getSourceKeyGroup();
-        $allMatches = [];
-        @preg_match_all($pattern, $content, $matches, PREG_SET_ORDER);
-
-        foreach ($matches as $match) {
-            if ($valueMap && count($valueMap) > 0) {
-                $row = [];
-                if ($keyGroup !== null) {
-                    $row['_key'] = $match[$keyGroup] ?? null;
-                }
-                foreach ($valueMap as $mapping) {
-                    $group = $mapping['group'] ?? 0;
-                    $label = $mapping['label'] ?? 'Group ' . $group;
-                    $row[$label] = $match[$group] ?? null;
-                }
-                $allMatches[] = $row;
-            } else {
-                $allMatches[] = $match[1] ?? $match[0];
-            }
-        }
-
-        return $allMatches;
-    }
-
-    private function readFullResponse(SSH2 $ssh): string
-    {
-        $output = $ssh->read(self::PROMPT_REGEX, SSH2::READ_REGEX);
-
-        $ssh->setTimeout(self::STABLE_WAIT);
-
-        while (true) {
-            $extra = @$ssh->read(self::PROMPT_REGEX, SSH2::READ_REGEX);
-            if ($extra === false || $extra === '') {
-                break;
-            }
-            $output .= $extra;
-        }
-
-        $ssh->setTimeout(self::READ_TIMEOUT);
-
-        return $output;
-    }
+    // Source data fetching and evaluation logic is now in ComplianceEvaluator service
 
     private function applySourceFields(ComplianceRule $rule, array $data, EntityManagerInterface $em): void
     {
-        if (array_key_exists('sourceType', $data)) {
-            $rule->setSourceType($data['sourceType'] ?: ComplianceRule::SOURCE_NONE);
-        }
-        if (array_key_exists('sourceCategoryId', $data)) {
-            $cat = $data['sourceCategoryId'] ? $em->getRepository(InventoryCategory::class)->find($data['sourceCategoryId']) : null;
-            $rule->setSourceCategory($cat);
-        }
-        if (array_key_exists('sourceKey', $data)) {
-            $rule->setSourceKey($data['sourceKey'] ?: null);
-        }
-        if (array_key_exists('sourceValue', $data)) {
-            $rule->setSourceValue($data['sourceValue'] ?: null);
-        }
-        if (array_key_exists('sourceCommand', $data)) {
-            $rule->setSourceCommand($data['sourceCommand'] ?: null);
-        }
-        if (array_key_exists('sourceTag', $data)) {
-            $rule->setSourceTag($data['sourceTag'] ?: null);
-        }
-        if (array_key_exists('sourceRegex', $data)) {
-            $rule->setSourceRegex($data['sourceRegex'] ?: null);
-        }
-        if (array_key_exists('sourceResultMode', $data)) {
-            $rule->setSourceResultMode($data['sourceResultMode'] ?: null);
-        }
-        if (array_key_exists('sourceValueMap', $data)) {
-            $rule->setSourceValueMap($data['sourceValueMap']);
-        }
-        if (array_key_exists('sourceKeyGroup', $data)) {
-            $rule->setSourceKeyGroup($data['sourceKeyGroup'] ? (int) $data['sourceKeyGroup'] : null);
+        if (array_key_exists('dataSources', $data)) {
+            $rule->setDataSources(is_array($data['dataSources']) ? $data['dataSources'] : []);
         }
         if (array_key_exists('conditionTree', $data)) {
             $tree = $data['conditionTree'];
@@ -984,9 +352,4 @@ class ComplianceRuleController extends AbstractController
         }
     }
 
-    private function slugify(string $text): string
-    {
-        $text = preg_replace('/[^a-z0-9]+/i', '-', $text);
-        return strtolower(trim($text, '-'));
-    }
 }

@@ -78,6 +78,10 @@ class GenerateReportMessageHandler
 
     private const PDF_TRANSLATIONS = [
         'fr' => [
+            'priority_critical' => 'Critique',
+            'priority_high' => 'Priorite haute',
+            'priority_medium' => 'Priorite moyenne',
+            'priority_low' => 'A surveiller',
             'toc' => 'Table des matieres',
             'authors_page' => 'Auteurs et diffusion',
             'authors' => 'Auteurs',
@@ -94,6 +98,10 @@ class GenerateReportMessageHandler
             'col_description' => 'Description',
         ],
         'en' => [
+            'priority_critical' => 'Critical',
+            'priority_high' => 'High priority',
+            'priority_medium' => 'Medium priority',
+            'priority_low' => 'Needs attention',
             'toc' => 'Table of Contents',
             'authors_page' => 'Authors and Distribution',
             'authors' => 'Authors',
@@ -110,6 +118,10 @@ class GenerateReportMessageHandler
             'col_description' => 'Description',
         ],
         'de' => [
+            'priority_critical' => 'Kritisch',
+            'priority_high' => 'Hohe Prioritaet',
+            'priority_medium' => 'Mittlere Prioritaet',
+            'priority_low' => 'Zu beachten',
             'toc' => 'Inhaltsverzeichnis',
             'authors_page' => 'Autoren und Verteilung',
             'authors' => 'Autoren',
@@ -126,6 +138,10 @@ class GenerateReportMessageHandler
             'col_description' => 'Beschreibung',
         ],
         'es' => [
+            'priority_critical' => 'Critico',
+            'priority_high' => 'Prioridad alta',
+            'priority_medium' => 'Prioridad media',
+            'priority_low' => 'Requiere atencion',
             'toc' => 'Tabla de Contenidos',
             'authors_page' => 'Autores y Distribucion',
             'authors' => 'Autores',
@@ -142,6 +158,10 @@ class GenerateReportMessageHandler
             'col_description' => 'Descripcion',
         ],
         'it' => [
+            'priority_critical' => 'Critico',
+            'priority_high' => 'Priorita alta',
+            'priority_medium' => 'Priorita media',
+            'priority_low' => 'Da monitorare',
             'toc' => 'Indice',
             'authors_page' => 'Autori e Distribuzione',
             'authors' => 'Autori',
@@ -319,6 +339,12 @@ class GenerateReportMessageHandler
         if ($report->getShowIllustrationsPage()) {
             $this->addTitledPage($pdf, $t['illustrations_page'], $mLeft, $mTop, $mRight, $mBottom, $headingsByLevel);
         }
+
+        // Reset PDF state before rendering blocks (cover page / special pages may leave corrupted font state)
+        $pdf->SetFont('helvetica', '', 11);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetMargins($mLeft, $mTop, $mRight);
+        $pdf->SetAutoPageBreak(true, $mBottom);
 
         // Render structure blocks
         $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report);
@@ -762,6 +788,11 @@ class GenerateReportMessageHandler
                     $prevType = 'paragraph';
                     continue;
                 }
+
+                // Apply text alignment
+                $alignMap = ['left' => 'left', 'center' => 'center', 'right' => 'right', 'justify' => 'justify'];
+                $cssAlign = $alignMap[$align] ?? 'left';
+                $html = '<div style="text-align:' . $cssAlign . ';">' . $html . '</div>';
 
                 // --- Render ---
                 $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
@@ -1780,6 +1811,332 @@ class GenerateReportMessageHandler
                 }
 
                 $prevType = 'cli_command';
+
+            } elseif ($type === 'equipment_list') {
+                $eqTitle = $block['title'] ?? '';
+                $eqTitleStyle = $block['titleStyle'] ?? [];
+                $eqCategories = $block['categories'] ?? [];
+                $eqNodeDisplayField = $block['nodeDisplayField'] ?? 'name';
+                $eqNodeColor = $block['nodeColor'] ?? '#7c3aed';
+                $eqShowCount = $block['showCount'] ?? true;
+
+                if (!empty($block['pageBreakBefore']) && !$firstBlock) {
+                    $pdf->AddPage();
+                }
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                // Render title with indent (resolve variables)
+                $eqTitle = $this->resolveNodeVariables($eqTitle, $forNode, $report);
+                if ($eqTitle) {
+                    $titleSize = $eqTitleStyle['size'] ?? 13;
+                    $titleBold = ($eqTitleStyle['bold'] ?? true) ? 'B' : '';
+                    $titleItalic = ($eqTitleStyle['italic'] ?? false) ? 'I' : '';
+                    $titleColor = $this->hexToRgb($eqTitleStyle['color'] ?? '#1e293b');
+                    $pdf->SetFont($bodyFont, $titleBold . $titleItalic, $titleSize);
+                    $pdf->SetTextColor($titleColor[0], $titleColor[1], $titleColor[2]);
+                    $titleIndentVal = $block['indent'] ?? 10;
+                    $pdf->SetX($mLeft + $titleIndentVal);
+                    $titleWidth = $pdf->getPageWidth() - $mLeft - $titleIndentVal - $mRight;
+                    $pdf->MultiCell($titleWidth, $titleSize * 0.5, $eqTitle . ':', 0, 'L');
+                    $pdf->Ln(2);
+                }
+
+                // Render each category
+                $nodeColorRgb = $this->hexToRgb($eqNodeColor);
+                $defaultCatStyle = $block['categoryStyle'] ?? [];
+                $titleIndent = $block['indent'] ?? 10;
+                $catIndent = $block['categoryIndent'] ?? 20;
+
+                foreach ($eqCategories as $cat) {
+                    $catName = $cat['name'] ?? '';
+                    $catNodeIds = $cat['nodeIds'] ?? [];
+
+                    // Resolve node names
+                    $nodeNames = [];
+                    if (!empty($catNodeIds)) {
+                        $catNodes = $this->em->getRepository(\App\Entity\Node::class)->findBy(['id' => $catNodeIds]);
+                        foreach ($catNodes as $cn) {
+                            $nodeNames[] = match ($eqNodeDisplayField) {
+                                'hostname' => $cn->getHostname() ?: $cn->getName() ?: $cn->getIpAddress(),
+                                'ipAddress' => $cn->getIpAddress(),
+                                default => $cn->getName() ?: $cn->getHostname() ?: $cn->getIpAddress(),
+                            };
+                        }
+                    }
+
+                    // Category label
+                    $catLabel = $catName;
+                    if ($eqShowCount) {
+                        $catLabel .= ' (' . count($nodeNames) . ')';
+                    }
+                    $catLabel .= ':';
+
+                    // Resolve category style (per-cat override > default)
+                    $catStyle = $cat['style'] ?? [];
+                    $catSize = $catStyle['size'] ?? $defaultCatStyle['size'] ?? $bodySize;
+                    $catBold = ($catStyle['bold'] ?? $defaultCatStyle['bold'] ?? false) ? 'B' : '';
+                    $catItalic = ($catStyle['italic'] ?? $defaultCatStyle['italic'] ?? false) ? 'I' : '';
+                    $catColorHex = $catStyle['color'] ?? $defaultCatStyle['color'] ?? ($bodyStyle['color'] ?? '#1e293b');
+                    $catColorRgb = $this->hexToRgb($catColorHex);
+
+                    $pdf->SetFont($bodyFont, $catBold . $catItalic, $catSize);
+                    $pdf->SetTextColor($catColorRgb[0], $catColorRgb[1], $catColorRgb[2]);
+                    $pdf->SetX($mLeft + $catIndent);
+
+                    // Render category name + nodes inline
+                    $catLabelWidth = min($pdf->GetStringWidth($catLabel) + 4, 60);
+                    $lineH = max($catSize, $bodySize) * 0.5;
+
+                    $pdf->Cell($catLabelWidth, $lineH, $catLabel, 0, 0, 'L');
+
+                    // Node names in color
+                    $pdf->SetFont($bodyFont, 'B', $bodySize);
+                    $pdf->SetTextColor($nodeColorRgb[0], $nodeColorRgb[1], $nodeColorRgb[2]);
+
+                    $nodeText = implode(', ', $nodeNames);
+                    $remainingWidth = $pdf->getPageWidth() - $pdf->GetX() - $mRight;
+                    if ($remainingWidth < 20) {
+                        $pdf->Ln($lineH);
+                        $pdf->SetX($mLeft + $catIndent + $catLabelWidth);
+                        $remainingWidth = $pdf->getPageWidth() - $pdf->GetX() - $mRight;
+                    }
+
+                    if (empty($nodeNames)) {
+                        $pdf->Ln($lineH);
+                    } elseif ($pdf->GetStringWidth($nodeText) <= $remainingWidth) {
+                        $pdf->Cell($remainingWidth, $lineH, $nodeText, 0, 1, 'L');
+                    } else {
+                        $pdf->MultiCell($remainingWidth, $lineH, $nodeText, 0, 'L');
+                    }
+
+                    $pdf->Ln(1);
+                }
+
+                // Reset text color
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'equipment_list';
+
+            } elseif ($type === 'action_list') {
+                $alTitle = $this->resolveNodeVariables($block['title'] ?? '', $forNode, $report);
+                $alActions = $block['actions'] ?? [];
+                $reportLocale = $report ? $report->getLocale() : 'en';
+                $pt = self::PDF_TRANSLATIONS[$reportLocale] ?? self::PDF_TRANSLATIONS['en'];
+                $priorityStyles = [
+                    'critical' => ['label' => $pt['priority_critical'] ?? 'Critical', 'rgb' => [220, 38, 38]],
+                    'high' => ['label' => $pt['priority_high'] ?? 'High priority', 'rgb' => [234, 88, 12]],
+                    'medium' => ['label' => $pt['priority_medium'] ?? 'Medium priority', 'rgb' => [37, 99, 235]],
+                    'low' => ['label' => $pt['priority_low'] ?? 'Needs attention', 'rgb' => [22, 163, 74]],
+                ];
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                }
+
+                // Title
+                $alFont = $this->mapFont(($headingsByLevel[1] ?? [])['font'] ?? 'Calibri');
+                if ($alTitle) {
+                    $pdf->SetFont($alFont, 'B', $bodySize + 1);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell(0, ($bodySize + 1) * 0.3528 + 1, $alTitle, 0, 'L');
+                    $pdf->Ln(2);
+                }
+
+                // Render actions — use MultiCell like heading/paragraph blocks
+                $lineH = $bodySize * 0.3528 + 1;
+                foreach ($alActions as $ai => $action) {
+                    $details = $this->resolveNodeVariables($action['details'] ?? '', $forNode, $report);
+                    $prio = $action['priority'] ?? 'medium';
+                    $prioStyle = $priorityStyles[$prio] ?? $priorityStyles['medium'];
+
+                    // Priority tag in bold + color
+                    $pdf->SetFont($alFont, 'B', $bodySize);
+                    $pdf->SetTextColor($prioStyle['rgb'][0], $prioStyle['rgb'][1], $prioStyle['rgb'][2]);
+                    $tagText = ($ai + 1) . '. [' . $prioStyle['label'] . '] ';
+                    $tagW = $pdf->GetStringWidth($tagText);
+                    $pdf->Cell($tagW, $lineH, $tagText, 0, 0, 'L');
+
+                    // Details text in normal color
+                    $pdf->SetFont($alFont, '', $bodySize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $remaining = $pdf->getPageWidth() - $pdf->GetX() - $mRight;
+                    $pdf->MultiCell($remaining, $lineH, $details ?: ' ', 0, 'L');
+                }
+
+                $prevType = 'action_list';
+
+            } elseif ($type === 'command_list') {
+                $modelId = $block['modelId'] ?? null;
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                if ($modelId) {
+                    $model = $this->em->getRepository(\App\Entity\DeviceModel::class)->find($modelId);
+                    if ($model) {
+                        $cliFont = 'courier';
+                        $cliSize = 9;
+                        $lineH = $cliSize * 0.45;
+                        $colW = ($pdf->getPageWidth() - $mLeft - $mRight) / 2;
+                        $indent = 10;
+
+                        // Collect all command lines: connection script + grouped commands
+                        $allLines = [];
+
+                        // Connection script
+                        $connScript = $model->getConnectionScript();
+                        if ($connScript) {
+                            foreach (array_filter(array_map('trim', explode("\n", $connScript)), fn($l) => $l !== '') as $line) {
+                                $allLines[] = ['type' => 'cmd', 'text' => $line];
+                            }
+                        }
+
+                        // Resolve commands (same logic as CollectNodeMessageHandler)
+                        $cmdFolderRepo = $this->em->getRepository(\App\Entity\CollectionFolder::class);
+                        $cmdRepo = $this->em->getRepository(\App\Entity\CollectionCommand::class);
+
+                        $manFolder = $cmdFolderRepo->findOneBy(['manufacturer' => $model->getManufacturer(), 'model' => null, 'type' => \App\Entity\CollectionFolder::TYPE_MANUFACTURER]);
+                        $modelFolder = $cmdFolderRepo->findOneBy(['model' => $model, 'type' => \App\Entity\CollectionFolder::TYPE_MODEL]);
+
+                        $seenIds = [];
+                        $folders = [];
+
+                        $collectCmdsRecursive = function (\App\Entity\CollectionFolder $folder, array &$cmds, array &$seen, bool $skipModelFolders = false) use ($cmdRepo, $cmdFolderRepo, &$collectCmdsRecursive): void {
+                            foreach ($cmdRepo->findBy(['folder' => $folder, 'enabled' => true], ['name' => 'ASC']) as $c) {
+                                if (!in_array($c->getId(), $seen, true)) { $seen[] = $c->getId(); $cmds[] = $c; }
+                            }
+                            foreach ($cmdFolderRepo->findBy(['parent' => $folder], ['name' => 'ASC']) as $child) {
+                                if ($skipModelFolders && $child->getType() === \App\Entity\CollectionFolder::TYPE_MODEL) continue;
+                                $collectCmdsRecursive($child, $cmds, $seen, $skipModelFolders);
+                            }
+                        };
+
+                        if ($manFolder) {
+                            $folderCmds = [];
+                            $collectCmdsRecursive($manFolder, $folderCmds, $seenIds, true);
+                            if (!empty($folderCmds)) $folders[] = ['name' => $manFolder->getName(), 'commands' => $folderCmds];
+                        }
+                        if ($modelFolder) {
+                            $folderCmds = [];
+                            $collectCmdsRecursive($modelFolder, $folderCmds, $seenIds);
+                            if (!empty($folderCmds)) $folders[] = ['name' => $modelFolder->getName(), 'commands' => $folderCmds];
+                        }
+                        // Manual commands
+                        $manualCmds = [];
+                        foreach ($model->getManualCommands() as $c) {
+                            if ($c->isEnabled() && !in_array($c->getId(), $seenIds, true)) { $manualCmds[] = $c; }
+                        }
+                        if (!empty($manualCmds)) {
+                            $folders[] = ['name' => 'Manual', 'commands' => $manualCmds];
+                        }
+
+                        // Build lines: each command has a title (command name) then its CLI lines
+                        foreach ($folders as $folder) {
+                            foreach ($folder['commands'] as $cmd) {
+                                $allLines[] = ['type' => 'title', 'text' => '# ' . mb_strtoupper($cmd->getName())];
+                                foreach (array_filter(array_map('trim', explode("\n", $cmd->getCommands())), fn($l) => $l !== '') as $line) {
+                                    $allLines[] = ['type' => 'cmd', 'text' => $line];
+                                }
+                            }
+                        }
+
+                        // Group lines into blocks (connection script = one block, each command = one block)
+                        $blocks2 = [];
+                        $currentBlock = [];
+                        foreach ($allLines as $line) {
+                            if ($line['type'] === 'title' && !empty($currentBlock)) {
+                                $blocks2[] = $currentBlock;
+                                $currentBlock = [];
+                            }
+                            $currentBlock[] = $line;
+                        }
+                        if (!empty($currentBlock)) $blocks2[] = $currentBlock;
+
+                        // Calculate height of each block
+                        $blockHeights = [];
+                        foreach ($blocks2 as $blk) {
+                            $h = 0;
+                            foreach ($blk as $line) {
+                                if ($line['type'] === 'title') $h += 2; // spacing before title
+                                $h += $lineH + 1;
+                            }
+                            $blockHeights[] = $h;
+                        }
+
+                        // Distribute blocks into two columns without splitting a block
+                        $totalH = array_sum($blockHeights);
+                        $targetH = $totalH / 2;
+                        $col1Blocks = [];
+                        $col2Blocks = [];
+                        $cumH = 0;
+                        $splitDone = false;
+                        foreach ($blocks2 as $bi => $blk) {
+                            if (!$splitDone && $cumH + $blockHeights[$bi] <= $targetH + $blockHeights[$bi] * 0.3) {
+                                $col1Blocks[] = $blk;
+                                $cumH += $blockHeights[$bi];
+                            } else {
+                                $splitDone = true;
+                                $col2Blocks[] = $blk;
+                            }
+                        }
+
+                        // Render columns
+                        $startY = $pdf->GetY();
+                        $col1X = $mLeft + $indent;
+                        $col2X = $mLeft + $colW;
+
+                        $renderColumn = function (array $colBlocks, float $x, float $startY) use ($pdf, $cliFont, $cliSize, $lineH, $colW, $indent, $bodyRgb): float {
+                            $y = $startY;
+                            foreach ($colBlocks as $blk) {
+                                foreach ($blk as $line) {
+                                    if ($line['type'] === 'title') {
+                                        $y += 2;
+                                        $pdf->SetFont($cliFont, 'B', $cliSize);
+                                    } else {
+                                        $pdf->SetFont($cliFont, '', $cliSize);
+                                    }
+                                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                                    $pdf->SetXY($x, $y);
+                                    $pdf->Cell($colW - $indent, $lineH, $line['text'], 0, 0, 'L');
+                                    $y += $lineH + 1;
+                                }
+                            }
+                            return $y;
+                        };
+
+                        $col1EndY = $renderColumn($col1Blocks, $col1X, $startY);
+                        $col2EndY = $renderColumn($col2Blocks, $col2X, $startY);
+
+                        $pdf->SetY(max($col1EndY, $col2EndY));
+                    }
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'command_list';
             }
         }
     }
@@ -1888,13 +2245,135 @@ class GenerateReportMessageHandler
             }
         };
 
-        $renderTable($authors, $t['authors']);
+        // Group authors by "group" field
+        $authorGroups = [];
+        foreach ($authors as $a) {
+            $g = $a['group'] ?? '';
+            if (!isset($authorGroups[$g])) $authorGroups[$g] = [];
+            $authorGroups[$g][] = $a;
+        }
+
+        if (count($authorGroups) <= 1 && array_key_first($authorGroups) === '') {
+            $renderTable($authors, $t['authors']);
+        } else {
+            $pdf->SetTextColor($h2Rgb[0], $h2Rgb[1], $h2Rgb[2]);
+            $pdf->SetFont($h2Font, $h2Bold . $h2Italic, $h2Size);
+            $h2LineH = $h2Size * 0.3528 + 1;
+            if ($h2Background) {
+                $bgRgb = $this->hexToRgb($h2Background);
+                $pdf->SetFillColor($bgRgb[0], $bgRgb[1], $bgRgb[2]);
+                $pdf->MultiCell($contentW, $h2LineH + 2, ' ' . $t['authors'], 0, 'L', true);
+            } else {
+                $pdf->Cell(0, $h2LineH, $t['authors'], 0, 1, 'L');
+            }
+            $pdf->Ln(2);
+
+            foreach ($authorGroups as $groupName => $groupAuthors) {
+                $label = $groupName ?: $t['authors'];
+                $pdf->SetFont($bodyFont, 'B', $bodySize);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                $pdf->Cell(0, $bodySize * 0.5, $label, 0, 1, 'L');
+                $pdf->Ln(1);
+                $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                $pdf->SetLineWidth(0.2);
+                $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                $pdf->SetFont($bodyFont, 'B', $bodySize);
+                $startY = $pdf->GetY(); $startX = $mLeft;
+                foreach ($colHeaders as $ci => $lbl) { $pdf->MultiCell($colWidths[$ci], $minLineH, $lbl, 1, 'L', true, 0, $startX, $startY, true, 0, false, true, $minLineH, 'M'); $startX += $colWidths[$ci]; }
+                $pdf->SetXY($mLeft, $startY + $minLineH);
+                foreach ($groupAuthors as $ri => $entry) {
+                    $fill = $alternateRows && $ri % 2 === 1;
+                    if ($fill) $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                    else if ($alternateRows) $pdf->SetFillColor(255, 255, 255);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, '', $bodySize);
+                    $cells = [$entry['lastName'] ?? '', $entry['firstName'] ?? '', $entry['position'] ?? '', $entry['email'] ?? '', $entry['phone'] ?? ''];
+                    $maxH = $minLineH;
+                    foreach ($cells as $ci => $val) { $maxH = max($maxH, $pdf->getStringHeight($colWidths[$ci], $val) + 2); }
+                    $startY = $pdf->GetY();
+                    if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) { $pdf->AddPage(); $startY = $pdf->GetY(); }
+                    $startX = $mLeft;
+                    foreach ($cells as $ci => $val) { $pdf->MultiCell($colWidths[$ci], $maxH, $val, 1, 'L', $fill || ($alternateRows && $ri % 2 === 0), 0, $startX, $startY, true, 0, false, true, $maxH, 'M'); $startX += $colWidths[$ci]; }
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+                $pdf->Ln(4);
+            }
+        }
 
         if (!empty($authors) && !empty($recipients)) {
             $pdf->Ln(6);
         }
 
-        $renderTable($recipients, $t['recipients']);
+        // Group recipients by "group" field
+        $recipientGroups = [];
+        foreach ($recipients as $r) {
+            $g = $r['group'] ?? '';
+            if (!isset($recipientGroups[$g])) $recipientGroups[$g] = [];
+            $recipientGroups[$g][] = $r;
+        }
+
+        if (count($recipientGroups) <= 1 && array_key_first($recipientGroups) === '') {
+            // No groups defined — render flat like before
+            $renderTable($recipients, $t['recipients']);
+        } else {
+            // Render main title
+            $pdf->SetTextColor($h2Rgb[0], $h2Rgb[1], $h2Rgb[2]);
+            $pdf->SetFont($h2Font, $h2Bold . $h2Italic, $h2Size);
+            $h2LineH = $h2Size * 0.3528 + 1;
+            if ($h2Background) {
+                $bgRgb = $this->hexToRgb($h2Background);
+                $pdf->SetFillColor($bgRgb[0], $bgRgb[1], $bgRgb[2]);
+                $pdf->MultiCell($contentW, $h2LineH + 2, ' ' . $t['recipients'], 0, 'L', true);
+            } else {
+                $pdf->Cell(0, $h2LineH, $t['recipients'], 0, 1, 'L');
+            }
+            $pdf->Ln(2);
+
+            // Render each group as a sub-table
+            foreach ($recipientGroups as $groupName => $groupRecipients) {
+                $label = $groupName ?: $t['recipients'];
+                // Sub-group title
+                $pdf->SetFont($bodyFont, 'B', $bodySize);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                $pdf->Cell(0, $bodySize * 0.5, $label, 0, 1, 'L');
+                $pdf->Ln(1);
+
+                // Render table without section title
+                $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                $pdf->SetLineWidth(0.2);
+                $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                $pdf->SetFont($bodyFont, 'B', $bodySize);
+                $startY = $pdf->GetY();
+                $startX = $mLeft;
+                foreach ($colHeaders as $ci => $lbl) {
+                    $pdf->MultiCell($colWidths[$ci], $minLineH, $lbl, 1, 'L', true, 0, $startX, $startY, true, 0, false, true, $minLineH, 'M');
+                    $startX += $colWidths[$ci];
+                }
+                $pdf->SetXY($mLeft, $startY + $minLineH);
+
+                foreach ($groupRecipients as $ri => $entry) {
+                    $fill = $alternateRows && $ri % 2 === 1;
+                    if ($fill) $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                    else if ($alternateRows) $pdf->SetFillColor(255, 255, 255);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, '', $bodySize);
+                    $cells = [$entry['lastName'] ?? '', $entry['firstName'] ?? '', $entry['position'] ?? '', $entry['email'] ?? '', $entry['phone'] ?? ''];
+                    $maxH = $minLineH;
+                    foreach ($cells as $ci => $val) { $maxH = max($maxH, $pdf->getStringHeight($colWidths[$ci], $val) + 2); }
+                    $startY = $pdf->GetY();
+                    if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) { $pdf->AddPage(); $startY = $pdf->GetY(); }
+                    $startX = $mLeft;
+                    foreach ($cells as $ci => $val) {
+                        $pdf->MultiCell($colWidths[$ci], $maxH, $val, 1, 'L', $fill || ($alternateRows && $ri % 2 === 0), 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                        $startX += $colWidths[$ci];
+                    }
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+                $pdf->Ln(4);
+            }
+        }
     }
 
     private function renderRevisionsPage(TCPDF $pdf, array $revisions, array $t, array $styles, float $mLeft, float $mRight, float $mBottom): void
@@ -2233,7 +2712,7 @@ class GenerateReportMessageHandler
         $text = preg_replace_callback(
             '/\{\{node\[([^\]]+)\]\.([^}]+)\}\}/',
             function ($matches) use ($nodeRepo, $report, $getNodeData, $resolve) {
-                $identifier = $matches[1];
+                $identifier = trim($matches[1], '"\'');
                 $parts = explode('.', $matches[2]);
                 if (count($parts) < 2 || count($parts) > 3) {
                     return $matches[0];
@@ -2252,7 +2731,136 @@ class GenerateReportMessageHandler
             $text
         );
 
+        // Resolve functions: {{fn:name(args)}}
+        $text = $this->resolveTemplateFunctions($text, $report);
+
         return $text;
+    }
+
+    /**
+     * Resolve template functions like {{fn:countByManufacturer("name")}}, {{fn:listWhere("cat","key","op","val")}}, etc.
+     */
+    private function resolveTemplateFunctions(string $text, Report $report): string
+    {
+        $context = $report->getContext();
+        $nodeRepo = $this->em->getRepository(Node::class);
+        $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
+        $tagRepo = $this->em->getRepository(\App\Entity\NodeTag::class);
+
+        return preg_replace_callback('/\{\{fn:(\w+)\(([^)]*)\)\}\}/', function ($matches) use ($context, $nodeRepo, $invRepo, $tagRepo) {
+            $fn = $matches[1];
+            // Parse arguments: "arg1", "arg2", ...
+            $rawArgs = $matches[2];
+            $args = [];
+            preg_match_all('/"([^"]*)"/', $rawArgs, $argMatches);
+            $args = $argMatches[1] ?? [];
+
+            $contextNodes = $nodeRepo->findBy(['context' => $context]);
+
+            switch ($fn) {
+                case 'countByManufacturer':
+                    $name = $args[0] ?? '';
+                    $count = 0;
+                    foreach ($contextNodes as $n) {
+                        if ($n->getManufacturer() && strcasecmp($n->getManufacturer()->getName(), $name) === 0) $count++;
+                    }
+                    return (string) $count;
+
+                case 'countByModel':
+                    $name = $args[0] ?? '';
+                    $count = 0;
+                    foreach ($contextNodes as $n) {
+                        if ($n->getModel() && strcasecmp($n->getModel()->getName(), $name) === 0) $count++;
+                    }
+                    return (string) $count;
+
+                case 'countByTag':
+                    $tagName = $args[0] ?? '';
+                    $count = 0;
+                    foreach ($contextNodes as $n) {
+                        foreach ($n->getTags() as $tag) {
+                            if (strcasecmp($tag->getName(), $tagName) === 0) { $count++; break; }
+                        }
+                    }
+                    return (string) $count;
+
+                case 'listWhere':
+                case 'countWhere':
+                    $category = $args[0] ?? '';
+                    $key = $args[1] ?? '';
+                    $operator = $args[2] ?? '=';
+                    $compareValue = $args[3] ?? '';
+                    $colLabel = $args[4] ?? null;
+
+                    $matched = [];
+                    foreach ($contextNodes as $n) {
+                        $criteria = ['node' => $n, 'categoryName' => $category, 'entryKey' => $key];
+                        if ($colLabel) $criteria['colLabel'] = $colLabel;
+                        $entries = $invRepo->findBy($criteria);
+                        foreach ($entries as $entry) {
+                            $val = $entry->getValue();
+                            $match = match ($operator) {
+                                '=', '==' => $val === $compareValue,
+                                '!=' => $val !== $compareValue,
+                                '<' => version_compare($val, $compareValue, '<'),
+                                '>' => version_compare($val, $compareValue, '>'),
+                                '<=' => version_compare($val, $compareValue, '<='),
+                                '>=' => version_compare($val, $compareValue, '>='),
+                                'contains' => str_contains($val, $compareValue),
+                                default => false,
+                            };
+                            if ($match) {
+                                $label = $n->getName() ?: $n->getHostname() ?: $n->getIpAddress();
+                                $matched[$n->getId()] = $label;
+                                break;
+                            }
+                        }
+                    }
+
+                    if ($fn === 'countWhere') {
+                        return (string) count($matched);
+                    }
+                    return implode(', ', array_values($matched));
+
+                case 'collectionCommands':
+                case 'collectionFiles':
+                case 'collectionWorker':
+                case 'collectionDate':
+                    $nodeIdentifier = $args[0] ?? '';
+                    $collTag = $args[1] ?? 'latest';
+                    $dateFormat = $args[2] ?? 'Y-m-d H:i:s';
+
+                    // Resolve node by IP (strip "node:" prefix if present)
+                    $ip = str_starts_with($nodeIdentifier, 'node:') ? substr($nodeIdentifier, 5) : $nodeIdentifier;
+                    $ip = trim($ip, '"\'');
+                    $targetNode = $nodeRepo->findOneBy(['ipAddress' => $ip, 'context' => $context]);
+                    if (!$targetNode) return '';
+
+                    // Find collection by tag
+                    $conn = $this->em->getConnection();
+                    $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1';
+                    $row = $conn->fetchAssociative($sql, [
+                        'node' => $targetNode->getId(),
+                        'status' => \App\Entity\Collection::STATUS_COMPLETED,
+                        'tag' => '%"' . $collTag . '"%',
+                    ]);
+
+                    if (!$row) return '';
+                    $collection = $this->em->getRepository(\App\Entity\Collection::class)->find($row['id']);
+                    if (!$collection) return '';
+
+                    return match ($fn) {
+                        'collectionCommands' => (string) ($collection->getCommandCount() ?? 0),
+                        'collectionFiles' => (string) ($collection->getCompletedCount() ?? 0),
+                        'collectionWorker' => $collection->getWorker() ?? '',
+                        'collectionDate' => $collection->getCompletedAt() ? $collection->getCompletedAt()->format($dateFormat) : '',
+                        default => '',
+                    };
+
+                default:
+                    return $matches[0]; // Unknown function — leave as is
+            }
+        }, $text) ?? $text;
     }
 
     private function publish(Report $report, string $status): void

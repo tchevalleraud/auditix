@@ -132,15 +132,19 @@ class NodeController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        $ipAddress = $data['ipAddress'] ?? '';
-        if (empty($ipAddress)) {
-            return $this->json(['error' => 'IP address is required'], Response::HTTP_BAD_REQUEST);
+        if (array_key_exists('ipAddress', $data)) {
+            $ipAddress = $data['ipAddress'] ?? '';
+            if (empty($ipAddress)) {
+                return $this->json(['error' => 'IP address is required'], Response::HTTP_BAD_REQUEST);
+            }
+            $node->setIpAddress($ipAddress);
         }
-
-        $node->setName($data['name'] ?? null);
-        $node->setIpAddress($ipAddress);
-        $node->setPolicy($data['policy'] ?? $node->getPolicy());
-
+        if (array_key_exists('name', $data)) {
+            $node->setName($data['name']);
+        }
+        if (array_key_exists('policy', $data)) {
+            $node->setPolicy($data['policy']);
+        }
         if (array_key_exists('manufacturerId', $data)) {
             $node->setManufacturer($data['manufacturerId'] ? $em->getRepository(Editor::class)->find($data['manufacturerId']) : null);
         }
@@ -151,8 +155,10 @@ class NodeController extends AbstractController
             $node->setProfile($data['profileId'] ? $em->getRepository(Profile::class)->find($data['profileId']) : null);
         }
         if (array_key_exists('tagIds', $data)) {
-            // Clear and re-set tags
-            foreach ($node->getTags()->toArray() as $tag) { $node->removeTag($tag); }
+            $tagMode = $data['tagMode'] ?? 'replace';
+            if ($tagMode === 'replace') {
+                foreach ($node->getTags()->toArray() as $tag) { $node->removeTag($tag); }
+            }
             foreach (($data['tagIds'] ?? []) as $tagId) {
                 $tag = $em->getRepository(NodeTag::class)->find($tagId);
                 if ($tag) $node->addTag($tag);

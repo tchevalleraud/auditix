@@ -121,6 +121,12 @@ class DeviceModelController extends AbstractController
         return $this->json($this->serialize($model), Response::HTTP_CREATED);
     }
 
+    #[Route('/{id}', methods: ['GET'])]
+    public function show(DeviceModel $model): JsonResponse
+    {
+        return $this->json($this->serialize($model));
+    }
+
     #[Route('/{id}', methods: ['PUT'])]
     public function update(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {

@@ -25,6 +25,7 @@ import {
   FileBarChart,
   Palette,
   Calendar,
+  FlaskConical,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -114,7 +115,7 @@ const adminNav: NavCategory[] = [
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { adminMode, setAdminMode } = useAppContext();
+  const { adminMode, setAdminMode, current } = useAppContext();
   const { t } = useI18n();
   const [versionStatus, setVersionStatus] = useState<{ upToDate: boolean; latest: string | null } | null>(null);
 
@@ -197,7 +198,20 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-3 py-3">
+      <div className="px-3 py-3 space-y-0.5">
+        {!adminMode && current?.publicEnabled && (
+          <Link
+            href="/labs"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              pathname.startsWith("/labs")
+                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            }`}
+          >
+            <FlaskConical className="h-5 w-5 shrink-0" />
+            {t("sidebar.labs")}
+          </Link>
+        )}
         {!adminMode && (
           <Link
             href="/settings"

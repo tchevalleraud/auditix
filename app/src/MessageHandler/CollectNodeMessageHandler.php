@@ -262,10 +262,7 @@ class CollectNodeMessageHandler
             'type' => CollectionFolder::TYPE_MANUFACTURER,
         ]);
         if ($manFolder) {
-            foreach ($this->em->getRepository(CollectionCommand::class)->findBy(['folder' => $manFolder, 'enabled' => true], ['name' => 'ASC']) as $c) {
-                $commands[] = $c;
-                $seenIds[] = $c->getId();
-            }
+            $this->collectCommandsFromFolder($manFolder, $commands, $seenIds, true);
         }
 
         $modelFolder = $this->em->getRepository(CollectionFolder::class)->findOneBy([
@@ -273,12 +270,7 @@ class CollectNodeMessageHandler
             'type' => CollectionFolder::TYPE_MODEL,
         ]);
         if ($modelFolder) {
-            foreach ($this->em->getRepository(CollectionCommand::class)->findBy(['folder' => $modelFolder, 'enabled' => true], ['name' => 'ASC']) as $c) {
-                if (!in_array($c->getId(), $seenIds, true)) {
-                    $commands[] = $c;
-                    $seenIds[] = $c->getId();
-                }
-            }
+            $this->collectCommandsFromFolder($modelFolder, $commands, $seenIds);
         }
 
         foreach ($model->getManualCommands() as $c) {
@@ -289,6 +281,21 @@ class CollectNodeMessageHandler
         }
 
         return $commands;
+    }
+
+    private function collectCommandsFromFolder(CollectionFolder $folder, array &$commands, array &$seenIds, bool $skipModelFolders = false): void
+    {
+        foreach ($this->em->getRepository(CollectionCommand::class)->findBy(['folder' => $folder, 'enabled' => true], ['name' => 'ASC']) as $c) {
+            if (!in_array($c->getId(), $seenIds, true)) {
+                $commands[] = $c;
+                $seenIds[] = $c->getId();
+            }
+        }
+        $children = $this->em->getRepository(CollectionFolder::class)->findBy(['parent' => $folder], ['name' => 'ASC']);
+        foreach ($children as $child) {
+            if ($skipModelFolders && $child->getType() === CollectionFolder::TYPE_MODEL) continue;
+            $this->collectCommandsFromFolder($child, $commands, $seenIds, $skipModelFolders);
+        }
     }
 
     private function publishUpdate(Collection $collection): void
@@ -342,7 +349,7 @@ class CollectNodeMessageHandler
         ));
     }
 
-    private function processInventoryRules(Collection $collection, Node $node, string $baseDir): void
+    public function processInventoryRules(Collection $collection, Node $node, string $baseDir): void
     {
         $model = $node->getModel();
         $rules = $this->resolveRules($model);
@@ -529,6 +536,10 @@ class CollectNodeMessageHandler
                 $key = $m[$kg] ?? null;
             } else {
                 $key = $ext->getKeyManual() ?: $ext->getName();
+                // Support template variables in manual key: $1, $2, etc. are replaced by captured groups
+                if ($key && preg_match('/\$\d/', $key)) {
+                    $key = preg_replace_callback('/\$(\d+)/', fn($r) => $m[(int)$r[1]] ?? '', $key);
+                }
             }
             if ($key === null || $key === '') continue;
 
@@ -597,33 +608,23 @@ class CollectNodeMessageHandler
         $rules = [];
         $seenIds = [];
 
-        // Manufacturer folder rules
+        // Manufacturer folder rules (recursive)
         $manFolder = $this->em->getRepository(CollectionRuleFolder::class)->findOneBy([
             'manufacturer' => $model->getManufacturer(),
             'model' => null,
             'type' => CollectionRuleFolder::TYPE_MANUFACTURER,
         ]);
         if ($manFolder) {
-            foreach ($this->em->getRepository(CollectionRule::class)->findBy(['folder' => $manFolder, 'enabled' => true]) as $r) {
-                if (!empty($r->getExtracts()->toArray())) {
-                    $rules[] = $r;
-                    $seenIds[] = $r->getId();
-                }
-            }
+            $this->collectRulesFromFolder($manFolder, $rules, $seenIds, true);
         }
 
-        // Model folder rules
+        // Model folder rules (recursive)
         $modelFolder = $this->em->getRepository(CollectionRuleFolder::class)->findOneBy([
             'model' => $model,
             'type' => CollectionRuleFolder::TYPE_MODEL,
         ]);
         if ($modelFolder) {
-            foreach ($this->em->getRepository(CollectionRule::class)->findBy(['folder' => $modelFolder, 'enabled' => true]) as $r) {
-                if (!in_array($r->getId(), $seenIds, true) && !empty($r->getExtracts()->toArray())) {
-                    $rules[] = $r;
-                    $seenIds[] = $r->getId();
-                }
-            }
+            $this->collectRulesFromFolder($modelFolder, $rules, $seenIds);
         }
 
         // Manual rules
@@ -641,5 +642,20 @@ class CollectNodeMessageHandler
     {
         $text = preg_replace('/[^a-z0-9]+/i', '-', $text);
         return strtolower(trim($text, '-'));
+    }
+
+    private function collectRulesFromFolder(CollectionRuleFolder $folder, array &$rules, array &$seenIds, bool $skipModelFolders = false): void
+    {
+        foreach ($this->em->getRepository(CollectionRule::class)->findBy(['folder' => $folder, 'enabled' => true]) as $r) {
+            if (!in_array($r->getId(), $seenIds, true) && !empty($r->getExtracts()->toArray())) {
+                $rules[] = $r;
+                $seenIds[] = $r->getId();
+            }
+        }
+        $children = $this->em->getRepository(CollectionRuleFolder::class)->findBy(['parent' => $folder], ['name' => 'ASC']);
+        foreach ($children as $child) {
+            if ($skipModelFolders && $child->getType() === CollectionRuleFolder::TYPE_MODEL) continue;
+            $this->collectRulesFromFolder($child, $rules, $seenIds, $skipModelFolders);
+        }
     }
 }

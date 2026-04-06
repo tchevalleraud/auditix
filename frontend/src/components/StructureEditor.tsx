@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import {
   Plus,
   Trash2,
@@ -31,11 +31,26 @@ import {
   Server,
   Search,
   Pencil,
+  ListChecks,
+  ClipboardList,
+  TerminalSquare,
+  Underline as UnderlineIcon,
+  Strikethrough,
+  Superscript,
+  Subscript,
+  Paintbrush,
+  Palette,
+  IndentIncrease,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import TextAlign from "@tiptap/extension-text-align";
+import UnderlineExt from "@tiptap/extension-underline";
+import SubscriptExt from "@tiptap/extension-subscript";
+import SuperscriptExt from "@tiptap/extension-superscript";
+import { TextStyle, Color } from "@tiptap/extension-text-style";
+import { Highlight } from "@tiptap/extension-highlight";
 
 // --- Block types ---
 
@@ -152,17 +167,71 @@ export interface CliCommandBlock {
   conditionalRules?: CliConditionalRule[];
 }
 
+export interface EquipmentCategory {
+  id: string;
+  name: string;
+  nodeIds: number[];
+  style?: { bold?: boolean; italic?: boolean; size?: number; color?: string };
+}
+
+export interface EquipmentListBlock {
+  id: string;
+  type: "equipment_list";
+  title: string;
+  titleStyle?: { bold?: boolean; italic?: boolean; size?: number; color?: string };
+  categoryStyle?: { bold?: boolean; italic?: boolean; size?: number; color?: string };
+  categories: EquipmentCategory[];
+  nodeDisplayField: "name" | "hostname" | "ipAddress";
+  nodeColor?: string;
+  showCount?: boolean;
+  indent?: number;
+  categoryIndent?: number;
+  pageBreakBefore?: boolean;
+}
+
+export interface ActionItem {
+  id: string;
+  priority: "critical" | "high" | "medium" | "low";
+  details: string;
+}
+
+export interface ActionListBlock {
+  id: string;
+  type: "action_list";
+  title: string;
+  actions: ActionItem[];
+  showPriorityBadge?: boolean;
+  pageBreakBefore?: boolean;
+}
+
+export interface CommandListBlock {
+  id: string;
+  type: "command_list";
+  manufacturerId: number | null;
+  modelId: number | null;
+  pageBreakBefore?: boolean;
+}
+
 function normalizeCell(cell: string | TableCell): TableCell {
   if (typeof cell === "string") return { value: cell };
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock;
+
+interface ReportNodeRef {
+  id: number;
+  ipAddress: string;
+  name: string | null;
+  hostname: string | null;
+}
 
 interface Props {
   blocks: ReportBlock[];
   onChange: (blocks: ReportBlock[]) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
 }
 
 function uid() {
@@ -198,7 +267,7 @@ const inputClass =
 
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-export default function StructureEditor({ blocks, onChange, t }: Props) {
+export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -228,6 +297,12 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
       block = { id, type: "inventory_table", columns: [], nodeIds: [], showHeader: true };
     } else if (type === "cli_command") {
       block = { id, type: "cli_command", commandName: "", command: "", dataSource: "none", nodeIds: [], tagIds: [], showEllipsis: true };
+    } else if (type === "equipment_list") {
+      block = { id, type: "equipment_list", title: "", categories: [], nodeDisplayField: "name", nodeColor: "#7c3aed", showCount: true, titleStyle: { bold: true, size: 13, color: "#1e293b" }, categoryStyle: { bold: false, size: 11, color: "#1e293b" } } as EquipmentListBlock;
+    } else if (type === "action_list") {
+      block = { id, type: "action_list", title: "", actions: [], showPriorityBadge: true };
+    } else if (type === "command_list") {
+      block = { id, type: "command_list", manufacturerId: null, modelId: null };
     } else {
       block = { id, type: "paragraph", content: "", align: "left" };
     }
@@ -324,6 +399,26 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
       }
       return <span className="italic text-slate-400">{t("structure.emptyCliCommand")}</span>;
     }
+    if (block.type === "equipment_list") {
+      if (block.title) {
+        const total = block.categories.reduce((s, c) => s + c.nodeIds.length, 0);
+        return <span className="text-slate-500">{block.title} — {block.categories.length} cat. ({total} nodes)</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyEquipmentList")}</span>;
+    }
+    if (block.type === "action_list") {
+      if (block.actions.length > 0) {
+        return <span className="text-slate-500">{block.title || t("structure.actionList")} — {block.actions.length} action{block.actions.length > 1 ? "s" : ""}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyActionList")}</span>;
+    }
+
+    if (block.type === "command_list") {
+      if (block.modelId) {
+        return <span className="text-slate-500 font-mono text-xs">{t("structure.commandList")} — model #{block.modelId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyCommandList")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -363,6 +458,27 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-slate-800 dark:bg-slate-200/10 px-2 py-0.5 text-[11px] font-bold text-green-400 dark:text-green-400 font-mono">
           &gt;_
+        </span>
+      );
+    }
+    if (block.type === "equipment_list") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-purple-100 dark:bg-purple-500/15 px-2 py-0.5 text-[11px] font-bold text-purple-600 dark:text-purple-400">
+          <ListChecks className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "action_list") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-rose-100 dark:bg-rose-500/15 px-2 py-0.5 text-[11px] font-bold text-rose-600 dark:text-rose-400">
+          <ClipboardList className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "command_list") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-teal-100 dark:bg-teal-500/15 px-2 py-0.5 text-[11px] font-bold text-teal-600 dark:text-teal-400">
+          <TerminalSquare className="h-3 w-3" />
         </span>
       );
     }
@@ -415,6 +531,18 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
                 <button onClick={() => { addBlock("cli_command"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                   <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span>
                   {t("structure.addCliCommand")}
+                </button>
+                <button onClick={() => { addBlock("equipment_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ListChecks className="h-4 w-4 text-purple-500" />
+                  {t("structure.addEquipmentList")}
+                </button>
+                <button onClick={() => { addBlock("action_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ClipboardList className="h-4 w-4 text-rose-500" />
+                  {t("structure.addActionList")}
+                </button>
+                <button onClick={() => { addBlock("command_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <TerminalSquare className="h-4 w-4 text-teal-500" />
+                  {t("structure.addCommandList")}
                 </button>
               </div>
             )}
@@ -563,7 +691,7 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
                 <HeadingProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "paragraph" && (
-                <ParagraphProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+                <ParagraphProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
               )}
               {editingBlock.type === "image" && (
                 <ImageProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -576,6 +704,15 @@ export default function StructureEditor({ blocks, onChange, t }: Props) {
               )}
               {editingBlock.type === "cli_command" && (
                 <CliCommandProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "equipment_list" && (
+                <EquipmentListProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "action_list" && (
+                <ActionListProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "command_list" && (
+                <CommandListProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
             </div>
           </div>
@@ -668,6 +805,27 @@ function InsertLine({
             <span className="font-mono text-[10px] font-bold">&gt;_</span>
             {t("structure.addCliCommand")}
           </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("equipment_list", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            {t("structure.addEquipmentList")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button
+            onClick={() => onInsert("action_list", index)}
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+          >
+            <ClipboardList className="h-3.5 w-3.5" />
+            {t("structure.addActionList")}
+          </button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
+          <button onClick={() => onInsert("command_list", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <TerminalSquare className="h-3.5 w-3.5" />
+            {t("structure.addCommandList")}
+          </button>
         </div>
       )}
     </div>
@@ -724,28 +882,73 @@ function HeadingProperties({
 }
 
 // --- Paragraph inline properties (TipTap WYSIWYG) ---
+interface InvStructure {
+  categoryId: number | null;
+  categoryName: string;
+  entries: { key: string; columns: string[] }[];
+}
+
 function ParagraphProperties({
   block,
   updateBlock,
   t,
+  reportType,
+  reportNodes,
 }: {
   block: ParagraphBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
 }) {
+  const { current } = useAppContext();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // Autocomplete state
+  const [acOpen, setAcOpen] = useState(false);
+  const [acPos, setAcPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [acStep, setAcStep] = useState<"root" | "node" | "category" | "key" | "column" | "fn" | "fn_param">("root");
+  const [acNode, setAcNode] = useState<string | null>(null);
+  const [acCategory, setAcCategory] = useState<string | null>(null);
+  const [acKey, setAcKey] = useState<string | null>(null);
+  const [acFilter, setAcFilter] = useState("");
+  const [invStructure, setInvStructure] = useState<InvStructure[]>([]);
+  // Function params state
+  const [acFn, setAcFn] = useState<string | null>(null);
+  const [acFnArgs, setAcFnArgs] = useState<string[]>([]);
+
+  // Available functions
+  const fnDefs = useMemo(() => [
+    { id: "countByManufacturer", label: "Compter par fabricant", desc: "Nombre d'equipements d'un fabricant", params: ["Fabricant"], group: "Noeuds" },
+    { id: "countByModel", label: "Compter par modele", desc: "Nombre d'equipements d'un modele", params: ["Modele"], group: "Noeuds" },
+    { id: "countByTag", label: "Compter par tag", desc: "Nombre d'equipements avec un tag", params: ["Tag"], group: "Noeuds" },
+    { id: "countWhere", label: "Compter si inventaire", desc: "Nombre d'equipements ou inventaire matche", params: ["Categorie", "Cle", "Operateur", "Valeur"], group: "Inventaire" },
+    { id: "listWhere", label: "Lister si inventaire", desc: "Noms d'equipements ou inventaire matche", params: ["Categorie", "Cle", "Operateur", "Valeur"], group: "Inventaire" },
+    { id: "collectionCommands", label: "Nombre de commandes", desc: "Nombre de commandes de la collecte", params: ["Noeud ou Tag", "Tag collecte"], group: "Collecte" },
+    { id: "collectionFiles", label: "Nombre de fichiers", desc: "Nombre de fichiers de la collecte", params: ["Noeud ou Tag", "Tag collecte"], group: "Collecte" },
+    { id: "collectionWorker", label: "Worker", desc: "Nom du worker qui a fait la collecte", params: ["Noeud ou Tag", "Tag collecte"], group: "Collecte" },
+    { id: "collectionDate", label: "Date de collecte", desc: "Date de la collecte", params: ["Noeud ou Tag", "Tag collecte", "Format"], group: "Collecte" },
+  ], []);
+
+  const fnOperators = ["=", "!=", "<", ">", "<=", ">=", "contains"];
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setInvStructure);
+  }, [current]);
 
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      StarterKit.configure({
-        heading: false,
-        codeBlock: false,
-        code: false,
-        blockquote: false,
-        horizontalRule: false,
-      }),
+      StarterKit.configure({ heading: false, codeBlock: false, code: false, blockquote: false, horizontalRule: false }),
       TextAlign.configure({ types: ["paragraph"] }),
+      UnderlineExt,
+      SubscriptExt,
+      SuperscriptExt,
+      TextStyle,
+      Color,
+      Highlight.configure({ multicolor: true }),
     ],
     content: block.content || "<p></p>",
     onUpdate: ({ editor: ed }) => {
@@ -753,87 +956,343 @@ function ParagraphProperties({
       debounceRef.current = setTimeout(() => {
         updateBlock(block.id, { content: ed.getHTML() });
       }, 400);
+
+      // Detect {{ trigger
+      const { from } = ed.state.selection;
+      const textBefore = ed.state.doc.textBetween(Math.max(0, from - 2), from);
+      if (textBefore === "{{") {
+        // Get cursor position for popup
+        const coords = ed.view.coordsAtPos(from);
+        const containerRect = editorContainerRef.current?.getBoundingClientRect();
+        if (containerRect) {
+          setAcPos({ top: coords.bottom - containerRect.top + 4, left: coords.left - containerRect.left });
+        }
+        setAcFilter("");
+        setAcStep("root");
+        setAcNode(null);
+        setAcCategory(null);
+        setAcKey(null);
+        setAcFn(null);
+        setAcFnArgs([]);
+        setAcOpen(true);
+      }
     },
     editorProps: {
-      attributes: {
-        class:
-          "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[80px] px-3.5 py-2.5 text-sm",
+      attributes: { class: "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[80px] px-3.5 py-2.5 text-sm" },
+      handleKeyDown: (_view, event) => {
+        if (acOpen && event.key === "Escape") { setAcOpen(false); return true; }
+        return false;
       },
     },
   });
 
+  const insertVariable = (variable: string) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent(variable + "}}").run();
+    setAcOpen(false);
+  };
+
+  const acGoVariable = () => {
+    setAcFilter("");
+    if (reportType === "node") {
+      setAcStep("category");
+    } else {
+      setAcStep("node");
+    }
+  };
+
+  const selectNode = (ip: string) => { setAcNode(ip); setAcStep("category"); setAcFilter(""); };
+
+  const selectCategory = (cat: string) => { setAcCategory(cat); setAcStep("key"); setAcFilter(""); };
+
+  const selectKey = (key: string, columns: string[]) => {
+    if (columns.length <= 1) {
+      const prefix = reportType === "node" ? "" : `node["${acNode}"].`;
+      insertVariable(`${prefix}${acCategory}.${key}`);
+    } else {
+      setAcKey(key);
+      setAcStep("column");
+      setAcFilter("");
+    }
+  };
+
+  const selectColumn = (col: string) => {
+    const prefix = reportType === "node" ? "" : `node["${acNode}"].`;
+    insertVariable(`${prefix}${acCategory}.${acKey}.${col}`);
+  };
+
+  const selectFn = (fnId: string) => {
+    const def = fnDefs.find((f) => f.id === fnId);
+    if (!def) return;
+    setAcFn(fnId);
+    setAcFnArgs([]);
+    setAcStep("fn_param");
+    setAcFilter("");
+  };
+
+  const submitFnArg = (value: string) => {
+    const def = fnDefs.find((f) => f.id === acFn);
+    if (!def) return;
+    const newArgs = [...acFnArgs, value];
+    if (newArgs.length >= def.params.length) {
+      // All params collected — insert function
+      const argsStr = newArgs.map((a) => `"${a}"`).join(", ");
+      insertVariable(`fn:${acFn}(${argsStr})`);
+    } else {
+      setAcFnArgs(newArgs);
+      setAcFilter("");
+    }
+  };
+
+  // Build filtered suggestions
+  const suggestions = useMemo(() => {
+    const q = acFilter.toLowerCase();
+    if (acStep === "root") {
+      return [
+        { id: "_var", label: "Variable d'inventaire", sub: "Valeur d'un noeud", icon: "var" },
+        { id: "_fn", label: "Fonction", sub: "Comptage, liste filtree...", icon: "fn" },
+      ];
+    }
+    if (acStep === "node") {
+      return (reportNodes || []).filter((n) => {
+        const label = n.name || n.hostname || n.ipAddress;
+        return !q || label.toLowerCase().includes(q) || n.ipAddress.includes(q);
+      }).map((n) => ({ id: n.ipAddress, label: n.name || n.hostname || n.ipAddress, sub: n.ipAddress }));
+    }
+    if (acStep === "category") {
+      return invStructure.filter((c) => !q || c.categoryName.toLowerCase().includes(q)).map((c) => ({ id: c.categoryName, label: c.categoryName, sub: `${c.entries.length} cle(s)` }));
+    }
+    if (acStep === "key") {
+      const cat = invStructure.find((c) => c.categoryName === acCategory);
+      return (cat?.entries || []).filter((e) => !q || e.key.toLowerCase().includes(q)).map((e) => ({ id: e.key, label: e.key, sub: e.columns.join(", "), columns: e.columns }));
+    }
+    if (acStep === "column") {
+      const cat = invStructure.find((c) => c.categoryName === acCategory);
+      const entry = cat?.entries.find((e) => e.key === acKey);
+      return (entry?.columns || []).filter((c) => !q || c.toLowerCase().includes(q)).map((c) => ({ id: c, label: c, sub: "" }));
+    }
+    if (acStep === "fn") {
+      return fnDefs.filter((f) => !q || f.label.toLowerCase().includes(q) || f.id.toLowerCase().includes(q)).map((f) => ({ id: f.id, label: f.label, sub: f.desc, group: f.group }));
+    }
+    if (acStep === "fn_param") {
+      const def = fnDefs.find((f) => f.id === acFn);
+      if (!def) return [];
+      const paramIdx = acFnArgs.length;
+      const paramName = def.params[paramIdx];
+      // Provide contextual suggestions for known param types
+      if (paramName === "Fabricant") {
+        const mfrs = [...new Set((reportNodes || []).map((n) => n.name).filter(Boolean))]; // fallback
+        // Can't easily get manufacturers from reportNodes — let user type
+        return [];
+      }
+      if (paramName === "Categorie") {
+        return invStructure.filter((c) => !q || c.categoryName.toLowerCase().includes(q)).map((c) => ({ id: c.categoryName, label: c.categoryName, sub: "" }));
+      }
+      if (paramName === "Cle") {
+        const cat = invStructure.find((c) => c.categoryName === acFnArgs[0]);
+        return (cat?.entries || []).filter((e) => !q || e.key.toLowerCase().includes(q)).map((e) => ({ id: e.key, label: e.key, sub: "" }));
+      }
+      if (paramName === "Operateur") {
+        return fnOperators.filter((o) => !q || o.includes(q)).map((o) => ({ id: o, label: o, sub: { "=": "egal", "!=": "different", "<": "inferieur", ">": "superieur", "<=": "inf. ou egal", ">=": "sup. ou egal", "contains": "contient" }[o] || "" }));
+      }
+      if (paramName === "Noeud ou Tag") {
+        const items: { id: string; label: string; sub: string }[] = [];
+        (reportNodes || []).filter((n) => { const l = n.name || n.hostname || n.ipAddress; return !q || l.toLowerCase().includes(q) || n.ipAddress.includes(q); })
+          .forEach((n) => items.push({ id: `node:${n.ipAddress}`, label: n.name || n.hostname || n.ipAddress, sub: n.ipAddress }));
+        return items;
+      }
+      if (paramName === "Tag collecte") {
+        return [
+          { id: "latest", label: "latest", sub: "Derniere collecte" },
+        ];
+      }
+      if (paramName === "Format") {
+        return [
+          { id: "Y-m-d H:i:s", label: "2026-04-06 14:30:00", sub: "Y-m-d H:i:s" },
+          { id: "d/m/Y H:i", label: "06/04/2026 14:30", sub: "d/m/Y H:i" },
+          { id: "d/m/Y", label: "06/04/2026", sub: "d/m/Y" },
+          { id: "Y-m-d", label: "2026-04-06", sub: "Y-m-d" },
+          { id: "d M Y", label: "06 Apr 2026", sub: "d M Y" },
+          { id: "H:i:s", label: "14:30:00", sub: "H:i:s" },
+          { id: "H:i", label: "14:30", sub: "H:i" },
+        ].filter((f) => !q || f.label.toLowerCase().includes(q) || f.sub.toLowerCase().includes(q));
+      }
+      return []; // "Valeur", "Tag", "Modele", "Fabricant" — free text input
+    }
+    return [];
+  }, [acStep, acFilter, acNode, acCategory, acKey, acFn, acFnArgs, invStructure, reportNodes, reportType, fnDefs]);
+
   if (!editor) return null;
 
   const btnClass = (active: boolean) =>
-    `p-1.5 rounded-md transition-colors ${
-      active
-        ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900"
-        : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
-    }`;
+    `p-1.5 rounded-md transition-colors ${active ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`;
+
+  const stepLabels: Record<string, string> = { root: "Type", node: "Noeud", category: "Categorie", key: "Cle", column: "Colonne", fn: "Fonction", fn_param: fnDefs.find((f) => f.id === acFn)?.params[acFnArgs.length] || "Parametre" };
 
   return (
     <div className="flex flex-col flex-1 min-h-0 gap-1.5">
       <label className={labelClass}>{t("structure.content")}</label>
-      <div className="flex flex-col flex-1 min-h-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+      <div ref={editorContainerRef} className="relative flex flex-col flex-1 min-h-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
         {/* Toolbar */}
-        <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0">
+        <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0 flex-wrap">
+          {/* Alignment */}
           {([
             { val: "left" as const, Icon: AlignLeft },
             { val: "center" as const, Icon: AlignCenter },
             { val: "right" as const, Icon: AlignRight },
             { val: "justify" as const, Icon: AlignJustify },
           ]).map(({ val, Icon }) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => {
-                editor.chain().focus().setTextAlign(val).run();
-                updateBlock(block.id, { align: val });
-              }}
-              className={btnClass(editor.isActive({ textAlign: val }))}
-            >
+            <button key={val} type="button" onClick={() => { editor.chain().focus().setTextAlign(val).run(); updateBlock(block.id, { align: val }); }} className={btnClass(editor.isActive({ textAlign: val }))}>
               <Icon className="h-3.5 w-3.5" />
             </button>
           ))}
           <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleBold().run()}
-            className={btnClass(editor.isActive("bold"))}
-            title={t("structure.bold")}
-          >
-            <Bold className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleItalic().run()}
-            className={btnClass(editor.isActive("italic"))}
-            title={t("structure.italic")}
-          >
-            <Italic className="h-3.5 w-3.5" />
-          </button>
+          {/* Text style */}
+          <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive("bold"))} title={t("structure.bold")}><Bold className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive("italic"))} title={t("structure.italic")}><Italic className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive("underline"))} title={t("structure.underline")}><UnderlineIcon className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().toggleStrike().run()} className={btnClass(editor.isActive("strike"))} title={t("structure.strikethrough")}><Strikethrough className="h-3.5 w-3.5" /></button>
           <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleBulletList().run()}
-            className={btnClass(editor.isActive("bulletList"))}
-            title={t("structure.bulletList")}
-          >
-            <List className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => editor.chain().focus().toggleOrderedList().run()}
-            className={btnClass(editor.isActive("orderedList"))}
-            title={t("structure.numberedList")}
-          >
-            <ListOrdered className="h-3.5 w-3.5" />
-          </button>
+          {/* Superscript / Subscript */}
+          <button type="button" onClick={() => editor.chain().focus().toggleSuperscript().run()} className={btnClass(editor.isActive("superscript"))} title={t("structure.superscript")}><Superscript className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().toggleSubscript().run()} className={btnClass(editor.isActive("subscript"))} title={t("structure.subscript")}><Subscript className="h-3.5 w-3.5" /></button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          {/* Text color */}
+          <div className="relative flex items-center">
+            <Palette className="h-3.5 w-3.5 text-slate-400 absolute left-1.5 pointer-events-none" />
+            <input type="color" value={editor.getAttributes("textStyle").color || "#000000"} onChange={(e) => editor.chain().focus().setColor(e.target.value).run()} className="w-7 h-7 rounded cursor-pointer opacity-0 absolute inset-0" title={t("structure.textColor")} />
+            <div className="w-7 h-7 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+              <Palette className="h-3.5 w-3.5" style={{ color: editor.getAttributes("textStyle").color || "#64748b" }} />
+            </div>
+          </div>
+          {/* Highlight */}
+          <div className="relative flex items-center">
+            <input type="color" value={editor.getAttributes("highlight").color || "#fef08a"} onChange={(e) => editor.chain().focus().toggleHighlight({ color: e.target.value }).run()} className="w-7 h-7 rounded cursor-pointer opacity-0 absolute inset-0" title={t("structure.highlight")} />
+            <div className={`w-7 h-7 rounded border border-slate-200 dark:border-slate-700 flex items-center justify-center ${editor.isActive("highlight") ? "bg-yellow-100 dark:bg-yellow-500/20" : ""}`}>
+              <Paintbrush className="h-3.5 w-3.5 text-amber-500" />
+            </div>
+          </div>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          {/* Tab / Indent */}
+          <button type="button" onClick={() => editor.chain().focus().insertContent("&emsp;&emsp;").run()} className={btnClass(false)} title={t("structure.tab")}><IndentIncrease className="h-3.5 w-3.5" /></button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          {/* Lists */}
+          <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive("bulletList"))} title={t("structure.bulletList")}><List className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive("orderedList"))} title={t("structure.numberedList")}><ListOrdered className="h-3.5 w-3.5" /></button>
         </div>
-        {/* Editor — fills remaining height */}
+        {/* Editor */}
         <div className="flex-1 min-h-0 overflow-y-auto">
           <EditorContent editor={editor} />
         </div>
+
+        {/* Autocomplete popup */}
+        {acOpen && (
+          <div
+            className="absolute z-50 w-96 max-h-72 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl overflow-hidden"
+            style={{ top: acPos.top, left: Math.min(acPos.left, 300) }}
+          >
+            {/* Header with breadcrumb */}
+            <div className="flex items-center gap-1 px-3 py-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex-wrap">
+              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{"{{"}</span>
+              {acStep !== "root" && (
+                <button onClick={() => { setAcStep("root"); setAcFilter(""); setAcFn(null); setAcFnArgs([]); }} className="text-[10px] text-slate-400 hover:text-slate-600">...</button>
+              )}
+              {acStep !== "root" && acStep !== "fn" && acStep !== "fn_param" && acStep !== "node" && reportType !== "node" && acNode && (
+                <>
+                  <span className="text-[10px] text-slate-300">.</span>
+                  <button onClick={() => { setAcStep("node"); setAcFilter(""); }} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{acNode}</button>
+                </>
+              )}
+              {(acStep === "key" || acStep === "column") && acCategory && (
+                <>
+                  <span className="text-[10px] text-slate-300">.</span>
+                  <button onClick={() => { setAcStep("category"); setAcFilter(""); }} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{acCategory}</button>
+                </>
+              )}
+              {acStep === "column" && acKey && (
+                <>
+                  <span className="text-[10px] text-slate-300">.</span>
+                  <button onClick={() => { setAcStep("key"); setAcFilter(""); }} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{acKey}</button>
+                </>
+              )}
+              {acStep === "fn_param" && acFn && (
+                <>
+                  <span className="text-[10px] text-slate-300">.</span>
+                  <button onClick={() => { setAcStep("fn"); setAcFilter(""); setAcFnArgs([]); }} className="text-[10px] text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">{acFn}</button>
+                  {acFnArgs.map((a, i) => (
+                    <span key={i} className="text-[10px] text-slate-400">(&quot;{a}&quot;)</span>
+                  ))}
+                </>
+              )}
+              <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 ml-0.5">{stepLabels[acStep]}</span>
+              <button onClick={() => setAcOpen(false)} className="ml-auto p-0.5 text-slate-400 hover:text-slate-600"><X className="h-3 w-3" /></button>
+            </div>
+            {/* Search */}
+            <div className="px-2 py-1.5 border-b border-slate-100 dark:border-slate-800">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-slate-400" />
+                <input
+                  type="text"
+                  value={acFilter}
+                  onChange={(e) => setAcFilter(e.target.value)}
+                  placeholder={`Filtrer...`}
+                  className="w-full rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1 pl-7 pr-2 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Escape") setAcOpen(false); }}
+                />
+              </div>
+            </div>
+            {/* Suggestions */}
+            <div className="max-h-44 overflow-y-auto">
+              {suggestions.length === 0 && acStep !== "fn_param" && (
+                <div className="px-3 py-4 text-center text-xs text-slate-400">Aucun resultat</div>
+              )}
+              {suggestions.map((s, sIdx) => (<>
+                {acStep === "fn" && (s as { group?: string }).group && (sIdx === 0 || (suggestions[sIdx - 1] as { group?: string }).group !== (s as { group?: string }).group) && (
+                  <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">{(s as { group?: string }).group}</div>
+                )}
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    if (acStep === "root") {
+                      if (s.id === "_var") acGoVariable();
+                      else if (s.id === "_fn") { setAcStep("fn"); setAcFilter(""); }
+                    }
+                    else if (acStep === "node") selectNode(s.id);
+                    else if (acStep === "category") selectCategory(s.id);
+                    else if (acStep === "key") selectKey(s.id, (s as { columns?: string[] }).columns || []);
+                    else if (acStep === "column") selectColumn(s.id);
+                    else if (acStep === "fn") selectFn(s.id);
+                    else if (acStep === "fn_param") submitFnArg(s.id);
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors"
+                >
+                  <span className="text-xs font-medium text-slate-800 dark:text-slate-200 truncate">{s.label}</span>
+                  {s.sub && <span className="text-[10px] text-slate-400 shrink-0 ml-2">{s.sub}</span>}
+                </button>
+              </>))}
+              {/* Free text input for fn params without suggestions */}
+              {acStep === "fn_param" && suggestions.length === 0 && (
+                <div className="px-3 py-2">
+                  <div className="text-[10px] text-slate-400 mb-1">{fnDefs.find((f) => f.id === acFn)?.params[acFnArgs.length] || "Valeur"}</div>
+                  <form onSubmit={(e) => { e.preventDefault(); if (acFilter.trim()) submitFnArg(acFilter.trim()); }}>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={acFilter}
+                        onChange={(e) => setAcFilter(e.target.value)}
+                        placeholder="Saisir la valeur..."
+                        className="flex-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs focus:outline-none"
+                        autoFocus
+                      />
+                      <button type="submit" className="rounded bg-slate-900 dark:bg-white px-2 py-1 text-[10px] font-medium text-white dark:text-slate-900">OK</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2793,6 +3252,430 @@ function CliCommandProperties({
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Equipment List properties ---
+function EquipmentListProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: EquipmentListBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [nodes, setNodes] = useState<{ id: number; name: string | null; hostname: string | null; ipAddress: string }[]>([]);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [editingCatIdx, setEditingCatIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/nodes?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setNodes);
+  }, [current]);
+
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  const nodeLabel = (n: { name: string | null; hostname: string | null; ipAddress: string }) =>
+    block.nodeDisplayField === "hostname" ? (n.hostname || n.name || n.ipAddress)
+    : block.nodeDisplayField === "ipAddress" ? n.ipAddress
+    : (n.name || n.hostname || n.ipAddress);
+
+  return (
+    <div className="space-y-6">
+      {/* Title */}
+      <div>
+        <label className={labelCls}>{t("structure.equipTitle")}</label>
+        <input type="text" value={block.title} onChange={(e) => updateBlock(block.id, { ...block, title: e.target.value })} placeholder={t("structure.equipTitlePlaceholder")} className={inputCls} />
+      </div>
+
+      {/* Title style */}
+      <div>
+        <label className={labelCls}>{t("structure.equipTitleStyle")}</label>
+        <div className="flex items-center gap-3">
+          <button onClick={() => updateBlock(block.id, { ...block, titleStyle: { ...block.titleStyle, bold: !block.titleStyle?.bold } })} className={`px-3 py-1.5 rounded-lg border text-sm font-bold transition-colors ${block.titleStyle?.bold ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>B</button>
+          <button onClick={() => updateBlock(block.id, { ...block, titleStyle: { ...block.titleStyle, italic: !block.titleStyle?.italic } })} className={`px-3 py-1.5 rounded-lg border text-sm italic transition-colors ${block.titleStyle?.italic ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>I</button>
+          <input type="number" value={block.titleStyle?.size || 13} onChange={(e) => updateBlock(block.id, { ...block, titleStyle: { ...block.titleStyle, size: Number(e.target.value) } })} className="w-16 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm text-center" />
+          <span className="text-xs text-slate-400">pt</span>
+          <input type="color" value={block.titleStyle?.color || "#1e293b"} onChange={(e) => updateBlock(block.id, { ...block, titleStyle: { ...block.titleStyle, color: e.target.value } })} className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 cursor-pointer" />
+        </div>
+      </div>
+
+      {/* Category style (default) */}
+      <div>
+        <label className={labelCls}>{t("structure.equipCategoryStyle")}</label>
+        <div className="flex items-center gap-3">
+          <button onClick={() => updateBlock(block.id, { ...block, categoryStyle: { ...block.categoryStyle, bold: !block.categoryStyle?.bold } })} className={`px-3 py-1.5 rounded-lg border text-sm font-bold transition-colors ${block.categoryStyle?.bold ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>B</button>
+          <button onClick={() => updateBlock(block.id, { ...block, categoryStyle: { ...block.categoryStyle, italic: !block.categoryStyle?.italic } })} className={`px-3 py-1.5 rounded-lg border text-sm italic transition-colors ${block.categoryStyle?.italic ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>I</button>
+          <input type="number" value={block.categoryStyle?.size || 11} onChange={(e) => updateBlock(block.id, { ...block, categoryStyle: { ...block.categoryStyle, size: Number(e.target.value) } })} className="w-16 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm text-center" />
+          <span className="text-xs text-slate-400">pt</span>
+          <input type="color" value={block.categoryStyle?.color || "#1e293b"} onChange={(e) => updateBlock(block.id, { ...block, categoryStyle: { ...block.categoryStyle, color: e.target.value } })} className="h-8 w-8 rounded border border-slate-200 dark:border-slate-700 cursor-pointer" />
+        </div>
+      </div>
+
+      {/* Node display field + node color */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>{t("structure.equipDisplayField")}</label>
+          <select value={block.nodeDisplayField} onChange={(e) => updateBlock(block.id, { ...block, nodeDisplayField: e.target.value as "name" | "hostname" | "ipAddress" })} className={inputCls}>
+            <option value="name">Name</option>
+            <option value="hostname">Hostname</option>
+            <option value="ipAddress">IP Address</option>
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>{t("structure.equipNodeColor")}</label>
+          <div className="flex items-center gap-2">
+            <input type="color" value={block.nodeColor || "#7c3aed"} onChange={(e) => updateBlock(block.id, { ...block, nodeColor: e.target.value })} className="h-9 w-9 rounded border border-slate-200 dark:border-slate-700 cursor-pointer" />
+            <span className="text-xs font-mono text-slate-400">{block.nodeColor || "#7c3aed"}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Indentation */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>{t("structure.equipIndent")}</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={80} value={block.indent ?? 10} onChange={(e) => updateBlock(block.id, { ...block, indent: Number(e.target.value) })} className="w-20 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm text-center" />
+            <span className="text-xs text-slate-400">mm</span>
+          </div>
+        </div>
+        <div>
+          <label className={labelCls}>{t("structure.equipCategoryIndent")}</label>
+          <div className="flex items-center gap-2">
+            <input type="number" min={0} max={80} value={block.categoryIndent ?? 20} onChange={(e) => updateBlock(block.id, { ...block, categoryIndent: Number(e.target.value) })} className="w-20 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm text-center" />
+            <span className="text-xs text-slate-400">mm</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Categories */}
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <label className={labelCls}>{t("structure.equipCategories")}</label>
+          <button
+            onClick={() => {
+              const id = Math.random().toString(36).slice(2, 10);
+              updateBlock(block.id, { ...block, categories: [...block.categories, { id, name: "", nodeIds: [] }] });
+              setEditingCatIdx(block.categories.length);
+            }}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("structure.equipAddCategory")}
+          </button>
+        </div>
+
+        {block.categories.length === 0 && (
+          <div className="text-center py-8 text-sm text-slate-400">{t("structure.equipNoCategories")}</div>
+        )}
+
+        <div className="space-y-3">
+          {block.categories.map((cat, catIdx) => {
+            const isEditing = editingCatIdx === catIdx;
+            const catNodes = nodes.filter((n) => cat.nodeIds.includes(n.id));
+            const availNodes = nodes.filter((n) => !cat.nodeIds.includes(n.id) && (!nodeSearch || nodeLabel(n).toLowerCase().includes(nodeSearch.toLowerCase())));
+
+            return (
+              <div key={cat.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                {/* Category header */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 dark:bg-slate-800/50 cursor-pointer" onClick={() => setEditingCatIdx(isEditing ? null : catIdx)}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{cat.name || "(sans nom)"}</span>
+                    <span className="text-xs text-slate-400">({cat.nodeIds.length})</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Pencil className="h-3.5 w-3.5 text-slate-400" />
+                    <button onClick={(e) => { e.stopPropagation(); updateBlock(block.id, { ...block, categories: block.categories.filter((_, i) => i !== catIdx) }); }} className="p-1 rounded text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                </div>
+
+                {/* Category edit form */}
+                {isEditing && (
+                  <div className="p-4 space-y-3 border-t border-slate-200 dark:border-slate-700">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.equipCategoryName")}</label>
+                      <input type="text" value={cat.name} onChange={(e) => { const cats = [...block.categories]; cats[catIdx] = { ...cats[catIdx], name: e.target.value }; updateBlock(block.id, { ...block, categories: cats }); }} placeholder={t("structure.equipCategoryNamePlaceholder")} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.equipCategoryStyleOverride")}</label>
+                      <div className="flex items-center gap-2">
+                        {(() => { const cs = cat.style; const updateCatStyle = (patch: Record<string, unknown>) => { const cats = [...block.categories]; cats[catIdx] = { ...cats[catIdx], style: { ...cats[catIdx].style, ...patch } }; updateBlock(block.id, { ...block, categories: cats }); }; return (<>
+                          <button onClick={() => updateCatStyle({ bold: !cs?.bold })} className={`px-2.5 py-1 rounded border text-xs font-bold transition-colors ${cs?.bold ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>B</button>
+                          <button onClick={() => updateCatStyle({ italic: !cs?.italic })} className={`px-2.5 py-1 rounded border text-xs italic transition-colors ${cs?.italic ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-400"}`}>I</button>
+                          <input type="number" value={cs?.size || ""} onChange={(e) => updateCatStyle({ size: e.target.value ? Number(e.target.value) : undefined })} placeholder={String(block.categoryStyle?.size || 11)} className="w-14 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-xs text-center" />
+                          <input type="color" value={cs?.color || block.categoryStyle?.color || "#1e293b"} onChange={(e) => updateCatStyle({ color: e.target.value })} className="h-7 w-7 rounded border border-slate-200 dark:border-slate-700 cursor-pointer" />
+                          {cs && (cs.bold || cs.italic || cs.size || cs.color) && <button onClick={() => { const cats = [...block.categories]; cats[catIdx] = { ...cats[catIdx], style: undefined }; updateBlock(block.id, { ...block, categories: cats }); }} className="text-[10px] text-slate-400 hover:text-red-500">Reset</button>}
+                        </>); })()}
+                      </div>
+                    </div>
+
+                    {/* Selected nodes */}
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.equipNodes")} ({cat.nodeIds.length})</label>
+                      {catNodes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                          {catNodes.map((n) => (
+                            <span key={n.id} className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: `${block.nodeColor || "#7c3aed"}15`, color: block.nodeColor || "#7c3aed" }}>
+                              {nodeLabel(n)}
+                              <button onClick={() => { const cats = [...block.categories]; cats[catIdx] = { ...cats[catIdx], nodeIds: cats[catIdx].nodeIds.filter((id) => id !== n.id) }; updateBlock(block.id, { ...block, categories: cats }); }} className="hover:opacity-60"><X className="h-3 w-3" /></button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Add nodes */}
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                        <input type="text" value={nodeSearch} onChange={(e) => setNodeSearch(e.target.value)} placeholder={t("structure.equipSearchNode")} className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 py-1.5 pl-8 pr-3 text-sm placeholder:text-slate-400 focus:outline-none" />
+                      </div>
+                      {nodeSearch && availNodes.length > 0 && (
+                        <div className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                          {availNodes.slice(0, 20).map((n) => (
+                            <button key={n.id} onClick={() => { const cats = [...block.categories]; cats[catIdx] = { ...cats[catIdx], nodeIds: [...cats[catIdx].nodeIds, n.id] }; updateBlock(block.id, { ...block, categories: cats }); setNodeSearch(""); }} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                              <Server className="h-3.5 w-3.5 text-slate-400" />
+                              <span>{nodeLabel(n)}</span>
+                              <span className="text-xs text-slate-400 ml-auto">{n.ipAddress}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Action List properties ---
+const PRIORITY_STYLES: Record<string, { color: string; bg: string; border: string }> = {
+  critical: { color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-500/10", border: "border-red-200 dark:border-red-500/20" },
+  high: { color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-500/10", border: "border-orange-200 dark:border-orange-500/20" },
+  medium: { color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-500/10", border: "border-blue-200 dark:border-blue-500/20" },
+  low: { color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50 dark:bg-emerald-500/10", border: "border-emerald-200 dark:border-emerald-500/20" },
+};
+
+function ActionListProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ActionListBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  const updateAction = (idx: number, patch: Partial<ActionItem>) => {
+    const actions = [...block.actions];
+    actions[idx] = { ...actions[idx], ...patch };
+    updateBlock(block.id, { ...block, actions });
+  };
+
+  const reorderAction = (fromIdx: number, toIdx: number) => {
+    const actions = [...block.actions];
+    const [moved] = actions.splice(fromIdx, 1);
+    actions.splice(toIdx, 0, moved);
+    updateBlock(block.id, { ...block, actions });
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Title */}
+      <div>
+        <label className={labelCls}>{t("structure.actionTitle")}</label>
+        <input type="text" value={block.title} onChange={(e) => updateBlock(block.id, { ...block, title: e.target.value })} placeholder={t("structure.actionTitlePlaceholder")} className={inputCls} />
+      </div>
+
+      {/* Actions */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <label className={labelCls}>{t("structure.actionItems")}</label>
+          <button
+            onClick={() => {
+              const id = Math.random().toString(36).slice(2, 10);
+              const actions = [...block.actions, { id, priority: "medium" as const, details: "" }];
+              updateBlock(block.id, { ...block, actions });
+              setEditingIdx(actions.length - 1);
+            }}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("structure.actionAdd")}
+          </button>
+        </div>
+
+        {block.actions.length === 0 && (
+          <div className="text-center py-8 text-sm text-slate-400">{t("structure.actionEmpty")}</div>
+        )}
+
+        <div className="space-y-2">
+          {block.actions.map((action, idx) => {
+            const isEditing = editingIdx === idx;
+            const prio = PRIORITY_STYLES[action.priority] || PRIORITY_STYLES.medium;
+
+            return (
+              <div
+                key={action.id}
+                className={`rounded-lg border overflow-hidden ${prio.border} ${dragOverIdx === idx && dragIdx !== idx ? "ring-2 ring-blue-400" : ""}`}
+                draggable={!isEditing}
+                onDragStart={() => setDragIdx(idx)}
+                onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+                onDragLeave={() => setDragOverIdx(null)}
+                onDrop={(e) => { e.preventDefault(); if (dragIdx !== null && dragIdx !== idx) reorderAction(dragIdx, idx); }}
+                onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+              >
+                {/* Compact view */}
+                {!isEditing && (
+                  <div className={`flex items-center gap-3 px-4 py-2.5 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity ${prio.bg}`} onClick={() => setEditingIdx(idx)}>
+                    <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                    <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${prio.color} ${prio.bg} border ${prio.border}`}>
+                      {t(`structure.priority_${action.priority}`)}
+                    </span>
+                    <span className="text-sm text-slate-900 dark:text-slate-100 truncate flex-1">{action.details || <span className="italic text-slate-400">{t("structure.actionDetailsPlaceholder")}</span>}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Pencil className="h-3 w-3 text-slate-400" />
+                      <button onClick={(e) => { e.stopPropagation(); updateBlock(block.id, { ...block, actions: block.actions.filter((_, ai) => ai !== idx) }); }} className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"><Trash2 className="h-3 w-3" /></button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Edit view */}
+                {isEditing && (
+                  <div className="p-4 space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.actionPriority")}</label>
+                      <div className="flex gap-1.5">
+                        {(["critical", "high", "medium", "low"] as const).map((p) => {
+                          const pc = PRIORITY_STYLES[p];
+                          return (
+                            <button key={p} onClick={() => updateAction(idx, { priority: p })} className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${action.priority === p ? `${pc.bg} ${pc.color} ${pc.border} ring-1 ring-current` : "border-slate-200 dark:border-slate-700 text-slate-400 hover:border-slate-300"}`}>
+                              {t(`structure.priority_${p}`)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.actionDetails")}</label>
+                      <textarea value={action.details} onChange={(e) => updateAction(idx, { details: e.target.value })} placeholder={t("structure.actionDetailsPlaceholder")} rows={3} className={`${inputCls} resize-none`} />
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <button onClick={() => { updateBlock(block.id, { ...block, actions: block.actions.filter((_, ai) => ai !== idx) }); setEditingIdx(null); }} className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600"><Trash2 className="h-3 w-3" />{t("common.delete")}</button>
+                      <button onClick={() => setEditingIdx(null)} className="flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">OK</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Command List properties ---
+function CommandListProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: CommandListBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [manufacturers, setManufacturers] = useState<{ id: number; name: string }[]>([]);
+  const [models, setModels] = useState<{ id: number; name: string; manufacturer: { id: number } }[]>([]);
+  const [preview, setPreview] = useState<{ folderName: string; commands: { name: string; commands: string }[] }[]>([]);
+  const [connectionScript, setConnectionScript] = useState<string>("");
+
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers);
+    fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels);
+  }, [current]);
+
+  useEffect(() => {
+    if (!block.modelId) { setPreview([]); setConnectionScript(""); return; }
+    fetch(`/api/collection-commands/by-model/${block.modelId}`).then((r) => r.ok ? r.json() : []).then((cmds: { name: string; commands: string; folderName?: string }[]) => {
+      const groups: Record<string, { folderName: string; commands: { name: string; commands: string }[] }> = {};
+      for (const c of cmds) {
+        const fn = c.folderName || "Other";
+        if (!groups[fn]) groups[fn] = { folderName: fn, commands: [] };
+        groups[fn].commands.push({ name: c.name, commands: c.commands });
+      }
+      setPreview(Object.values(groups));
+    });
+    fetch(`/api/models/${block.modelId}`).then((r) => r.ok ? r.json() : null).then((m: Record<string, unknown> | null) => {
+      setConnectionScript((m?.connectionScript as string) || "");
+    });
+  }, [block.modelId]);
+
+  const filteredModels = block.manufacturerId ? models.filter((m) => m.manufacturer?.id === block.manufacturerId) : models;
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>{t("structure.cmdManufacturer")}</label>
+          <select value={block.manufacturerId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, manufacturerId: e.target.value ? Number(e.target.value) : null, modelId: null })} className={inputCls}>
+            <option value="">--</option>
+            {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>{t("structure.cmdModel")}</label>
+          <select value={block.modelId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, modelId: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
+            <option value="">--</option>
+            {filteredModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+      </div>
+      {block.modelId && (
+        <div>
+          <label className={labelCls}>{t("structure.cmdPreview")}</label>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 max-h-80 overflow-y-auto font-mono text-xs text-slate-800 dark:text-slate-200 space-y-1">
+            {connectionScript && connectionScript.split("\n").filter((l) => l.trim()).map((line, i) => (
+              <div key={`cs-${i}`} className="text-slate-500 dark:text-slate-400">{line}</div>
+            ))}
+            {preview.map((group, gi) => (
+              <div key={gi}>
+                {group.commands.map((cmd, ci) => (
+                  <div key={`${gi}-${ci}`} className="mt-2">
+                    <div className="font-bold text-slate-900 dark:text-slate-100"># {cmd.name.toUpperCase()}</div>
+                    {cmd.commands.split("\n").filter((l) => l.trim()).map((line, li) => (
+                      <div key={`${gi}-${ci}-${li}`}>{line}</div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
+            {preview.length === 0 && !connectionScript && (
+              <div className="text-slate-400 italic">{t("structure.cmdNoCommands")}</div>
+            )}
+          </div>
         </div>
       )}
     </div>

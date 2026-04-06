@@ -3,9 +3,11 @@
 namespace App\Controller\Api;
 
 use App\Entity\Collection;
+use App\Entity\CollectionCommand;
+use App\Entity\CollectionFolder;
 use App\Entity\Context;
 use App\Entity\Node;
-use App\Message\CollectNodeMessage;
+use App\Message\ProcessInventoryMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -282,6 +284,159 @@ class CollectionController extends AbstractController
         $em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/import', methods: ['POST'], priority: 10)]
+    public function import(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $nodeId = $data['nodeId'] ?? null;
+        $rawOutput = $data['rawOutput'] ?? '';
+        $tags = $data['tags'] ?? ['latest'];
+
+        if (!$nodeId || !$rawOutput) {
+            return $this->json(['error' => 'nodeId and rawOutput are required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $node = $em->getRepository(Node::class)->find($nodeId);
+        if (!$node) return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
+
+        $model = $node->getModel();
+        if (!$model) return $this->json(['error' => 'Node has no model configured'], Response::HTTP_BAD_REQUEST);
+
+        // Resolve commands for this model (same logic as CollectNodeMessageHandler)
+        $commands = $this->resolveModelCommands($model, $em);
+        if (empty($commands)) return $this->json(['error' => 'No commands configured for this model'], Response::HTTP_BAD_REQUEST);
+
+        // Build a flat list of all CLI lines with their parent command
+        $cmdLines = [];
+        foreach ($commands as $cmd) {
+            foreach (array_filter(array_map('trim', explode("\n", $cmd->getCommands())), fn($l) => $l !== '') as $line) {
+                $cmdLines[] = ['command' => $cmd, 'line' => $line];
+            }
+        }
+
+        // Parse raw output: split by detected command lines
+        $lines = explode("\n", $rawOutput);
+        $segments = []; // [{command: CollectionCommand, line: string, output: string}]
+        $currentSegment = null;
+
+        foreach ($lines as $rawLine) {
+            $line = rtrim($rawLine, "\r");
+            $trimmed = trim($line);
+
+            // Check if this line matches a known command
+            $matched = null;
+            foreach ($cmdLines as $cl) {
+                // Match if line ends with the command (prompt prefix is variable)
+                if (str_ends_with($trimmed, $cl['line']) || $trimmed === $cl['line']) {
+                    $matched = $cl;
+                    break;
+                }
+            }
+
+            if ($matched) {
+                if ($currentSegment) {
+                    $segments[] = $currentSegment;
+                }
+                $currentSegment = ['command' => $matched['command'], 'line' => $matched['line'], 'output' => ''];
+            } elseif ($currentSegment) {
+                $currentSegment['output'] .= $line . "\n";
+            }
+        }
+        if ($currentSegment) {
+            $segments[] = $currentSegment;
+        }
+
+        // Release 'latest' tag from previous collections
+        foreach ($tags as $tag) {
+            $this->releaseTag($em, $tag, $node);
+        }
+
+        // Create collection
+        $collection = new Collection();
+        $collection->setNode($node);
+        $collection->setContext($node->getContext());
+        $collection->setTags(array_values(array_unique(array_merge(['latest'], $tags))));
+        $collection->setStatus(Collection::STATUS_COMPLETED);
+        $collection->setWorker('manual-import');
+        $collection->setStartedAt(new \DateTimeImmutable());
+        $collection->setCompletedAt(new \DateTimeImmutable());
+        $collection->setCommandCount(count($commands));
+        $collection->setCompletedCount(count(array_unique(array_map(fn($s) => $s['command']->getId(), $segments))));
+
+        $em->persist($collection);
+        $em->flush();
+
+        // Write files
+        $projectDir = $this->getParameter('kernel.project_dir');
+        $baseDir = $projectDir . '/var/' . $collection->getStoragePath();
+
+        foreach ($segments as $seg) {
+            $cmd = $seg['command'];
+            $ruleSlug = $cmd->getId() . '_' . $this->slugify($cmd->getName());
+            $ruleDir = $baseDir . '/' . $ruleSlug;
+            if (!is_dir($ruleDir)) {
+                mkdir($ruleDir, 0775, true);
+            }
+
+            $lineSlug = $this->slugify($seg['line']);
+            $filepath = $ruleDir . '/' . $lineSlug . '.txt';
+
+            // Remove echoed command from start and trailing prompt
+            $output = $seg['output'];
+            $outputLines = explode("\n", $output);
+            if (!empty($outputLines) && preg_match('/[#>\$\]]\s*$/', end($outputLines))) {
+                array_pop($outputLines);
+            }
+            // Remove trailing empty lines
+            while (!empty($outputLines) && trim(end($outputLines)) === '') {
+                array_pop($outputLines);
+            }
+
+            file_put_contents($filepath, implode("\n", $outputLines));
+        }
+
+        // Dispatch async inventory extraction
+        $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
+
+        return $this->json($this->serialize($collection), Response::HTTP_CREATED);
+    }
+
+    /** Resolve all commands for a model (manufacturer + model folders + manual, recursive) */
+    private function resolveModelCommands($model, EntityManagerInterface $em): array
+    {
+        $commands = [];
+        $seenIds = [];
+        $cmdRepo = $em->getRepository(CollectionCommand::class);
+        $folderRepo = $em->getRepository(CollectionFolder::class);
+
+        $collectRecursive = function (CollectionFolder $folder, bool $skipModel) use ($cmdRepo, $folderRepo, &$commands, &$seenIds, &$collectRecursive): void {
+            foreach ($cmdRepo->findBy(['folder' => $folder, 'enabled' => true], ['name' => 'ASC']) as $c) {
+                if (!in_array($c->getId(), $seenIds, true)) { $seenIds[] = $c->getId(); $commands[] = $c; }
+            }
+            foreach ($folderRepo->findBy(['parent' => $folder], ['name' => 'ASC']) as $child) {
+                if ($skipModel && $child->getType() === CollectionFolder::TYPE_MODEL) continue;
+                $collectRecursive($child, $skipModel);
+            }
+        };
+
+        $manFolder = $folderRepo->findOneBy(['manufacturer' => $model->getManufacturer(), 'model' => null, 'type' => CollectionFolder::TYPE_MANUFACTURER]);
+        if ($manFolder) $collectRecursive($manFolder, true);
+
+        $modelFolder = $folderRepo->findOneBy(['model' => $model, 'type' => CollectionFolder::TYPE_MODEL]);
+        if ($modelFolder) $collectRecursive($modelFolder, false);
+
+        foreach ($model->getManualCommands() as $c) {
+            if ($c->isEnabled() && !in_array($c->getId(), $seenIds, true)) { $seenIds[] = $c->getId(); $commands[] = $c; }
+        }
+
+        return $commands;
+    }
+
+    private function slugify(string $text): string
+    {
+        return strtolower(trim(preg_replace('/[^a-z0-9]+/i', '-', $text), '-'));
     }
 
     private function releaseTag(EntityManagerInterface $em, string $tag, Node $node, ?Collection $except = null): void

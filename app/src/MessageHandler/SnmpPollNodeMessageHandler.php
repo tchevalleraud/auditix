@@ -73,11 +73,27 @@ class SnmpPollNodeMessageHandler
         $output = [];
         $hasError = false;
 
+        // Launch all SNMP queries in parallel
+        $processes = [];
         foreach ($oids as $monOid) {
             $cmd = $this->buildSnmpCommand($snmpCred, $ip, $monOid->getOid());
             $process = new Process($cmd);
             $process->setTimeout(10);
-            $process->run();
+            $process->start();
+            $processes[] = ['process' => $process, 'oid' => $monOid];
+        }
+
+        // Wait for all to finish and collect results
+        foreach ($processes as $entry) {
+            /** @var Process $process */
+            $process = $entry['process'];
+            $monOid = $entry['oid'];
+
+            try {
+                $process->wait();
+            } catch (\Throwable) {
+                // timeout or signal
+            }
 
             $result = trim($process->getOutput());
             $output[] = sprintf('[%s] OID %s: %s', $monOid->getCategory(), $monOid->getOid(), $result ?: $process->getErrorOutput());
@@ -99,7 +115,9 @@ class SnmpPollNodeMessageHandler
             }
         }
 
-        $task->setStatus($hasError ? Task::STATUS_FAILED : Task::STATUS_COMPLETED);
+        // Only mark as failed if ALL OIDs failed — partial success is still completed
+        $successCount = count(array_filter($processes, fn($e) => $e['process']->isSuccessful() && trim($e['process']->getOutput())));
+        $task->setStatus($successCount > 0 ? Task::STATUS_COMPLETED : Task::STATUS_FAILED);
         $task->setCompletedAt(new \DateTimeImmutable());
         $task->setOutput(implode("\n", $output));
         $this->em->flush();

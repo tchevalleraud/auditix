@@ -73,5 +73,6 @@ framework:
             App\Message\PingNodeMessage: monitoring
             App\Message\SnmpPollNodeMessage: monitoring
             App\Message\CollectNodeMessage: collector
+            App\Message\ProcessInventoryMessage: collector
             App\Message\EvaluateComplianceMessage: compliance
             App\Message\GenerateReportMessage: generator

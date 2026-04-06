@@ -41,6 +41,7 @@ interface Author {
   position: string;
   email: string;
   phone: string;
+  group?: string;
 }
 
 interface Revision {
@@ -603,7 +604,8 @@ export default function ReportDetailPage() {
                   <button
                     onClick={() => {
                       const newId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-                      const newAuthors = [...authors, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "" }];
+                      const lastGroup = authors.length > 0 ? authors[authors.length - 1].group || "" : "";
+                      const newAuthors = [...authors, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "", group: lastGroup }];
                       handleSaveAuthors(newAuthors);
                       setExpandedAuthors((prev) => new Set([...prev, newId]));
                     }}
@@ -617,12 +619,28 @@ export default function ReportDetailPage() {
                   <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noAuthors")}</p>
                 ) : (
                   <div className="space-y-2">
-                    {authors.map((author, idx) => {
+                    {(() => {
+                      const groups: { name: string; items: { author: Author; idx: number }[] }[] = [];
+                      let currentGroup: string | null = null;
+                      authors.forEach((a, idx) => {
+                        const g = a.group || "";
+                        if (groups.length === 0 || g !== currentGroup) { groups.push({ name: g, items: [] }); currentGroup = g; }
+                        groups[groups.length - 1].items.push({ author: a, idx });
+                      });
+                      return groups.map((group, gi) => (
+                        <div key={gi}>
+                          {group.name && (
+                            <div className="flex items-center gap-2 mt-3 mb-1">
+                              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{group.name}</span>
+                              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                            </div>
+                          )}
+                          {group.items.map(({ author, idx }) => {
                       const isExpanded = expandedAuthors.has(author.id);
                       const summary = [author.lastName, author.firstName].filter(Boolean).join(" ") || t("reports.authorLastNamePlaceholder");
                       const detail = [author.position, author.email].filter(Boolean).join(" - ");
                       return (
-                        <div key={author.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div key={author.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden mb-2">
                           <div
                             className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors select-none"
                             onClick={() => setExpandedAuthors((prev) => {
@@ -663,6 +681,13 @@ export default function ReportDetailPage() {
                           {isExpanded && (
                             <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800">
                               <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1 col-span-2">
+                                  <label className={labelClass}>{t("reports.recipientGroup")}</label>
+                                  <input type="text" value={author.group || ""} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, group: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.recipientGroupPlaceholder")} className={inputClass} list="author-groups" />
+                                  <datalist id="author-groups">
+                                    {[...new Set(authors.map((a) => a.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}
+                                  </datalist>
+                                </div>
                                 <div className="space-y-1">
                                   <label className={labelClass}>{t("reports.authorLastName")}</label>
                                   <input type="text" value={author.lastName} onChange={(e) => { setAuthors(authors.map((a) => a.id === author.id ? { ...a, lastName: e.target.value } : a)); }} onBlur={() => handleSaveAuthors(authors)} placeholder={t("reports.authorLastNamePlaceholder")} className={inputClass} />
@@ -688,7 +713,10 @@ export default function ReportDetailPage() {
                           )}
                         </div>
                       );
-                    })}
+                          })}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
@@ -700,7 +728,9 @@ export default function ReportDetailPage() {
                   <button
                     onClick={() => {
                       const newId = Math.random().toString(36).slice(2) + Date.now().toString(36);
-                      const newRecipients = [...recipients, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "" }];
+                      // Pre-fill group with the last used group
+                      const lastGroup = recipients.length > 0 ? recipients[recipients.length - 1].group || "" : "";
+                      const newRecipients = [...recipients, { id: newId, lastName: "", firstName: "", position: "", email: "", phone: "", group: lastGroup }];
                       handleSaveRecipients(newRecipients);
                       setExpandedRecipients((prev) => new Set([...prev, newId]));
                     }}
@@ -714,12 +744,32 @@ export default function ReportDetailPage() {
                   <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">{t("reports.noRecipients")}</p>
                 ) : (
                   <div className="space-y-2">
-                    {recipients.map((recipient, idx) => {
+                    {(() => {
+                      // Group recipients by group name
+                      const groups: { name: string; items: { recipient: Author; idx: number }[] }[] = [];
+                      let currentGroup: string | null = null;
+                      recipients.forEach((r, idx) => {
+                        const g = r.group || "";
+                        if (groups.length === 0 || g !== currentGroup) {
+                          groups.push({ name: g, items: [] });
+                          currentGroup = g;
+                        }
+                        groups[groups.length - 1].items.push({ recipient: r, idx });
+                      });
+                      return groups.map((group, gi) => (
+                        <div key={gi}>
+                          {group.name && (
+                            <div className="flex items-center gap-2 mt-3 mb-1">
+                              <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{group.name}</span>
+                              <div className="flex-1 h-px bg-slate-200 dark:bg-slate-700" />
+                            </div>
+                          )}
+                          {group.items.map(({ recipient, idx }) => {
                       const isExpanded = expandedRecipients.has(recipient.id);
                       const summary = [recipient.lastName, recipient.firstName].filter(Boolean).join(" ") || t("reports.authorLastNamePlaceholder");
                       const detail = [recipient.position, recipient.email].filter(Boolean).join(" - ");
                       return (
-                        <div key={recipient.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div key={recipient.id} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden mb-2">
                           <div
                             className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors select-none"
                             onClick={() => setExpandedRecipients((prev) => {
@@ -760,6 +810,15 @@ export default function ReportDetailPage() {
                           {isExpanded && (
                             <div className="px-4 pb-4 pt-1 border-t border-slate-100 dark:border-slate-800">
                               <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1 col-span-2">
+                                  <label className={labelClass}>{t("reports.recipientGroup")}</label>
+                                  <div className="flex items-center gap-2">
+                                    <input type="text" value={recipient.group || ""} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, group: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.recipientGroupPlaceholder")} className={inputClass} list="recipient-groups" />
+                                    <datalist id="recipient-groups">
+                                      {[...new Set(recipients.map((r) => r.group).filter(Boolean))].map((g) => <option key={g} value={g} />)}
+                                    </datalist>
+                                  </div>
+                                </div>
                                 <div className="space-y-1">
                                   <label className={labelClass}>{t("reports.authorLastName")}</label>
                                   <input type="text" value={recipient.lastName} onChange={(e) => { setRecipients(recipients.map((r) => r.id === recipient.id ? { ...r, lastName: e.target.value } : r)); }} onBlur={() => handleSaveRecipients(recipients)} placeholder={t("reports.authorLastNamePlaceholder")} className={inputClass} />
@@ -785,7 +844,10 @@ export default function ReportDetailPage() {
                           )}
                         </div>
                       );
-                    })}
+                          })}
+                        </div>
+                      ));
+                    })()}
                   </div>
                 )}
               </div>
@@ -891,6 +953,8 @@ export default function ReportDetailPage() {
                   blocks={blocks}
                   onChange={handleSaveBlocks}
                   t={t}
+                  reportType={reportType as "general" | "node"}
+                  reportNodes={reportType === "node" ? report?.nodes : contextNodes}
                 />
               </div>
             </div>
