@@ -16,18 +16,24 @@ final class Version20260403010000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql("ALTER TABLE report ADD COLUMN type VARCHAR(10) NOT NULL DEFAULT 'general'");
-        $this->addSql("ALTER TABLE report ADD COLUMN generated_files JSON DEFAULT NULL");
+        $this->addSql("ALTER TABLE report ADD COLUMN IF NOT EXISTS type VARCHAR(10) NOT NULL DEFAULT 'general'");
+        $this->addSql("ALTER TABLE report ADD COLUMN IF NOT EXISTS generated_files JSON DEFAULT NULL");
 
-        $this->addSql('CREATE TABLE report_node (
+        $this->addSql('CREATE TABLE IF NOT EXISTS report_node (
             report_id INT NOT NULL,
             node_id INT NOT NULL,
             PRIMARY KEY (report_id, node_id)
         )');
-        $this->addSql('CREATE INDEX IDX_report_node_report ON report_node (report_id)');
-        $this->addSql('CREATE INDEX IDX_report_node_node ON report_node (node_id)');
-        $this->addSql('ALTER TABLE report_node ADD CONSTRAINT FK_report_node_report FOREIGN KEY (report_id) REFERENCES report (id) ON DELETE CASCADE');
-        $this->addSql('ALTER TABLE report_node ADD CONSTRAINT FK_report_node_node FOREIGN KEY (node_id) REFERENCES node (id) ON DELETE CASCADE');
+        $this->addSql('CREATE INDEX IF NOT EXISTS IDX_report_node_report ON report_node (report_id)');
+        $this->addSql('CREATE INDEX IF NOT EXISTS IDX_report_node_node ON report_node (node_id)');
+        $this->addSql("DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_report_node_report') THEN
+                ALTER TABLE report_node ADD CONSTRAINT FK_report_node_report FOREIGN KEY (report_id) REFERENCES report (id) ON DELETE CASCADE;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = 'fk_report_node_node') THEN
+                ALTER TABLE report_node ADD CONSTRAINT FK_report_node_node FOREIGN KEY (node_id) REFERENCES node (id) ON DELETE CASCADE;
+            END IF;
+        END $$;");
     }
 
     public function down(Schema $schema): void

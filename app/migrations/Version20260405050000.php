@@ -16,8 +16,18 @@ final class Version20260405050000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        // 1. Add new column
-        $this->addSql("ALTER TABLE compliance_rule ADD COLUMN data_sources JSON NOT NULL DEFAULT '[]'");
+        // 1. Add new column (idempotent)
+        $this->addSql("ALTER TABLE compliance_rule ADD COLUMN IF NOT EXISTS data_sources JSON NOT NULL DEFAULT '[]'");
+
+        // Skip data migration if old columns no longer exist (already migrated)
+        $hasSourceType = (bool) $this->connection->fetchOne("
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'compliance_rule' AND column_name = 'source_type'
+        ");
+
+        if (!$hasSourceType) {
+            return;
+        }
 
         // 2. Migrate collection/ssh sources → data_sources array with name='default'
         $this->addSql("

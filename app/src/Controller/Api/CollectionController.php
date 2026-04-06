@@ -7,6 +7,7 @@ use App\Entity\CollectionCommand;
 use App\Entity\CollectionFolder;
 use App\Entity\Context;
 use App\Entity\Node;
+use App\Message\CollectNodeMessage;
 use App\Message\ProcessInventoryMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;

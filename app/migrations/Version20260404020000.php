@@ -16,7 +16,7 @@ final class Version20260404020000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('ALTER TABLE schedule ADD COLUMN cleanup_enabled BOOLEAN NOT NULL DEFAULT FALSE');
+        $this->addSql('ALTER TABLE schedule ADD COLUMN IF NOT EXISTS cleanup_enabled BOOLEAN NOT NULL DEFAULT FALSE');
     }
 
     public function down(Schema $schema): void
