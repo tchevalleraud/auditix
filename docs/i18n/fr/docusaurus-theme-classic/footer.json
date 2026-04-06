@@ -1,0 +1,30 @@
+{
+  "link.title.Documentation": {
+    "message": "Documentation",
+    "description": "The title of the footer links column with title=Documentation in the footer"
+  },
+  "link.title.Community": {
+    "message": "Community",
+    "description": "The title of the footer links column with title=Community in the footer"
+  },
+  "link.item.label.Getting Started": {
+    "message": "Getting Started",
+    "description": "The label of footer link with label=Getting Started linking to /docs/getting-started/installation"
+  },
+  "link.item.label.Configuration": {
+    "message": "Configuration",
+    "description": "The label of footer link with label=Configuration linking to /docs/configuration/overview"
+  },
+  "link.item.label.GitHub": {
+    "message": "GitHub",
+    "description": "The label of footer link with label=GitHub linking to https://github.com/tchevalleraud/auditix"
+  },
+  "link.item.label.Issues": {
+    "message": "Issues",
+    "description": "The label of footer link with label=Issues linking to https://github.com/tchevalleraud/auditix/issues"
+  },
+  "copyright": {
+    "message": "Copyright 2026 Auditix. Built with Docusaurus.",
+    "description": "The footer copyright"
+  }
+}

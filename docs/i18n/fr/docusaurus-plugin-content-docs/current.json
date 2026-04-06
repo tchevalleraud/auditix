@@ -1,0 +1,34 @@
+{
+  "version.label": {
+    "message": "2.1.x",
+    "description": "The label for version current"
+  },
+  "sidebar.docsSidebar.category.Getting Started": {
+    "message": "Demarrage",
+    "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.User Guide": {
+    "message": "Guide utilisateur",
+    "description": "The label for category 'User Guide' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Node Management": {
+    "message": "Gestion des noeuds",
+    "description": "The label for category 'Node Management' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Collections": {
+    "message": "Collectes",
+    "description": "The label for category 'Collections' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Compliance": {
+    "message": "Conformite",
+    "description": "The label for category 'Compliance' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Reports": {
+    "message": "Rapports",
+    "description": "The label for category 'Reports' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Administration": {
+    "message": "Administration",
+    "description": "The label for category 'Administration' in sidebar 'docsSidebar'"
+  }
+}
