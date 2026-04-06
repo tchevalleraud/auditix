@@ -3,8 +3,10 @@
 namespace App\Command;
 
 use App\Entity\Context;
+use App\Entity\ReportTheme;
 use App\Entity\User;
 use App\Repository\ContextRepository;
+use App\Repository\ReportThemeRepository;
 use App\Repository\UserRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -24,6 +26,7 @@ class CreateDefaultUserCommand extends Command
         private UserPasswordHasherInterface $passwordHasher,
         private UserRepository $userRepository,
         private ContextRepository $contextRepository,
+        private ReportThemeRepository $reportThemeRepository,
     ) {
         parent::__construct();
     }
@@ -35,6 +38,7 @@ class CreateDefaultUserCommand extends Command
             $user->setUsername('admin');
             $user->setRoles(['ROLE_ADMIN']);
             $user->setPassword($this->passwordHasher->hashPassword($user, 'password'));
+            $user->setLocale('en');
 
             $this->em->persist($user);
             $output->writeln('Default admin user created (admin/password).');
@@ -52,6 +56,17 @@ class CreateDefaultUserCommand extends Command
             $output->writeln('Default context created.');
         } else {
             $output->writeln('Contexts already exist, skipping.');
+        }
+
+        if ($this->reportThemeRepository->count() === 0) {
+            $theme = new ReportTheme();
+            $theme->setName('Classic');
+            $theme->setIsDefault(true);
+
+            $this->em->persist($theme);
+            $output->writeln('Default report theme created.');
+        } else {
+            $output->writeln('Report themes already exist, skipping.');
         }
 
         $this->em->flush();

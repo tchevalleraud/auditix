@@ -65,8 +65,8 @@ class Report
     private Context $context;
 
     #[ORM\ManyToOne(targetEntity: ReportTheme::class)]
-    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
-    private ?ReportTheme $theme = null;
+    #[ORM\JoinColumn(nullable: false)]
+    private ReportTheme $theme;
 
     #[ORM\Column(length: 20, nullable: true)]
     private ?string $generatingStatus = null;
@@ -130,8 +130,8 @@ class Report
     public function setBlocks(array $v): static { $this->blocks = $v; return $this; }
     public function getContext(): Context { return $this->context; }
     public function setContext(Context $v): static { $this->context = $v; return $this; }
-    public function getTheme(): ?ReportTheme { return $this->theme; }
-    public function setTheme(?ReportTheme $v): static { $this->theme = $v; return $this; }
+    public function getTheme(): ReportTheme { return $this->theme; }
+    public function setTheme(ReportTheme $v): static { $this->theme = $v; return $this; }
     public function getGeneratingStatus(): ?string { return $this->generatingStatus; }
     public function setGeneratingStatus(?string $v): static { $this->generatingStatus = $v; return $this; }
     public function getGeneratedAt(): ?\DateTimeImmutable { return $this->generatedAt; }

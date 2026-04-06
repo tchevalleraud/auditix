@@ -96,9 +96,15 @@ class ReportController extends AbstractController
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
 
+        $defaultTheme = $em->getRepository(ReportTheme::class)->findOneBy(['isDefault' => true]);
+        if (!$defaultTheme) {
+            return $this->json(['error' => 'No default theme found'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
         $report = new Report();
         $report->setName($data['name']);
         $report->setContext($context);
+        $report->setTheme($defaultTheme);
 
         if (array_key_exists('description', $data)) {
             $report->setDescription($data['description']);
@@ -177,12 +183,10 @@ class ReportController extends AbstractController
         if (array_key_exists('blocks', $data)) {
             $report->setBlocks($data['blocks']);
         }
-        if (array_key_exists('themeId', $data)) {
-            if ($data['themeId']) {
-                $theme = $em->getRepository(ReportTheme::class)->find($data['themeId']);
+        if (array_key_exists('themeId', $data) && $data['themeId']) {
+            $theme = $em->getRepository(ReportTheme::class)->find($data['themeId']);
+            if ($theme) {
                 $report->setTheme($theme);
-            } else {
-                $report->setTheme(null);
             }
         }
         if (isset($data['type']) && in_array($data['type'], [Report::TYPE_GENERAL, Report::TYPE_NODE], true)) {
