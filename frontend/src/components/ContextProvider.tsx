@@ -14,6 +14,7 @@ export interface AppContext {
   icmpPollIntervalSeconds: number;
   isDefault: boolean;
   publicEnabled: boolean;
+  publicToken: string | null;
   userCount: number;
   createdAt: string;
 }

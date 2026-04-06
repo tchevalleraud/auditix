@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
@@ -171,6 +171,18 @@ export default function NodeDetailPage() {
   const [complianceEvaluating, setComplianceEvaluating] = useState(false);
   const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
   const [scoreCalcOpen, setScoreCalcOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (actionsRef.current && !actionsRef.current.contains(e.target as Node)) {
+        setActionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const dateLocale = locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
 
@@ -501,7 +513,7 @@ export default function NodeDetailPage() {
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "summary", label: t("nodes.tabSummary") },
-    { key: "monitoring", label: t("nodes.tabMonitoring") },
+    ...(current?.monitoringEnabled ? [{ key: "monitoring" as TabKey, label: t("nodes.tabMonitoring") }] : []),
     { key: "compliance", label: t("compliance.title") },
     { key: "inventory", label: t("nodes.tabInventory") },
     { key: "collections", label: t("nodes.tabCollections") },
@@ -614,32 +626,57 @@ export default function NodeDetailPage() {
                 {t("common.save")}
               </button>
             )}
-            <button
-              onClick={async () => {
-                const res = await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
-                if (res.ok) {
-                  const data = await res.json();
-                  if (data.dispatched > 0) {
-                    setComplianceEvaluating(true);
-                    setNode((prev) => prev ? { ...prev, score: null } : prev);
-                  }
-                }
-              }}
-              disabled={complianceEvaluating}
-              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-            >
-              {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
-            </button>
-            {node.model && (
+            {tab === "collections" && node.model && (
               <button
-                onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
-                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                onClick={openImportModal}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
               >
-                <Play className="h-4 w-4" />
-                {t("nodes.collect")}
+                <Upload className="h-4 w-4" />
+                {t("nodes.importCollection")}
               </button>
             )}
+            <div className="relative" ref={actionsRef}>
+              <button
+                onClick={() => setActionsOpen(!actionsOpen)}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                {t("nodes.actions")}
+                <ChevronDown className={`h-4 w-4 transition-transform ${actionsOpen ? "rotate-180" : ""}`} />
+              </button>
+              {actionsOpen && (
+                <div className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 z-50">
+                  <button
+                    onClick={async () => {
+                      setActionsOpen(false);
+                      const res = await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+                      if (res.ok) {
+                        const data = await res.json();
+                        if (data.dispatched > 0) {
+                          setComplianceEvaluating(true);
+                          setNode((prev) => prev ? { ...prev, score: null } : prev);
+                        }
+                      }
+                    }}
+                    disabled={complianceEvaluating}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition-colors"
+                  >
+                    {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
+                  </button>
+                  {node.model && (
+                    <>
+                      <button
+                        onClick={() => { setActionsOpen(false); setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                      >
+                        <Play className="h-4 w-4" />
+                        {t("nodes.collect")}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -1038,15 +1075,6 @@ export default function NodeDetailPage() {
 
       {tab === "collections" && (
         <div className="space-y-3">
-          {/* Import button */}
-          {node?.model && (
-            <div className="flex justify-end">
-              <button onClick={openImportModal} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                <Upload className="h-4 w-4" />
-                {t("nodes.importCollection")}
-              </button>
-            </div>
-          )}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
             {collectionsLoading ? (
               <div className="flex items-center justify-center py-12">

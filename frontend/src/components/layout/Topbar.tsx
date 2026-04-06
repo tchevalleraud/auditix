@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Bell, CircleUser, LogOut, Moon, Sun, ChevronDown, Settings, ArrowLeft, UserCog } from "lucide-react";
+import { CircleUser, LogOut, Moon, Sun, ChevronDown, Settings, ArrowLeft, UserCog } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n, locales, type Locale } from "@/components/I18nProvider";
@@ -93,11 +93,6 @@ export default function Topbar() {
           className="rounded-lg p-2 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
         >
           {resolved === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-        </button>
-
-        <button className="relative rounded-lg p-2 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-slate-900 dark:bg-white" />
         </button>
 
         {isUserAdmin && (

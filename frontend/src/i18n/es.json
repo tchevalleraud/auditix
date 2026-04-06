@@ -350,6 +350,7 @@
     "title": "Nodos",
     "subtitle": "Gestione los nodos de equipos de red",
     "newNode": "Nuevo nodo",
+    "actions": "Acciones",
     "searchPlaceholder": "Buscar un nodo...",
     "colScore": "Puntuacion",
     "colName": "Nombre",

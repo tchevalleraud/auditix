@@ -350,6 +350,7 @@
     "title": "Knoten",
     "subtitle": "Verwalten Sie die Netzwerkgerate-Knoten",
     "newNode": "Neuer Knoten",
+    "actions": "Aktionen",
     "searchPlaceholder": "Knoten suchen...",
     "colScore": "Bewertung",
     "colName": "Name",
