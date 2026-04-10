@@ -2137,8 +2137,348 @@ class GenerateReportMessageHandler
                 }
 
                 $prevType = 'command_list';
+
+            } elseif ($type === 'topology') {
+                $mapId = $block['topologyMapId'] ?? null;
+                $topoWidth = (float) ($block['width'] ?? 100);
+                $topoProto = $block['protocol'] ?? '';
+                $showLabels = !empty($block['showLabels']);
+                $showLegend = !empty($block['showLegend']);
+                $caption = $block['caption'] ?? '';
+                $pageBreak = !empty($block['pageBreakBefore']);
+                $showMonitoring = !empty($block['showMonitoring']);
+                $showCompliance = !empty($block['showCompliance']);
+
+                if (!$mapId) continue;
+
+                $map = $this->em->getRepository(\App\Entity\TopologyMap::class)->find($mapId);
+                if (!$map) continue;
+
+                if ($pageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $svg = $this->renderTopologySvg($map, $topoProto, $showLabels, $showLegend, $showMonitoring, $showCompliance);
+
+                // Embed SVG directly via TCPDF
+                $tmpSvg = tempnam(sys_get_temp_dir(), 'topo_') . '.svg';
+                file_put_contents($tmpSvg, $svg);
+
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $imgW = $contentW * ($topoWidth / 100);
+                $imgX = $mLeft + ($contentW - $imgW) / 2;
+
+                // Compute aspect ratio for height
+                $svgAspect = 1.0;
+                if (preg_match('/width="(\d+(?:\.\d+)?)"/', $svg, $wm) && preg_match('/height="(\d+(?:\.\d+)?)"/', $svg, $hm)) {
+                    $svgAspect = (float) $hm[1] / max((float) $wm[1], 1);
+                }
+                $imgH = $imgW * $svgAspect;
+                $yBefore = $pdf->GetY();
+
+                // Check if we need a page break
+                if ($yBefore + $imgH > $pdf->getPageHeight() - $mBottom) {
+                    $pdf->AddPage();
+                    $yBefore = $pdf->GetY();
+                }
+
+                $pdf->ImageSVG($tmpSvg, $imgX, $yBefore, $imgW, $imgH, '', '', '', 0, false);
+                @unlink($tmpSvg);
+
+                $pdf->SetY($yBefore + $imgH);
+
+                // Caption
+                if (!empty($caption)) {
+                    $pdf->Ln(2);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, 'I', $bodySize - 1);
+                    $pdf->MultiCell($contentW, 0, $caption, 0, 'C', false, 1, $mLeft);
+                    $pdf->SetFont($bodyFont, '', $bodySize);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'topology';
             }
         }
+    }
+
+    private function renderTopologySvg(\App\Entity\TopologyMap $map, string $protocol, bool $showLabels, bool $showLegend, bool $showMonitoring = false, bool $showCompliance = false): string
+    {
+        $devices = $this->em->getRepository(\App\Entity\TopologyDevice::class)->findBy(['map' => $map]);
+        $linkQb = $this->em->createQueryBuilder()
+            ->select('l')->from(\App\Entity\TopologyLink::class, 'l')
+            ->where('l.map = :map')->setParameter('map', $map);
+        if ($protocol) {
+            $linkQb->andWhere('l.protocol = :p')->setParameter('p', $protocol);
+        }
+        $links = $linkQb->getQuery()->getResult();
+
+        $layout = $map->getLayout() ?? [];
+        $dc = $map->getDesignConfig();
+        $nodeConf = $dc['node'] ?? [];
+        $labelConf = $dc['label'] ?? [];
+        $edgeConf = $dc['edge'] ?? [];
+        $zones = $dc['zones'] ?? [];
+
+        $nodeW = (float) ($nodeConf['width'] ?? 40);
+        $nodeH = (float) ($nodeConf['height'] ?? 40);
+        $nodeBg = $nodeConf['bgColor'] ?? '#e2e8f0';
+        $nodeBorder = $nodeConf['borderColor'] ?? '#3b82f6';
+        $nodeBorderW = (float) ($nodeConf['borderWidth'] ?? 2.5);
+        $nodeShape = $nodeConf['shape'] ?? 'ellipse';
+
+        $edgeW = (float) ($edgeConf['width'] ?? 2.5);
+        $edgeColor = $edgeConf['color'] ?? '';
+
+        $protocolColors = ['lldp' => '#6366f1', 'stp' => '#0ea5e9', 'ospf' => '#10b981', 'bgp' => '#f59e0b', 'isis' => '#ec4899'];
+
+        // Build device position map
+        $devicePositions = [];
+        $minX = PHP_INT_MAX; $minY = PHP_INT_MAX; $maxX = PHP_INT_MIN; $maxY = PHP_INT_MIN;
+
+        foreach ($devices as $d) {
+            $key = (string) $d->getId();
+            $pos = $layout[$key] ?? null;
+            if (!$pos) continue;
+            $x = (float) $pos['x'];
+            $y = (float) $pos['y'];
+            $devicePositions[$key] = ['x' => $x, 'y' => $y, 'device' => $d];
+            $minX = min($minX, $x - $nodeW);
+            $minY = min($minY, $y - $nodeH);
+            $maxX = max($maxX, $x + $nodeW);
+            $maxY = max($maxY, $y + $nodeH);
+        }
+
+        // Include zones in bounding box
+        foreach ($zones as $z) {
+            $zPos = $layout[$z['id']] ?? $z['position'] ?? null;
+            if (!$zPos) continue;
+            $zx = (float) $zPos['x']; $zy = (float) $zPos['y'];
+            $zw = (float) ($z['width'] ?? 200) / 2; $zh = (float) ($z['height'] ?? 150) / 2;
+            $minX = min($minX, $zx - $zw); $minY = min($minY, $zy - $zh);
+            $maxX = max($maxX, $zx + $zw); $maxY = max($maxY, $zy + $zh);
+        }
+
+        if (empty($devicePositions)) {
+            return '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><text x="200" y="50" text-anchor="middle" fill="#94a3b8" font-size="14">No positioned devices</text></svg>';
+        }
+
+        $pad = 60;
+        $minX -= $pad; $minY -= $pad; $maxX += $pad; $maxY += $pad;
+        $vw = $maxX - $minX;
+        $vh = $maxY - $minY;
+        $svgW = 800;
+        $svgH = $svgW * ($vh / max($vw, 1));
+
+        // Offset to normalize all coordinates to positive (TCPDF doesn't handle negative viewBox well)
+        $ox = -$minX;
+        $oy = -$minY;
+
+        // Shift all device positions
+        foreach ($devicePositions as &$dp) {
+            $dp['x'] += $ox;
+            $dp['y'] += $oy;
+        }
+        unset($dp);
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' . $svgW . '" height="' . round($svgH) . '" viewBox="0 0 ' . round($vw) . ' ' . round($vh) . '">';
+        $svg .= '<rect width="' . round($vw) . '" height="' . round($vh) . '" fill="white"/>';
+
+        // Zones (background)
+        usort($zones, fn($a, $b) => ($a['layer'] ?? 0) - ($b['layer'] ?? 0));
+        foreach ($zones as $z) {
+            $zPos = $layout[$z['id']] ?? $z['position'] ?? null;
+            if (!$zPos) continue;
+            $zx = (float) $zPos['x'] + $ox; $zy = (float) $zPos['y'] + $oy;
+            $zw = (float) ($z['width'] ?? 200); $zh = (float) ($z['height'] ?? 150);
+            $style = $z['style'] ?? [];
+            $bg = $style['bgColor'] ?? '#dbeafe';
+            $bgOp = (float) ($style['bgOpacity'] ?? 0.3);
+            $bc = $style['borderColor'] ?? '#3b82f6';
+            $bw = (float) ($style['borderWidth'] ?? 2);
+            $br = (float) ($style['borderRadius'] ?? 12);
+            $lbl = htmlspecialchars($z['label'] ?? '');
+            $lblColor = $style['labelColor'] ?? '#1e40af';
+            $lblSize = (float) ($style['labelSize'] ?? 14);
+
+            if (($z['type'] ?? 'rectangle') === 'ellipse') {
+                $svg .= '<ellipse cx="' . $zx . '" cy="' . $zy . '" rx="' . ($zw / 2) . '" ry="' . ($zh / 2) . '" fill="' . $bg . '" fill-opacity="' . $bgOp . '" stroke="' . $bc . '" stroke-width="' . $bw . '"/>';
+            } else {
+                $svg .= '<rect x="' . ($zx - $zw / 2) . '" y="' . ($zy - $zh / 2) . '" width="' . $zw . '" height="' . $zh . '" rx="' . $br . '" fill="' . $bg . '" fill-opacity="' . $bgOp . '" stroke="' . $bc . '" stroke-width="' . $bw . '"/>';
+            }
+            if ($lbl) {
+                $ly = ($style['labelPosition'] ?? 'top') === 'top' ? $zy - $zh / 2 + $lblSize + 4 : (($style['labelPosition'] ?? 'top') === 'bottom' ? $zy + $zh / 2 - 4 : $zy);
+                $svg .= '<text x="' . $zx . '" y="' . $ly . '" text-anchor="middle" fill="' . $lblColor . '" font-size="' . $lblSize . '" font-weight="600">' . $lbl . '</text>';
+            }
+        }
+
+        // Edges — group by node pair to curve parallel links
+        $edgeGroups = [];
+        foreach ($links as $l) {
+            $sKey = (string) $l->getSourceDevice()->getId();
+            $tKey = (string) $l->getTargetDevice()->getId();
+            if (!isset($devicePositions[$sKey]) || !isset($devicePositions[$tKey])) continue;
+            $pairKey = min($sKey, $tKey) . ':' . max($sKey, $tKey);
+            $edgeGroups[$pairKey][] = $l;
+        }
+
+        foreach ($edgeGroups as $group) {
+            $count = count($group);
+            foreach ($group as $idx => $l) {
+                $sKey = (string) $l->getSourceDevice()->getId();
+                $tKey = (string) $l->getTargetDevice()->getId();
+                $sp = $devicePositions[$sKey];
+                $tp = $devicePositions[$tKey];
+                $color = $edgeColor ?: ($protocolColors[$l->getProtocol()] ?? '#94a3b8');
+
+                $mx = ($sp['x'] + $tp['x']) / 2;
+                $my = ($sp['y'] + $tp['y']) / 2;
+
+                if ($count === 1) {
+                    // Single link: straight line
+                    $svg .= '<line x1="' . $sp['x'] . '" y1="' . $sp['y'] . '" x2="' . $tp['x'] . '" y2="' . $tp['y'] . '" stroke="' . $color . '" stroke-width="' . $edgeW . '" fill="none"/>';
+                } else {
+                    // Multiple links: use quadratic bezier curves with offset
+                    $dx = $tp['x'] - $sp['x'];
+                    $dy = $tp['y'] - $sp['y'];
+                    $len = max(sqrt($dx * $dx + $dy * $dy), 1);
+                    // Normal vector (perpendicular)
+                    $nx = -$dy / $len;
+                    $ny = $dx / $len;
+                    // Spread: center the offsets around 0
+                    $offset = ($idx - ($count - 1) / 2) * 30;
+                    $cx = $mx + $nx * $offset;
+                    $cy = $my + $ny * $offset;
+                    $svg .= '<path d="M' . $sp['x'] . ',' . $sp['y'] . ' Q' . round($cx, 1) . ',' . round($cy, 1) . ' ' . $tp['x'] . ',' . $tp['y'] . '" stroke="' . $color . '" stroke-width="' . $edgeW . '" fill="none"/>';
+                    $mx = $cx;
+                    $my = $cy;
+                }
+
+                // Port labels on edge — rotated to follow link direction
+                if ($showLabels) {
+                    $ports = array_filter([$l->getSourcePort(), $l->getTargetPort()]);
+                    if ($ports) {
+                        $edx = $tp['x'] - $sp['x'];
+                        $edy = $tp['y'] - $sp['y'];
+                        $angleDeg = rad2deg(atan2($edy, $edx));
+                        if ($angleDeg > 90) $angleDeg -= 180;
+                        if ($angleDeg < -90) $angleDeg += 180;
+                        // Small perpendicular offset so label sits just above the line
+                        $elen = max(sqrt($edx * $edx + $edy * $edy), 1);
+                        $pnx = -$edy / $elen;
+                        $pny = $edx / $elen;
+                        $lbx = round($mx + $pnx * 5, 1);
+                        $lby = round($my + $pny * 5, 1);
+                        // Manual baseline offset (+2.5 ≈ half of font-size 7)
+                        $svg .= '<text x="' . $lbx . '" y="' . round($lby + 2.5, 1) . '" text-anchor="middle" fill="#64748b" font-size="7" transform="rotate(' . round($angleDeg, 1) . ',' . $lbx . ',' . $lby . ')">' . htmlspecialchars(implode(' — ', $ports)) . '</text>';
+                    }
+                }
+            }
+        }
+
+        // Nodes
+        foreach ($devicePositions as $dp) {
+            $x = $dp['x']; $y = $dp['y'];
+            $d = $dp['device'];
+
+            // Per-node style override
+            $so = $d->getStyleOverride();
+            $bg = $so['bgColor'] ?? $nodeBg;
+            $border = $so['borderColor'] ?? $nodeBorder;
+            $bw = (float) ($so['borderWidth'] ?? $nodeBorderW);
+            $shape = $so['shape'] ?? $nodeShape;
+            $w = (float) ($so['width'] ?? $nodeW);
+            $h = (float) ($so['height'] ?? $nodeH);
+
+            if ($d->isExternal()) {
+                $border = '#94a3b8';
+            }
+
+            if ($shape === 'rectangle' || $shape === 'round-rectangle') {
+                $rx = $shape === 'round-rectangle' ? 6 : 0;
+                $svg .= '<rect x="' . ($x - $w / 2) . '" y="' . ($y - $h / 2) . '" width="' . $w . '" height="' . $h . '" rx="' . $rx . '" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
+            } else {
+                $svg .= '<ellipse cx="' . $x . '" cy="' . $y . '" rx="' . ($w / 2) . '" ry="' . ($h / 2) . '" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
+            }
+
+            // Label
+            if ($showLabels) {
+                $labelElements = $labelConf['elements'] ?? [];
+                if (empty($labelElements)) {
+                    $labelElements = [['field' => 'name', 'x' => 0, 'y' => $h / 2 + 12, 'fontSize' => 11, 'color' => '#1e293b', 'fontWeight' => 600, 'fontFamily' => 'sans-serif']];
+                }
+                $node = $d->getNode();
+                $fieldValues = [
+                    'name' => $node?->getName() ?? $node?->getHostname() ?? $d->getName(),
+                    'hostname' => $node?->getHostname() ?? '',
+                    'ipAddress' => $node?->getIpAddress() ?? $d->getMgmtAddress() ?? '',
+                    'manufacturer' => $node?->getManufacturer()?->getName() ?? '',
+                    'model' => $node?->getModel()?->getName() ?? '',
+                    'chassisId' => $d->getChassisId() ?? '',
+                    'sysDescr' => $d->getSysDescr() ?? '',
+                ];
+
+                $gradeColors = ['A' => '#22c55e', 'B' => '#84cc16', 'C' => '#f59e0b', 'D' => '#f97316', 'E' => '#ef4444', 'F' => '#dc2626'];
+                $isReachable = $node?->getIsReachable();
+                $score = $node?->getScore();
+
+                foreach ($labelElements as $el) {
+                    $field = $el['field'] ?? 'name';
+                    $lx = $x + (float) ($el['x'] ?? 0);
+                    $ly = $y + (float) ($el['y'] ?? 0);
+                    $fs = (float) ($el['fontSize'] ?? 11);
+
+                    if ($field === 'badge:monitoring') {
+                        if (!$showMonitoring || $isReachable === null) continue;
+                        $badgeColor = $isReachable ? '#22c55e' : '#ef4444';
+                        $r = $fs / 2;
+                        $svg .= '<circle cx="' . $lx . '" cy="' . $ly . '" r="' . $r . '" fill="' . $badgeColor . '" stroke="white" stroke-width="1.5"/>';
+                    } elseif ($field === 'badge:compliance') {
+                        if (!$showCompliance || !$score) continue;
+                        $badgeColor = $gradeColors[$score] ?? '#94a3b8';
+                        $r = $fs / 2;
+                        $svg .= '<circle cx="' . $lx . '" cy="' . $ly . '" r="' . $r . '" fill="' . $badgeColor . '" stroke="white" stroke-width="1.5"/>';
+                        $svg .= '<text x="' . $lx . '" y="' . round($ly + $r * 0.38, 1) . '" text-anchor="middle" fill="white" font-size="' . round($r * 1.2, 1) . '" font-weight="bold">' . $score . '</text>';
+                    } else {
+                        $value = $fieldValues[$field] ?? '';
+                        if (!$value) continue;
+                        $color = $el['color'] ?? '#1e293b';
+                        $fw = ((int) ($el['fontWeight'] ?? 400)) >= 600 ? ' font-weight="bold"' : '';
+                        $fi = ($el['fontStyle'] ?? '') === 'italic' ? ' font-style="italic"' : '';
+                        $textY = $ly + $fs * 0.35;
+                        $svg .= '<text x="' . $lx . '" y="' . round($textY, 1) . '" text-anchor="middle" fill="' . $color . '" font-size="' . $fs . '"' . $fw . $fi . '>' . htmlspecialchars($value) . '</text>';
+                    }
+                }
+            }
+        }
+
+        // Legend
+        if ($showLegend) {
+            $protocols = array_values(array_unique(array_map(fn($l) => $l->getProtocol(), $links)));
+            if (!empty($protocols)) {
+                $legendX = 10;
+                $legendY = $vh - 10 - count($protocols) * 16;
+                $svg .= '<rect x="' . $legendX . '" y="' . ($legendY - 4) . '" width="80" height="' . (count($protocols) * 16 + 8) . '" fill="white" fill-opacity="0.9" rx="4" stroke="#e2e8f0"/>';
+                foreach ($protocols as $i => $p) {
+                    $py = $legendY + $i * 16 + 8;
+                    $c = $protocolColors[$p] ?? '#94a3b8';
+                    $svg .= '<line x1="' . ($legendX + 8) . '" y1="' . $py . '" x2="' . ($legendX + 24) . '" y2="' . $py . '" stroke="' . $c . '" stroke-width="2.5"/>';
+                    $svg .= '<text x="' . ($legendX + 30) . '" y="' . ($py + 4) . '" fill="#475569" font-size="10">' . strtoupper($p) . '</text>';
+                }
+            }
+        }
+
+        $svg .= '</svg>';
+        return $svg;
     }
 
     private function renderAuthorsPage(TCPDF $pdf, array $authors, array $recipients, array $t, array $styles, float $mLeft, float $mRight, float $mBottom, array $headingsByLevel): void
@@ -2702,6 +3042,27 @@ class GenerateReportMessageHandler
                     }
                     $data = $getNodeData($forNode->getId());
                     return $resolve($data, $parts);
+                },
+                $text
+            );
+
+            // Legacy format (without "node." prefix): {{category.key}} or {{category.key.colLabel}}
+            // Only matches 2 or 3 dot-separated identifiers and excludes reserved prefixes
+            $text = preg_replace_callback(
+                '/\{\{([A-Za-z_][A-Za-z0-9 _-]*(?:\.[A-Za-z0-9 _#-]+){1,2})\}\}/',
+                function ($matches) use ($forNode, $getNodeData, $resolve) {
+                    $parts = explode('.', $matches[1]);
+                    // Skip reserved prefixes
+                    $first = strtolower($parts[0]);
+                    if (in_array($first, ['node', 'fn', 'fn:'], true) || str_starts_with($first, 'fn:')) {
+                        return $matches[0];
+                    }
+                    if (count($parts) < 2 || count($parts) > 3) {
+                        return $matches[0];
+                    }
+                    $data = $getNodeData($forNode->getId());
+                    $resolved = $resolve($data, $parts);
+                    return $resolved !== '' ? $resolved : $matches[0];
                 },
                 $text
             );

@@ -518,6 +518,55 @@ class CollectNodeMessageHandler
         $regex = $ext->getRegex();
         if (!$regex) return;
 
+        if ($ext->getExtractMode() === CollectionRuleExtract::EXTRACT_MODE_BLOCK) {
+            $this->applyBlockExtract($ext, $text, $node, $rule, $collection);
+            return;
+        }
+
+        // --- Line mode (default, unchanged) ---
+        $this->applyExtractOnText($ext, $text, $node, $rule, $collection, null);
+    }
+
+    /**
+     * Block mode: split the text into blocks using blockSeparator, then apply
+     * the normal line-by-line extraction within each block individually.
+     */
+    private function applyBlockExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection): void
+    {
+        $separator = $ext->getBlockSeparator();
+        if (!$separator) return;
+
+        $separatorRegex = '/' . $separator . '/m';
+        if (@preg_match_all($separatorRegex, $text, $matches, PREG_OFFSET_CAPTURE) === false || empty($matches[0])) {
+            return;
+        }
+
+        $positions = array_map(fn($m) => (int) $m[1], $matches[0]);
+        $blockKeyGroup = $ext->getBlockKeyGroup();
+
+        for ($i = 0, $n = count($positions); $i < $n; $i++) {
+            $start = $positions[$i];
+            $end = $positions[$i + 1] ?? strlen($text);
+            $blockText = substr($text, $start, $end - $start);
+
+            // Extract the block key from the separator's capture group (if configured)
+            $blockKey = null;
+            if ($blockKeyGroup !== null && isset($matches[$blockKeyGroup][$i])) {
+                $blockKey = trim((string) $matches[$blockKeyGroup][$i][0]);
+            }
+
+            $this->applyExtractOnText($ext, $blockText, $node, $rule, $collection, $blockKey);
+        }
+    }
+
+    /**
+     * Apply extraction regex on a text fragment (either the full output in line
+     * mode, or a single block in block mode). If $blockKey is provided, it
+     * overrides the normal key resolution for all entries created.
+     */
+    private function applyExtractOnText(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection, ?string $blockKey): void
+    {
+        $regex = $ext->getRegex();
         $hasValueMap = $ext->getValueMap() && count($ext->getValueMap()) > 0;
         $categoryName = $ext->getCategory() ? $ext->getCategory()->getName() : 'Uncategorized';
 
@@ -529,14 +578,19 @@ class CollectNodeMessageHandler
                 continue;
             }
 
-            // Resolve key
+            // Resolve key: blockKey takes priority if provided
             $key = null;
-            if ($ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT && $ext->getKeyGroup()) {
+            if ($blockKey !== null && $blockKey !== '') {
+                $key = $blockKey;
+                // Still support template variables: $1, $2 from the current regex match
+                if (preg_match('/\$\d/', $key)) {
+                    $key = preg_replace_callback('/\$(\d+)/', fn($r) => $m[(int)$r[1]] ?? '', $key);
+                }
+            } elseif ($ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT && $ext->getKeyGroup()) {
                 $kg = $ext->getKeyGroup();
                 $key = $m[$kg] ?? null;
             } else {
                 $key = $ext->getKeyManual() ?: $ext->getName();
-                // Support template variables in manual key: $1, $2, etc. are replaced by captured groups
                 if ($key && preg_match('/\$\d/', $key)) {
                     $key = preg_replace_callback('/\$(\d+)/', fn($r) => $m[(int)$r[1]] ?? '', $key);
                 }

@@ -41,6 +41,7 @@ import {
   Paintbrush,
   Palette,
   IndentIncrease,
+  Network,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -212,12 +213,26 @@ export interface CommandListBlock {
   pageBreakBefore?: boolean;
 }
 
+export interface TopologyBlock {
+  id: string;
+  type: "topology";
+  topologyMapId: number | null;
+  width: number;
+  protocol: string;
+  showLegend: boolean;
+  showLabels: boolean;
+  showMonitoring: boolean;
+  showCompliance: boolean;
+  caption: string;
+  pageBreakBefore?: boolean;
+}
+
 function normalizeCell(cell: string | TableCell): TableCell {
   if (typeof cell === "string") return { value: cell };
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -303,6 +318,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "action_list", title: "", actions: [], showPriorityBadge: true };
     } else if (type === "command_list") {
       block = { id, type: "command_list", manufacturerId: null, modelId: null };
+    } else if (type === "topology") {
+      block = { id, type: "topology", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
     } else {
       block = { id, type: "paragraph", content: "", align: "left" };
     }
@@ -419,6 +436,12 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyCommandList")}</span>;
     }
+    if (block.type === "topology") {
+      if (block.topologyMapId) {
+        return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyMapId}{block.protocol ? ` (${block.protocol.toUpperCase()})` : ""}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyTopology")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -479,6 +502,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-teal-100 dark:bg-teal-500/15 px-2 py-0.5 text-[11px] font-bold text-teal-600 dark:text-teal-400">
           <TerminalSquare className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "topology") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-600 dark:text-violet-400">
+          <Network className="h-3 w-3" />
         </span>
       );
     }
@@ -543,6 +573,10 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 <button onClick={() => { addBlock("command_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                   <TerminalSquare className="h-4 w-4 text-teal-500" />
                   {t("structure.addCommandList")}
+                </button>
+                <button onClick={() => { addBlock("topology"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Network className="h-4 w-4 text-violet-500" />
+                  {t("structure.addTopology")}
                 </button>
               </div>
             )}
@@ -714,6 +748,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               {editingBlock.type === "command_list" && (
                 <CommandListProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
+              {editingBlock.type === "topology" && (
+                <TopologyBlockProperties block={editingBlock as TopologyBlock} updateBlock={updateBlock} t={t} />
+              )}
             </div>
           </div>
         </div>
@@ -825,6 +862,10 @@ function InsertLine({
           <button onClick={() => onInsert("command_list", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
             <TerminalSquare className="h-3.5 w-3.5" />
             {t("structure.addCommandList")}
+          </button>
+          <button onClick={() => onInsert("topology", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <Network className="h-3.5 w-3.5" />
+            {t("structure.addTopology")}
           </button>
         </div>
       )}
@@ -1007,7 +1048,7 @@ function ParagraphProperties({
 
   const selectKey = (key: string, columns: string[]) => {
     if (columns.length <= 1) {
-      const prefix = reportType === "node" ? "" : `node["${acNode}"].`;
+      const prefix = reportType === "node" ? "node." : `node["${acNode}"].`;
       insertVariable(`${prefix}${acCategory}.${key}`);
     } else {
       setAcKey(key);
@@ -1017,7 +1058,7 @@ function ParagraphProperties({
   };
 
   const selectColumn = (col: string) => {
-    const prefix = reportType === "node" ? "" : `node["${acNode}"].`;
+    const prefix = reportType === "node" ? "node." : `node["${acNode}"].`;
     insertVariable(`${prefix}${acCategory}.${acKey}.${col}`);
   };
 
@@ -3678,6 +3719,165 @@ function CommandListProperties({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function TopologyBlockProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: TopologyBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [maps, setMaps] = useState<{ id: number; name: string; description: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!current) return;
+    setLoading(true);
+    fetch(`/api/topology-maps?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setMaps(data))
+      .finally(() => setLoading(false));
+  }, [current]);
+
+  const selectedMap = maps.find((m) => m.id === block.topologyMapId);
+
+  return (
+    <div className="space-y-4">
+      {/* Map selector */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyMap")} <span className="text-red-500">*</span>
+        </label>
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t("common.loading")}
+          </div>
+        ) : (
+          <select
+            value={block.topologyMapId ?? ""}
+            onChange={(e) => updateBlock(block.id, { topologyMapId: e.target.value ? Number(e.target.value) : null })}
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+          >
+            <option value="">{t("structure.topologySelectMap")}</option>
+            {maps.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {selectedMap?.description && (
+          <p className="text-xs text-slate-400 dark:text-slate-500">{selectedMap.description}</p>
+        )}
+      </div>
+
+      {/* Protocol filter */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyProtocol")}
+        </label>
+        <select
+          value={block.protocol}
+          onChange={(e) => updateBlock(block.id, { protocol: e.target.value })}
+          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+        >
+          <option value="">{t("topology.protocolAll")}</option>
+          <option value="lldp">LLDP</option>
+          <option value="stp">STP</option>
+          <option value="ospf">OSPF</option>
+          <option value="bgp">BGP</option>
+          <option value="isis">ISIS</option>
+        </select>
+      </div>
+
+      {/* Width */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyWidth")}
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={30}
+            max={100}
+            step={5}
+            value={block.width}
+            onChange={(e) => updateBlock(block.id, { width: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-10 text-right">{block.width}%</span>
+        </div>
+      </div>
+
+      {/* Toggles */}
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showLabels}
+            onChange={(e) => updateBlock(block.id, { showLabels: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowLabels")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showLegend}
+            onChange={(e) => updateBlock(block.id, { showLegend: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowLegend")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showMonitoring}
+            onChange={(e) => updateBlock(block.id, { showMonitoring: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowMonitoring")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showCompliance}
+            onChange={(e) => updateBlock(block.id, { showCompliance: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowCompliance")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      {/* Caption */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyCaption")}
+        </label>
+        <input
+          type="text"
+          value={block.caption}
+          onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
+          placeholder={t("structure.topologyCaptionPlaceholder")}
+          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+        />
+      </div>
     </div>
   );
 }

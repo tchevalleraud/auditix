@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -26,6 +26,9 @@ import {
   Palette,
   Calendar,
   FlaskConical,
+  ChevronDown,
+  FolderTree,
+  Network,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -47,6 +50,8 @@ const contextNav: NavCategory[] = [
     label: "",
     items: [
       { key: "sidebar.dashboard", href: "/", icon: LayoutDashboard },
+      { key: "sidebar.topology", href: "/topology", icon: Network },
+      { key: "sidebar.nodes", href: "/nodes", icon: Server },
     ],
   },
   {
@@ -54,9 +59,9 @@ const contextNav: NavCategory[] = [
     items: [
       { key: "sidebar.manufacturers", href: "/manufacturers", icon: Box },
       { key: "sidebar.models", href: "/models", icon: Cpu },
-      { key: "sidebar.nodes", href: "/nodes", icon: Server },
       { key: "sidebar.profiles", href: "/profiles", icon: KeyRound },
       { key: "sidebar.tags", href: "/tags", icon: Tags },
+      { key: "sidebar.inventoryCategories", href: "/inventory-categories", icon: FolderTree },
     ],
   },
   {
@@ -113,11 +118,76 @@ const adminNav: NavCategory[] = [
   },
 ];
 
+function CollapsibleSection({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const firstRender = useRef(true);
+
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer || !innerRef.current) return;
+
+    if (firstRender.current) {
+      firstRender.current = false;
+      outer.style.height = isOpen ? "auto" : "0px";
+      return;
+    }
+
+    if (isOpen) {
+      const target = innerRef.current.offsetHeight;
+      outer.style.height = "0px";
+      // force reflow so the browser registers 0px before animating
+      void outer.offsetHeight;
+      outer.style.height = `${target}px`;
+
+      const onEnd = () => {
+        outer.style.height = "auto";
+        outer.removeEventListener("transitionend", onEnd);
+      };
+      outer.addEventListener("transitionend", onEnd);
+    } else {
+      // pin to current height first
+      outer.style.height = `${outer.scrollHeight}px`;
+      // force reflow
+      void outer.offsetHeight;
+      outer.style.height = "0px";
+    }
+  }, [isOpen]);
+
+  return (
+    <div
+      ref={outerRef}
+      style={{ overflow: "hidden", transition: "height 200ms ease-in-out" }}
+    >
+      <div ref={innerRef} className="space-y-0.5">{children}</div>
+    </div>
+  );
+}
+
+function isItemActive(itemHref: string, pathname: string): boolean {
+  if (itemHref === "/admin") return pathname === "/admin";
+  if (itemHref === "/") return pathname === "/";
+  return pathname.startsWith(itemHref);
+}
+
 export default function Sidebar() {
   const pathname = usePathname();
   const { adminMode, setAdminMode, current } = useAppContext();
   const { t } = useI18n();
   const [versionStatus, setVersionStatus] = useState<{ upToDate: boolean; latest: string | null } | null>(null);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
+
+  useEffect(() => {
+    const nav = adminMode ? adminNav : contextNav;
+    const active = nav.find(
+      (cat) => cat.label && cat.items.some((item) => isItemActive(item.href, pathname))
+    );
+    setOpenCategory(active?.label ?? null);
+  }, [adminMode]);
+
+  const toggleCategory = (label: string) => {
+    setOpenCategory((prev) => (prev === label ? null : label));
+  };
 
   useEffect(() => {
     const isAdminPath = pathname.startsWith("/admin");
@@ -162,40 +232,56 @@ export default function Sidebar() {
         </div>
       )}
 
-      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-5">
-        {navigation.map((category, i) => (
-          <div key={i}>
-            {category.label && (
-              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                {t(category.label)}
-              </p>
-            )}
-            <div className="space-y-0.5">
-              {category.items.map((item) => {
-                const isActive =
-                  item.href === "/admin"
-                    ? pathname === "/admin"
-                    : item.href === "/"
-                      ? pathname === "/"
-                      : pathname.startsWith(item.href);
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                      isActive
-                        ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
-                        : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                    }`}
-                  >
-                    <item.icon className="h-5 w-5 shrink-0" />
-                    {t(item.key)}
-                  </Link>
-                );
-              })}
+      <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+        {navigation.map((category, i) => {
+          const renderItems = (items: NavItem[]) =>
+            items.map((item) => {
+              const isActive = isItemActive(item.href, pathname);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                      : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                  }`}
+                >
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  {t(item.key)}
+                </Link>
+              );
+            });
+
+          if (!category.label) {
+            return (
+              <div key={i} className="space-y-0.5">
+                {renderItems(category.items)}
+              </div>
+            );
+          }
+
+          const isOpen = openCategory === category.label;
+
+          return (
+            <div key={i}>
+              <button
+                type="button"
+                onClick={() => toggleCategory(category.label)}
+                aria-expanded={isOpen}
+                className="flex items-center justify-between w-full mb-1 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+              >
+                <span>{t(category.label)}</span>
+                <ChevronDown
+                  className={`h-3.5 w-3.5 shrink-0 transition-transform duration-200 ${isOpen ? "" : "-rotate-90"}`}
+                />
+              </button>
+              <CollapsibleSection isOpen={isOpen}>
+                {renderItems(category.items)}
+              </CollapsibleSection>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </nav>
 
       <div className="px-3 py-3 space-y-0.5">

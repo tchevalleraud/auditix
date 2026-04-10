@@ -542,6 +542,9 @@ class CollectionRuleController extends AbstractController
             'categoryKeyLabel' => $e->getCategory()?->getKeyLabel(),
             'nodeField' => $e->getNodeField(),
             'nodeFieldGroup' => $e->getNodeFieldGroup(),
+            'extractMode' => $e->getExtractMode(),
+            'blockSeparator' => $e->getBlockSeparator(),
+            'blockKeyGroup' => $e->getBlockKeyGroup(),
             'position' => $e->getPosition(),
         ];
     }
@@ -594,6 +597,9 @@ class CollectionRuleController extends AbstractController
         }
         $extract->setNodeField($data['nodeField'] ?? null);
         $extract->setNodeFieldGroup(isset($data['nodeFieldGroup']) ? (int)$data['nodeFieldGroup'] : null);
+        $extract->setExtractMode($data['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE);
+        $extract->setBlockSeparator($data['blockSeparator'] ?? null);
+        $extract->setBlockKeyGroup(isset($data['blockKeyGroup']) ? (int)$data['blockKeyGroup'] : null);
 
         $extract->setPosition($maxPos + 1);
         $rule->addExtract($extract);
@@ -652,6 +658,15 @@ class CollectionRuleController extends AbstractController
         }
         if (array_key_exists('nodeFieldGroup', $data)) {
             $extract->setNodeFieldGroup($data['nodeFieldGroup'] !== null ? (int)$data['nodeFieldGroup'] : null);
+        }
+        if (array_key_exists('extractMode', $data)) {
+            $extract->setExtractMode($data['extractMode'] ?: CollectionRuleExtract::EXTRACT_MODE_LINE);
+        }
+        if (array_key_exists('blockSeparator', $data)) {
+            $extract->setBlockSeparator($data['blockSeparator'] ?: null);
+        }
+        if (array_key_exists('blockKeyGroup', $data)) {
+            $extract->setBlockKeyGroup($data['blockKeyGroup'] !== null ? (int)$data['blockKeyGroup'] : null);
         }
 
         $em->flush();

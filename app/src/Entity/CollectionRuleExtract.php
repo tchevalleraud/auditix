@@ -11,6 +11,9 @@ class CollectionRuleExtract
     public const KEY_MODE_MANUAL = 'manual';
     public const KEY_MODE_EXTRACT = 'extract';
 
+    public const EXTRACT_MODE_LINE = 'line';
+    public const EXTRACT_MODE_BLOCK = 'block';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -57,6 +60,29 @@ class CollectionRuleExtract
     #[ORM\Column(nullable: true)]
     private ?int $nodeFieldGroup = null;
 
+    /**
+     * Extraction mode: 'line' applies regex per line (default), 'block' splits
+     * text by blockSeparator first and applies regex within each block.
+     */
+    #[ORM\Column(length: 10)]
+    private string $extractMode = self::EXTRACT_MODE_LINE;
+
+    /**
+     * Block mode only: regex that identifies the start of each block.
+     * Must use the /m flag convention for line-anchored patterns (e.g. ^Port:\s+(\S+)).
+     * Each match starts a new block; the text between two consecutive matches is one block.
+     */
+    #[ORM\Column(length: 1000, nullable: true)]
+    private ?string $blockSeparator = null;
+
+    /**
+     * Block mode only: which capture group from blockSeparator to use as the
+     * entry key for all inventory entries produced within this block.
+     * If null, the normal keyMode/keyGroup/keyManual logic is used instead.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?int $blockKeyGroup = null;
+
     #[ORM\Column]
     private int $position = 0;
 
@@ -99,6 +125,12 @@ class CollectionRuleExtract
     public function setNodeField(?string $v): static { $this->nodeField = $v; return $this; }
     public function getNodeFieldGroup(): ?int { return $this->nodeFieldGroup; }
     public function setNodeFieldGroup(?int $v): static { $this->nodeFieldGroup = $v; return $this; }
+    public function getExtractMode(): string { return $this->extractMode; }
+    public function setExtractMode(string $v): static { $this->extractMode = $v; return $this; }
+    public function getBlockSeparator(): ?string { return $this->blockSeparator; }
+    public function setBlockSeparator(?string $v): static { $this->blockSeparator = $v; return $this; }
+    public function getBlockKeyGroup(): ?int { return $this->blockKeyGroup; }
+    public function setBlockKeyGroup(?int $v): static { $this->blockKeyGroup = $v; return $this; }
     public function getPosition(): int { return $this->position; }
     public function setPosition(int $v): static { $this->position = $v; return $this; }
     public function getRule(): CollectionRule { return $this->rule; }

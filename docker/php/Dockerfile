@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     openssh-client \
     iputils-ping \
     snmp \
+    librsvg2-bin \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install \
     pdo_pgsql \

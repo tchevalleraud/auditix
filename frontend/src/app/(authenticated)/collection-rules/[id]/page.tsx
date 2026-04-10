@@ -54,6 +54,9 @@ interface ExtractItem {
   categoryKeyLabel: string | null;
   nodeField: string | null;
   nodeFieldGroup: number | null;
+  extractMode: "line" | "block";
+  blockSeparator: string | null;
+  blockKeyGroup: number | null;
   position: number;
 }
 
@@ -130,6 +133,9 @@ export default function CollectionRuleEditPage() {
   const [extractName, setExtractName] = useState("");
   const [extractRegex, setExtractRegex] = useState("");
   const [extractMultiline, setExtractMultiline] = useState(false);
+  const [extractMode, setExtractMode] = useState<"line" | "block">("line");
+  const [blockSeparator, setBlockSeparator] = useState("");
+  const [blockKeyGroup, setBlockKeyGroup] = useState<number | null>(1);
   const [extractGroups, setExtractGroups] = useState<{ isKey: boolean; label: string }[]>([]);
   const [extractKeyTemplate, setExtractKeyTemplate] = useState("");
   const [extractCategoryId, setExtractCategoryId] = useState<number | null>(null);
@@ -328,6 +334,9 @@ export default function CollectionRuleEditPage() {
       name: extractName,
       regex: extractRegex,
       multiline: extractMultiline,
+      extractMode: extractMode,
+      blockSeparator: extractMode === "block" ? (blockSeparator || null) : null,
+      blockKeyGroup: extractMode === "block" ? blockKeyGroup : null,
       keyMode: keyIdx >= 0 ? "extract" as const : "manual" as const,
       keyManual: hasKeyTemplate ? extractKeyTemplate.trim() : null,
       keyExtractId: null,
@@ -370,6 +379,9 @@ export default function CollectionRuleEditPage() {
     setExtractName("");
     setExtractRegex("");
     setExtractMultiline(false);
+    setExtractMode("line");
+    setBlockSeparator("");
+    setBlockKeyGroup(1);
     setExtractGroups([]);
     setExtractKeyTemplate("");
     setExtractCategoryId(null);
@@ -386,6 +398,9 @@ export default function CollectionRuleEditPage() {
       name: `${ext.name} (copie)`,
       regex: ext.regex,
       multiline: ext.multiline,
+      extractMode: ext.extractMode,
+      blockSeparator: ext.blockSeparator,
+      blockKeyGroup: ext.blockKeyGroup,
       keyMode: ext.keyMode,
       keyManual: ext.keyManual,
       keyExtractId: ext.keyExtractId,
@@ -469,6 +484,9 @@ export default function CollectionRuleEditPage() {
     setExtractName(e.name);
     setExtractRegex(e.regex);
     setExtractMultiline(e.multiline);
+    setExtractMode(e.extractMode || "line");
+    setBlockSeparator(e.blockSeparator || "");
+    setBlockKeyGroup(e.blockKeyGroup ?? 1);
     setExtractCategoryId(e.categoryId);
     setExtractCategoryKeyLabel(e.categoryKeyLabel || "");
     setExtractNodeField(e.nodeField || "");
@@ -691,15 +709,20 @@ export default function CollectionRuleEditPage() {
       const hasValueMap = ext.valueMap && ext.valueMap.length > 0;
 
       // Define columns for this extract
-      // Use label as colKey so that identical labels across extracts merge into one column
       const cols: ExtractColumns = hasValueMap
         ? ext.valueMap!.map((vm) => ({ colKey: `col:${vm.label}`, label: vm.label }))
         : [{ colKey: "col:Value#1", label: "Value#1" }];
       allExtractColumns[ext.id] = cols;
 
-      const processMatch = (m: RegExpExecArray) => {
+      const processMatch = (m: RegExpExecArray, blockKey: string | null) => {
         let key: string;
-        if (ext.keyMode === "extract") {
+        if (blockKey) {
+          // In block mode, the key comes from the block separator capture group
+          key = blockKey;
+          if (/\$\d/.test(key)) {
+            key = key.replace(/\$(\d+)/g, (_, n) => m[Number(n)] ?? "");
+          }
+        } else if (ext.keyMode === "extract") {
           const kg = ext.keyGroup ?? 1;
           key = m[kg] ?? m[0];
         } else {
@@ -720,22 +743,58 @@ export default function CollectionRuleEditPage() {
         rows.push({ key, columns });
       };
 
-      try {
-        // Always run line by line so \s never crosses newlines
-        const flags = ext.multiline ? "gs" : "g";
-        const re = new RegExp(ext.regex, flags);
-        for (const rawLine of text.split("\n")) {
-          const line = rawLine.replace(/\r$/, "");
-          re.lastIndex = 0;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(line)) !== null) {
-            processMatch(m);
-            if (m[0].length === 0) re.lastIndex++;
+      const applyRegexOnText = (fragment: string, blockKey: string | null) => {
+        try {
+          const flags = ext.multiline ? "gs" : "g";
+          const re = new RegExp(ext.regex, flags);
+          for (const rawLine of fragment.split("\n")) {
+            const line = rawLine.replace(/\r$/, "");
+            re.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(line)) !== null) {
+              processMatch(m, blockKey);
+              if (m[0].length === 0) re.lastIndex++;
+            }
           }
+        } catch {
+          // invalid regex
         }
-      } catch {
-        // invalid regex
+      };
+
+      if (ext.extractMode === "block" && ext.blockSeparator) {
+        // Block mode: split text into blocks, then apply regex within each block
+        try {
+          const sepRe = new RegExp(ext.blockSeparator, "gm");
+          const sepMatches: { index: number; groups: string[] }[] = [];
+          let sm: RegExpExecArray | null;
+          while ((sm = sepRe.exec(text)) !== null) {
+            const groups: string[] = [];
+            for (let gi = 0; gi < sm.length; gi++) groups.push(sm[gi] ?? "");
+            sepMatches.push({ index: sm.index, groups });
+            if (sm[0].length === 0) sepRe.lastIndex++;
+          }
+
+          for (let bi = 0; bi < sepMatches.length; bi++) {
+            const start = sepMatches[bi].index;
+            const end = sepMatches[bi + 1]?.index ?? text.length;
+            const blockText = text.substring(start, end);
+
+            let bKey: string | null = null;
+            const bkg = ext.blockKeyGroup ?? 1;
+            if (sepMatches[bi].groups[bkg] !== undefined) {
+              bKey = sepMatches[bi].groups[bkg].trim();
+            }
+
+            applyRegexOnText(blockText, bKey);
+          }
+        } catch {
+          // invalid block separator regex
+        }
+      } else {
+        // Line mode (default)
+        applyRegexOnText(text, null);
       }
+
       allMatchRows[ext.id] = rows;
     });
 
@@ -1164,18 +1223,123 @@ export default function CollectionRuleEditPage() {
                           autoFocus
                         />
                       </div>
+                      {/* Extract mode: Line vs Block */}
+                      <div className="space-y-1.5">
+                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.extractModeLabel")}</label>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExtractMode("line")}
+                            className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
+                              extractMode === "line"
+                                ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                                : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400"
+                            }`}
+                          >
+                            {t("collection_rules.extractModeLine")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExtractMode("block")}
+                            className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm font-medium transition-all ${
+                              extractMode === "block"
+                                ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
+                                : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400"
+                            }`}
+                          >
+                            {t("collection_rules.extractModeBlock")}
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-400 dark:text-slate-500">
+                          {extractMode === "line" ? t("collection_rules.extractModeLineDesc") : t("collection_rules.extractModeBlockDesc")}
+                        </p>
+                      </div>
+
+                      {/* Block separator (only in block mode) */}
+                      {extractMode === "block" && (
+                        <div className="space-y-3 rounded-lg border border-blue-200 dark:border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 p-3">
+                          <div className="space-y-1.5">
+                            <label className="block text-sm font-medium text-blue-700 dark:text-blue-300">{t("collection_rules.blockSeparator")}</label>
+                            <input
+                              type="text"
+                              value={blockSeparator}
+                              onChange={(e) => setBlockSeparator(e.target.value)}
+                              placeholder={t("collection_rules.blockSeparatorPlaceholder")}
+                              className={`${inputCls} font-mono`}
+                            />
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.blockSeparatorHint")}</p>
+                          </div>
+
+                          {/* Dynamic capture groups from blockSeparator */}
+                          {(() => {
+                            let count = 0;
+                            let esc = false;
+                            let inCC = false;
+                            for (let i = 0; i < blockSeparator.length; i++) {
+                              const ch = blockSeparator[i];
+                              if (esc) { esc = false; continue; }
+                              if (ch === "\\") { esc = true; continue; }
+                              if (ch === "[") { inCC = true; continue; }
+                              if (ch === "]") { inCC = false; continue; }
+                              if (inCC) continue;
+                              if (ch === "(" && blockSeparator[i + 1] !== "?") count++;
+                            }
+                            if (count === 0) return null;
+                            return (
+                              <div className="space-y-2">
+                                <label className="block text-sm font-medium text-blue-700 dark:text-blue-300">
+                                  {t("collection_rules.blockKeyGroup")}
+                                </label>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.blockKeyGroupHint")}</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {Array.from({ length: count }, (_, i) => i + 1).map((g) => (
+                                    <button
+                                      key={g}
+                                      type="button"
+                                      onClick={() => setBlockKeyGroup(g)}
+                                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-mono font-medium transition-all ${
+                                        (blockKeyGroup ?? 1) === g
+                                          ? "border-blue-500 bg-blue-600 text-white shadow-sm"
+                                          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-500"
+                                      }`}
+                                    >
+                                      <span>${g}</span>
+                                      {(blockKeyGroup ?? 1) === g && (
+                                        <span className="text-[10px] font-sans font-normal opacity-80">← {t("collection_rules.blockKeySelected")}</span>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                                {(blockKeyGroup ?? 1) <= count && (
+                                  <div className="flex items-center gap-2 mt-1 text-xs">
+                                    <span className="text-slate-500 dark:text-slate-400">{t("collection_rules.blockKeyPreview")}:</span>
+                                    <code className="rounded bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 font-mono text-blue-700 dark:text-blue-300 font-semibold">
+                                      ${blockKeyGroup ?? 1}
+                                    </code>
+                                    <span className="text-slate-400 dark:text-slate-500">→ ex. &quot;1/1&quot;, &quot;1/2&quot;, &quot;1/3&quot;, ...</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+
                       <div className="space-y-1.5">
                         <label className="flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-300">
                           <Regex className="h-4 w-4" />
-                          {t("collection_rules.extractRegex")}
+                          {extractMode === "block" ? t("collection_rules.extractRegexBlock") : t("collection_rules.extractRegex")}
                         </label>
                         <input
                           type="text"
                           value={extractRegex}
                           onChange={(e) => setExtractRegex(e.target.value)}
-                          placeholder={t("collection_rules.extractRegexPlaceholder")}
+                          placeholder={extractMode === "block" ? t("collection_rules.extractRegexBlockPlaceholder") : t("collection_rules.extractRegexPlaceholder")}
                           className={`${inputCls} font-mono`}
                         />
+                        {extractMode === "block" && (
+                          <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.extractRegexBlockHint")}</p>
+                        )}
                       </div>
 
                       {/* Inventory category */}
@@ -1265,8 +1429,57 @@ export default function CollectionRuleEditPage() {
                         </div>
                       </label>
 
-                      {/* Capture groups */}
-                      {detectedGroupCount > 0 && (
+                      {/* Block mode: key comes from separator, show info banner instead of key picker */}
+                      {extractMode === "block" && blockKeyGroup != null && detectedGroupCount > 0 && (
+                        <div className="rounded-lg border border-blue-200 dark:border-blue-500/20 bg-blue-50/50 dark:bg-blue-500/5 p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">{t("collection_rules.blockKeyInfo")}</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300">
+                            {t("collection_rules.blockKeyInfoDesc")}
+                            {" "}<code className="rounded bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 font-mono text-blue-700 dark:text-blue-300 font-semibold">${blockKeyGroup}</code>
+                            {" "}{t("collection_rules.blockKeyInfoSuffix")}
+                          </p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.blockKeyInfoValues")}</p>
+                          {/* Still show value column mapping for extraction regex groups */}
+                          <div className="mt-2 pt-2 border-t border-blue-200 dark:border-blue-500/20">
+                            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">{t("collection_rules.extractGroupValuesOnly")}</label>
+                            <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400 w-12">#</th>
+                                    <th className="px-3 py-2 text-left text-xs font-medium text-slate-500 dark:text-slate-400">{t("collection_rules.extractMappingLabel")}</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                  {extractGroups.map((g, gIdx) => (
+                                    <tr key={gIdx}>
+                                      <td className="px-3 py-2"><code className="text-xs font-mono text-slate-500 dark:text-slate-400">${gIdx + 1}</code></td>
+                                      <td className="px-3 py-2">
+                                        <input
+                                          type="text"
+                                          value={g.label}
+                                          onChange={(e) => {
+                                            const next = [...extractGroups];
+                                            next[gIdx] = { ...next[gIdx], label: e.target.value };
+                                            setExtractGroups(next);
+                                          }}
+                                          placeholder={`Value#${gIdx + 1}`}
+                                          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors"
+                                        />
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Capture groups (line mode or block mode without blockKeyGroup) */}
+                      {!(extractMode === "block" && blockKeyGroup != null) && detectedGroupCount > 0 && (
                         <div className="space-y-2">
                           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.extractCaptureGroups")}</label>
                           <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">

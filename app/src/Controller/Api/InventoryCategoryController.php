@@ -23,16 +23,24 @@ class InventoryCategoryController extends AbstractController
             return $this->json([]);
         }
 
-        $categories = $em->getRepository(InventoryCategory::class)->findBy(
-            ['context' => $contextId],
-            ['name' => 'ASC']
-        );
+        $rows = $em->createQueryBuilder()
+            ->select('c.id', 'c.name', 'c.keyLabel', 'c.createdAt', 'COUNT(DISTINCT e.id) AS usageCount')
+            ->from(InventoryCategory::class, 'c')
+            ->leftJoin(NodeInventoryEntry::class, 'e', 'WITH', 'e.category = c')
+            ->where('c.context = :ctx')
+            ->setParameter('ctx', $contextId)
+            ->groupBy('c.id')
+            ->orderBy('c.name', 'ASC')
+            ->getQuery()
+            ->getArrayResult();
 
-        return $this->json(array_map(fn(InventoryCategory $c) => [
-            'id' => $c->getId(),
-            'name' => $c->getName(),
-            'keyLabel' => $c->getKeyLabel(),
-        ], $categories));
+        return $this->json(array_map(fn(array $r) => [
+            'id' => (int)$r['id'],
+            'name' => $r['name'],
+            'keyLabel' => $r['keyLabel'],
+            'createdAt' => $r['createdAt'] instanceof \DateTimeInterface ? $r['createdAt']->format(\DateTimeInterface::ATOM) : null,
+            'usageCount' => (int)$r['usageCount'],
+        ], $rows));
     }
 
     #[Route('', methods: ['POST'])]
@@ -65,6 +73,8 @@ class InventoryCategoryController extends AbstractController
             'id' => $cat->getId(),
             'name' => $cat->getName(),
             'keyLabel' => $cat->getKeyLabel(),
+            'createdAt' => $cat->getCreatedAt()->format(\DateTimeInterface::ATOM),
+            'usageCount' => 0,
         ], Response::HTTP_CREATED);
     }
 
@@ -80,10 +90,20 @@ class InventoryCategoryController extends AbstractController
         }
         $em->flush();
 
+        $usageCount = (int)$em->createQueryBuilder()
+            ->select('COUNT(e.id)')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->where('e.category = :cat')
+            ->setParameter('cat', $cat)
+            ->getQuery()
+            ->getSingleScalarResult();
+
         return $this->json([
             'id' => $cat->getId(),
             'name' => $cat->getName(),
             'keyLabel' => $cat->getKeyLabel(),
+            'createdAt' => $cat->getCreatedAt()->format(\DateTimeInterface::ATOM),
+            'usageCount' => $usageCount,
         ]);
     }
 
@@ -93,6 +113,21 @@ class InventoryCategoryController extends AbstractController
         $em->remove($cat);
         $em->flush();
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/{id}/columns', methods: ['GET'])]
+    public function columns(InventoryCategory $cat, EntityManagerInterface $em): JsonResponse
+    {
+        $rows = $em->createQueryBuilder()
+            ->select('DISTINCT e.colLabel')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->where('e.category = :cat')
+            ->setParameter('cat', $cat)
+            ->orderBy('e.colLabel', 'ASC')
+            ->getQuery()
+            ->getArrayResult();
+
+        return $this->json(array_map(fn($r) => $r['colLabel'], $rows));
     }
 
     #[Route('/structure', methods: ['GET'], priority: 10)]
