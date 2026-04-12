@@ -54,19 +54,29 @@ class ComplianceEvaluator
 
         // Detect multi-row sources → evaluate per row independently
         $multiRowSource = null;
+        $secondaryMultiRowSources = [];
         foreach ($rule->getDataSources() as $src) {
             if (!empty($src['multiRow'])) {
                 $name = $src['name'] ?? 'default';
                 $rows = $fields["$name.\$rows"] ?? null;
                 if (is_array($rows) && !empty($rows)) {
-                    $multiRowSource = ['name' => $name, 'rows' => $rows];
-                    break;
+                    if ($multiRowSource === null) {
+                        $multiRowSource = ['name' => $name, 'rows' => $rows];
+                    } else {
+                        // Index secondary rows by their _key for join
+                        $indexed = [];
+                        foreach ($rows as $r) {
+                            $k = $r['_key'] ?? null;
+                            if ($k !== null) $indexed[$k] = $r;
+                        }
+                        $secondaryMultiRowSources[] = ['name' => $name, 'rowsByKey' => $indexed];
+                    }
                 }
             }
         }
 
         if ($multiRowSource) {
-            return $this->evaluateMultiRow($rule, $node, $conditionTree, $fields, $multiRowSource);
+            return $this->evaluateMultiRow($rule, $node, $conditionTree, $fields, $multiRowSource, $secondaryMultiRowSources);
         }
 
         $evaluation = $this->evaluateBlocks($conditionTree['blocks'], $fields, $node);
@@ -91,7 +101,7 @@ class ComplianceEvaluator
      * Multi-row evaluation: run the condition tree independently for each row.
      * Final result = worst status across all rows.
      */
-    private function evaluateMultiRow(ComplianceRule $rule, Node $node, array $conditionTree, array $fields, array $multiRowSource): array
+    private function evaluateMultiRow(ComplianceRule $rule, Node $node, array $conditionTree, array $fields, array $multiRowSource, array $secondaryMultiRowSources = []): array
     {
         $statusPriority = ['compliant' => 0, 'not_applicable' => 1, 'skipped' => 2, 'error' => 3, 'non_compliant' => 4];
         $srcName = $multiRowSource['name'];
@@ -101,11 +111,29 @@ class ComplianceEvaluator
         foreach ($multiRowSource['rows'] as $row) {
             // Inject this row's values as source.field (overriding any previous)
             $rowFields = $fields;
+            $rowKey = $row['_key'] ?? null;
             foreach ($row as $label => $val) {
                 if ($label === '_key') {
                     $rowFields["$srcName.\$key"] = $val;
                 } else {
                     $rowFields["$srcName.$label"] = is_string($val) ? trim($val) : $val;
+                }
+            }
+
+            // Inject matching rows from secondary multi-row sources (join by key)
+            if ($rowKey !== null) {
+                foreach ($secondaryMultiRowSources as $sec) {
+                    $secName = $sec['name'];
+                    $secRow = $sec['rowsByKey'][$rowKey] ?? null;
+                    if ($secRow) {
+                        foreach ($secRow as $label => $val) {
+                            if ($label === '_key') {
+                                $rowFields["$secName.\$key"] = $val;
+                            } else {
+                                $rowFields["$secName.$label"] = is_string($val) ? trim($val) : $val;
+                            }
+                        }
+                    }
                 }
             }
 
@@ -158,6 +186,70 @@ class ComplianceEvaluator
     {
         $allFields = [];
 
+        // Pre-resolve collections per tag so all data sources sharing the same
+        // tag (or no tag) read from the exact same collection.
+        $collectionBaseDirs = []; // keyed by tag ('' for no tag)
+
+        foreach ($rule->getDataSources() as $src) {
+            if (($src['type'] ?? '') !== 'collection') continue;
+            $tag = $src['tag'] ?? null;
+            $cacheKey = $tag ?? '';
+            if (isset($collectionBaseDirs[$cacheKey])) continue;
+
+            $conn = $this->em->getConnection();
+            $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status';
+            $params = ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED];
+            if ($tag) { $sql .= ' AND tags::text LIKE :tag'; $params['tag'] = '%"' . $tag . '"%'; }
+            $sql .= ' ORDER BY completed_at DESC LIMIT 1';
+            $row = $conn->fetchAssociative($sql, $params);
+            $collection = $row ? $this->em->getRepository(Collection::class)->find($row['id']) : null;
+
+            if ($collection) {
+                $baseDir = $this->projectDir . '/var/' . $collection->getStoragePath();
+                $collectionBaseDirs[$cacheKey] = is_dir($baseDir) ? $baseDir : null;
+            } else {
+                $collectionBaseDirs[$cacheKey] = null;
+            }
+        }
+
+        // For each tag group, find a preferred instance subdirectory that
+        // contains ALL commands required by the data sources in that group.
+        // This ensures data sources sharing the same collection+tag always
+        // read from the same CollectionCommand instance.
+        $preferredInstance = []; // keyed by tag cacheKey → subdirectory name
+
+        foreach (array_keys($collectionBaseDirs) as $cacheKey) {
+            $baseDir = $collectionBaseDirs[$cacheKey];
+            if (!$baseDir) continue;
+
+            $commandSlugs = [];
+            foreach ($rule->getDataSources() as $src) {
+                if (($src['type'] ?? '') !== 'collection') continue;
+                $srcTag = ($src['tag'] ?? null) ?? '';
+                if ($srcTag !== $cacheKey) continue;
+                $cmd = $src['command'] ?? '';
+                if ($cmd) $commandSlugs[] = $this->slugify($cmd);
+            }
+            if (empty($commandSlugs)) continue;
+
+            // Find first subdirectory containing ALL required command files
+            foreach (scandir($baseDir) as $dir) {
+                if ($dir === '.' || $dir === '..') continue;
+                if (!is_dir($baseDir . '/' . $dir)) continue;
+                $allFound = true;
+                foreach ($commandSlugs as $slug) {
+                    if (!file_exists($baseDir . '/' . $dir . '/' . $slug . '.txt')) {
+                        $allFound = false;
+                        break;
+                    }
+                }
+                if ($allFound) {
+                    $preferredInstance[$cacheKey] = $dir;
+                    break;
+                }
+            }
+        }
+
         foreach ($rule->getDataSources() as $src) {
             $name = $src['name'] ?? 'default';
             $type = $src['type'] ?? '';
@@ -177,9 +269,25 @@ class ComplianceEvaluator
             // Fetch raw content
             $foundContent = null;
             if ($type === 'collection') {
-                $foundContent = $this->fetchCollectionContent($node, $command, $tag);
-                if ($foundContent === null) {
+                $cacheKey = $tag ?? '';
+                $baseDir = $collectionBaseDirs[$cacheKey] ?? null;
+                if (!$baseDir) {
                     $allFields['_error'] = "Source \"$name\": no completed collection found for command \"$command\"";
+                    return $allFields;
+                }
+
+                // Use the preferred instance if available, otherwise scan all
+                $preferred = $preferredInstance[$cacheKey] ?? null;
+                if ($preferred) {
+                    $commandSlug = $this->slugify($command);
+                    $filePath = $baseDir . '/' . $preferred . '/' . $commandSlug . '.txt';
+                    $foundContent = file_exists($filePath) ? file_get_contents($filePath) : null;
+                }
+                if ($foundContent === null) {
+                    $foundContent = $this->fetchCollectionContentFromDir($baseDir, $command);
+                }
+                if ($foundContent === null) {
+                    $allFields['_error'] = "Source \"$name\": command \"$command\" not found in collection";
                     return $allFields;
                 }
             } elseif ($type === 'ssh') {
@@ -244,7 +352,6 @@ class ComplianceEvaluator
      */
     private function fetchCollectionContent(Node $node, string $command, ?string $tag): ?string
     {
-        $commandSlug = $this->slugify($command);
         $conn = $this->em->getConnection();
         $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status';
         $params = ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED];
@@ -257,6 +364,16 @@ class ComplianceEvaluator
 
         $baseDir = $this->projectDir . '/var/' . $collection->getStoragePath();
         if (!is_dir($baseDir)) return null;
+
+        return $this->fetchCollectionContentFromDir($baseDir, $command);
+    }
+
+    /**
+     * Find a command output file within a collection base directory (scanning all instance subdirectories).
+     */
+    private function fetchCollectionContentFromDir(string $baseDir, string $command): ?string
+    {
+        $commandSlug = $this->slugify($command);
 
         foreach (scandir($baseDir) as $dir) {
             if ($dir === '.' || $dir === '..') continue;

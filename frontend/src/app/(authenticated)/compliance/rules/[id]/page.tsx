@@ -1828,7 +1828,8 @@ export default function ComplianceRuleEditPage() {
                   const dbg = (evalResult as Record<string, unknown>).debug as any;
                   const isMultiRow = dbg.multiRow === true;
 
-                  const renderBlockTrace = (blocks: { block: number; type: string; logic: string; blockResult: boolean | null; skipped?: boolean; executed?: boolean; conditions: { index: number; condition: Record<string, string>; result: boolean | null; details: { field?: string; value?: unknown; operator?: string; expected?: unknown; pass?: boolean; error?: string }[] }[] }[]) => (
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const renderBlockTrace = (blocks: any[], depth = 0): React.ReactNode => (
                     <>
                       {blocks.map((block, bi) => (
                         <div key={bi} className={`rounded-lg border overflow-hidden ${block.skipped ? "border-slate-100 dark:border-slate-800 opacity-40" : "border-slate-200 dark:border-slate-700"}`}>
@@ -1845,7 +1846,7 @@ export default function ComplianceRuleEditPage() {
                               </span>
                             )}
                           </div>
-                          {!block.skipped && block.conditions.map((cond, ci) => (
+                          {!block.skipped && block.conditions?.map((cond: any, ci: number) => (
                             <div key={ci} className="border-t border-slate-100 dark:border-slate-800 px-3 py-1.5 flex items-center gap-2">
                               <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cond.result ? "bg-emerald-500" : "bg-red-500"}`} />
                               <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300">
@@ -1860,6 +1861,12 @@ export default function ComplianceRuleEditPage() {
                               </span>
                             </div>
                           ))}
+                          {/* Nested children blocks */}
+                          {block.children && block.children.length > 0 && (
+                            <div className="border-t border-slate-200 dark:border-slate-700 pl-4 pr-2 py-2 space-y-2 bg-slate-50/50 dark:bg-slate-800/30 border-l-2 border-l-blue-300 dark:border-l-blue-600 ml-2 mr-2 mb-2 mt-1 rounded">
+                              {renderBlockTrace(block.children, depth + 1)}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </>
@@ -1867,6 +1874,28 @@ export default function ComplianceRuleEditPage() {
 
                   return (
                     <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+                      {/* Source fields collected from data sources */}
+                      {dbg.fields && (
+                        <div>
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">{t("compliance.sourceFields")}</h4>
+                          <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                              {Object.entries(dbg.fields as Record<string, unknown>)
+                                .filter(([k]) => !k.endsWith(".$rows") && !k.startsWith("_"))
+                                .map(([key, val]) => (
+                                  <div key={key} className="flex items-center gap-2 px-3 py-1 text-[11px]">
+                                    <span className="font-mono font-medium text-slate-600 dark:text-slate-300 min-w-0 shrink-0">{key}</span>
+                                    <span className="text-slate-300 dark:text-slate-600">=</span>
+                                    <span className="font-mono text-slate-500 dark:text-slate-400 truncate">
+                                      {val === null ? <span className="italic text-slate-400">null</span> : typeof val === "boolean" ? String(val) : String(val).length > 120 ? String(val).slice(0, 120) + "…" : String(val)}
+                                    </span>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       <h4 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">{t("compliance.debugTrace")}</h4>
 
                       {isMultiRow ? (

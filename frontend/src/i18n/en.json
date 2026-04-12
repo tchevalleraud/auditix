@@ -1344,6 +1344,7 @@
     "multiRowNo": "Single row",
     "debug": "Debug evaluation",
     "debugTrace": "Debug trace",
+    "sourceFields": "Data source fields",
     "allRows": "all rows",
     "rows": "rows",
     "evaluateCompliance": "Evaluate compliance",

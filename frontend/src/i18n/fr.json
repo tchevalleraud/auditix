@@ -1318,6 +1318,7 @@
     "multiRowNo": "Ligne unique",
     "debug": "Evaluation debug",
     "debugTrace": "Trace de debug",
+    "sourceFields": "Champs des sources de données",
     "allRows": "toutes les lignes",
     "rows": "lignes",
     "evaluateCompliance": "Evaluer la conformite",
