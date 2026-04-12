@@ -87,7 +87,7 @@ services:
       <<: *worker-env
       WORKER_SERVICE_NAME: worker-collector
     deploy:
-      replicas: ${WORKER_COLLECTOR_REPLICAS:-2}
+      replicas: ${WORKER_COLLECTOR_REPLICAS:-6}
 
   worker-generator:
     <<: *worker
@@ -106,6 +106,24 @@ services:
       WORKER_SERVICE_NAME: worker-compliance
     deploy:
       replicas: ${WORKER_COMPLIANCE_REPLICAS:-2}
+
+  worker-vulnerability:
+    <<: *worker
+    command: php bin/console messenger:consume vulnerability --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-vulnerability
+    deploy:
+      replicas: ${WORKER_VULNERABILITY_REPLICAS:-1}
+
+  worker-system-update:
+    <<: *worker
+    command: php bin/console messenger:consume system_update --time-limit=3600 --memory-limit=256M
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-system-update
+    deploy:
+      replicas: ${WORKER_SYSTEM_UPDATE_REPLICAS:-1}
 
   worker-cleanup:
     <<: *worker

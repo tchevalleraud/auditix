@@ -19,9 +19,13 @@ interface NodeDetail {
   ipAddress: string;
   hostname: string | null;
   score: string | null;
+  complianceScore: string | null;
+  vulnerabilityScore: string | null;
+  systemUpdateScore: string | null;
   policy: string;
   discoveredModel: string | null;
   discoveredVersion: string | null;
+  productModel: string | null;
   complianceEvaluating: string | null;
   isReachable: boolean | null;
   lastPingAt: string | null;
@@ -66,7 +70,7 @@ interface SnmpMonitoringResponse {
   oidConfig: { category: string; oid: string }[];
 }
 
-type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance" | "monitoring";
+type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance" | "monitoring" | "vulnerabilities" | "system-updates";
 
 interface ComplianceResultEntry {
   ruleId: number;
@@ -168,6 +172,8 @@ export default function NodeDetailPage() {
   // Compliance state
   const [complianceData, setComplianceData] = useState<ComplianceData | null>(null);
   const [complianceLoading, setComplianceLoading] = useState(false);
+  const [vulnData, setVulnData] = useState<{ vulnerabilityScore: string | null; cves: any[]; stats: { total: number; bySeverity: Record<string, number> } } | null>(null);
+  const [vulnLoading, setVulnLoading] = useState(false);
   const [complianceEvaluating, setComplianceEvaluating] = useState(false);
   const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
   const [scoreCalcOpen, setScoreCalcOpen] = useState(false);
@@ -302,6 +308,13 @@ export default function NodeDetailPage() {
     setComplianceLoading(false);
   }, [nodeId]);
 
+  const loadVulnerabilities = useCallback(async () => {
+    setVulnLoading(true);
+    const res = await fetch(`/api/nodes/${nodeId}/vulnerabilities`);
+    if (res.ok) setVulnData(await res.json());
+    setVulnLoading(false);
+  }, [nodeId]);
+
   // Always load collections on mount (for tab spinner), then reload when switching to tab
   useEffect(() => { loadCollections(); }, [loadCollections]);
   useEffect(() => {
@@ -309,8 +322,9 @@ export default function NodeDetailPage() {
     if (tab === "inventory") loadInventory();
     if (tab === "collections") loadCollections();
     if (tab === "compliance") loadCompliance();
+    if (tab === "vulnerabilities") loadVulnerabilities();
     if (tab === "monitoring") loadMonitoring();
-  }, [tab, loadCollections, loadCompliance, loadMonitoring]);
+  }, [tab, loadCollections, loadCompliance, loadVulnerabilities, loadMonitoring]);
 
   // Open collection from query params (e.g. from Collections page)
   const [initialCollectionOpened, setInitialCollectionOpened] = useState(false);
@@ -351,9 +365,24 @@ export default function NodeDetailPage() {
         setComplianceEvaluating(true);
       }
       if (data.event === "compliance.evaluated" && data.nodeId === Number(nodeId)) {
-        setNode((prev) => prev ? { ...prev, score: data.score, complianceEvaluating: null } : prev);
+        setNode((prev) => prev ? {
+          ...prev,
+          score: data.score,
+          complianceScore: data.complianceScore ?? prev.complianceScore,
+          vulnerabilityScore: data.vulnerabilityScore ?? prev.vulnerabilityScore,
+          complianceEvaluating: null,
+        } : prev);
         setComplianceEvaluating(false);
         loadCompliance();
+      }
+      if (data.event === "vulnerability.score" && data.nodeId === Number(nodeId)) {
+        setNode((prev) => prev ? {
+          ...prev,
+          score: data.score,
+          complianceScore: data.complianceScore ?? prev.complianceScore,
+          vulnerabilityScore: data.vulnerabilityScore ?? prev.vulnerabilityScore,
+          systemUpdateScore: data.systemUpdateScore ?? prev.systemUpdateScore,
+        } : prev);
       }
       if (data.event === "snmp.polled" && data.nodeId === Number(nodeId)) {
         loadMonitoring(true);
@@ -515,6 +544,8 @@ export default function NodeDetailPage() {
     { key: "summary", label: t("nodes.tabSummary") },
     ...(current?.monitoringEnabled ? [{ key: "monitoring" as TabKey, label: t("nodes.tabMonitoring") }] : []),
     { key: "compliance", label: t("compliance.title") },
+    { key: "vulnerabilities", label: t("vulnerabilities.title") },
+    { key: "system-updates", label: t("systemUpdates.title") },
     { key: "inventory", label: t("nodes.tabInventory") },
     { key: "collections", label: t("nodes.tabCollections") },
   ];
@@ -733,7 +764,9 @@ export default function NodeDetailPage() {
         const pingLoss = pingPts.length > 0 ? ((pingPts.filter((p) => p.value === 0).length / pingPts.length) * 100) : null;
         const tempVal = lastVal("temperature");
         const diskVal = lastVal("disk");
-        const compScore = complianceData?.score ?? node.score;
+        const globalScore = node.score;
+        const compScore = node.complianceScore ?? null;
+        const vulnScore = node.vulnerabilityScore;
         const compPolicies = complianceData?.policies ?? [];
         const totalCompliant = compPolicies.reduce((s, p) => s + (p.stats.compliant ?? 0), 0);
         const totalNonCompliant = compPolicies.reduce((s, p) => s + (p.stats.non_compliant ?? 0), 0);
@@ -750,16 +783,16 @@ export default function NodeDetailPage() {
 
               {/* 1. Main score badge */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col w-28">
-                {compScore ? (
+                {globalScore ? (
                   <>
-                    <div className="flex-1 flex flex-col items-center justify-center py-3" style={{ backgroundColor: gradeColors[compScore] ?? "#94a3b8" }}>
-                      <span className="text-5xl font-black text-white drop-shadow-sm">{compScore}</span>
+                    <div className="flex-1 flex flex-col items-center justify-center py-3" style={{ backgroundColor: gradeColors[globalScore] ?? "#94a3b8" }}>
+                      <span className="text-5xl font-black text-white drop-shadow-sm">{globalScore}</span>
                     </div>
                     <div className="flex">
                       {grades.map((g) => (
                         <div key={g} className="flex-1 flex items-center justify-center py-1 text-[10px] font-bold"
-                          style={{ backgroundColor: g === compScore ? gradeColors[compScore] : undefined, color: g === compScore ? "#fff" : "#94a3b8" }}>
-                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm ${g === compScore ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"}`}>{g}</span>
+                          style={{ backgroundColor: g === globalScore ? gradeColors[globalScore] : undefined, color: g === globalScore ? "#fff" : "#94a3b8" }}>
+                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm ${g === globalScore ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"}`}>{g}</span>
                         </div>
                       ))}
                     </div>
@@ -775,8 +808,8 @@ export default function NodeDetailPage() {
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-4 flex flex-col justify-center gap-3 w-52">
                 {[
                   { label: t("compliance.title"), score: compScore, color: gradeColors[compScore ?? ""] },
-                  { label: t("nodes.summaryVulnerabilities"), score: null, color: undefined },
-                  { label: t("nodes.summarySystemUpdates"), score: null, color: undefined },
+                  { label: t("vulnerabilities.title"), score: vulnScore, color: gradeColors[vulnScore ?? ""] },
+                  { label: t("nodes.summarySystemUpdates"), score: node.systemUpdateScore, color: gradeColors[node.systemUpdateScore ?? ""] },
                 ].map((item, i) => (
                   <div key={i} className="flex items-center gap-2.5">
                     <span
@@ -801,7 +834,7 @@ export default function NodeDetailPage() {
                     <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
                       <div
                         className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${compliancePercent}%`, backgroundColor: gradeColors[compScore ?? ""] ?? "#94a3b8" }}
+                        style={{ width: `${compliancePercent}%`, backgroundColor: gradeColors[compScore ?? ""] || "#94a3b8" }}
                       />
                     </div>
                     <div className="flex items-center gap-4 mt-2">
@@ -847,6 +880,7 @@ export default function NodeDetailPage() {
                     [t("nodes.colProfile"), node.profile?.name],
                     [t("nodes.summaryVersion"), node.discoveredVersion],
                     [t("nodes.summaryDiscoveredModel"), node.discoveredModel],
+                    [t("systemUpdates.productModel"), node.productModel],
                     [t("nodes.summaryPolicy"), node.policy === "enforce" ? t("nodes.policyEnforce") : t("nodes.policyAudit")],
                   ].filter(([, v]) => v).map(([label, value], i) => (
                     <div key={i} className="flex items-center justify-between px-5 py-2.5">
@@ -1490,6 +1524,109 @@ export default function NodeDetailPage() {
             )}
           </div>
         </div>
+      )}
+
+      {tab === "vulnerabilities" && (
+        <div className="space-y-6">
+          {vulnLoading ? (
+            <div className="flex items-center justify-center py-12 text-slate-400">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : !node?.model ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center">
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("vulnerabilities.noModel")}</p>
+            </div>
+          ) : (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 flex items-center gap-3">
+                  <span
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shrink-0"
+                    style={{ backgroundColor: node.vulnerabilityScore ? ({ A: "#22c55e", B: "#84cc16", C: "#eab308", D: "#f97316", E: "#f87171", F: "#dc2626" } as Record<string, string>)[node.vulnerabilityScore] ?? "#94a3b8" : "#94a3b8" }}
+                  >
+                    {node.vulnerabilityScore ?? "—"}
+                  </span>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("vulnerabilities.vulnScore")}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("vulnerabilities.totalCves")}</p>
+                  <p className="mt-1 text-2xl font-bold text-slate-900 dark:text-white">{vulnData?.stats?.total ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("vulnerabilities.criticalCves")}</p>
+                  <p className="mt-1 text-2xl font-bold text-red-600 dark:text-red-400">{vulnData?.stats?.bySeverity?.critical ?? 0}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("vulnerabilities.highCves")}</p>
+                  <p className="mt-1 text-2xl font-bold text-orange-600 dark:text-orange-400">{vulnData?.stats?.bySeverity?.high ?? 0}</p>
+                </div>
+              </div>
+
+              {/* CVE Table */}
+              {vulnData && vulnData.cves.length > 0 ? (
+                <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("vulnerabilities.cveId")}</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("vulnerabilities.description")}</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("vulnerabilities.cvssScore")}</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("vulnerabilities.severity")}</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("vulnerabilities.publishedAt")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vulnData.cves.map((cve: any) => (
+                        <tr key={cve.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <Link
+                              href={`/vulnerabilities/${cve.id}`}
+                              className="font-mono text-sm font-medium text-slate-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400"
+                            >
+                              {cve.cveId}
+                            </Link>
+                          </td>
+                          <td className="px-4 py-3 max-w-md">
+                            <span className="text-slate-600 dark:text-slate-300 line-clamp-2 text-xs">{cve.description || "-"}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`font-mono font-semibold ${
+                              cve.cvssScore >= 9.0 ? "text-red-600 dark:text-red-400" :
+                              cve.cvssScore >= 7.0 ? "text-orange-600 dark:text-orange-400" :
+                              cve.cvssScore >= 4.0 ? "text-amber-600 dark:text-amber-400" :
+                              "text-blue-600 dark:text-blue-400"
+                            }`}>{cve.cvssScore !== null ? cve.cvssScore.toFixed(1) : "-"}</span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                              cve.severity === "critical" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400" :
+                              cve.severity === "high" ? "bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-400" :
+                              cve.severity === "medium" ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-400" :
+                              cve.severity === "low" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400" :
+                              "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400"
+                            }`}>{cve.severity}</span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-500 dark:text-slate-400 text-xs">
+                            {cve.publishedAt ? new Date(cve.publishedAt).toLocaleDateString() : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 text-center">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{t("vulnerabilities.noVulnerabilities")}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === "system-updates" && (
+        <SystemUpdatesTab nodeId={node.id} node={node} t={t} />
       )}
 
       {tab === "settings" && (
@@ -2343,6 +2480,158 @@ function PingChart({ latencyPoints, statusPoints, dateLocale, t, downtimeZones =
             />
           </ComposedChart>
         </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/* ─── System Updates Tab ─── */
+
+function SystemUpdatesTab({ nodeId, node, t }: { nodeId: number; node: NodeDetail; t: (k: string, v?: Record<string, string>) => string }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`/api/nodes/${nodeId}/system-updates`, { credentials: "include" });
+        if (res.ok) setData(await res.json());
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [nodeId]);
+
+  const gradeColors: Record<string, string> = {
+    A: "#10b981", B: "#84cc16", C: "#eab308", D: "#f97316", E: "#f87171", F: "#dc2626",
+  };
+
+  const statusLabels: Record<string, string> = {
+    current: t("systemUpdates.upToDate"),
+    patch_behind: t("systemUpdates.patchBehind"),
+    one_minor_behind: t("systemUpdates.oneMinorBehind"),
+    outdated: t("systemUpdates.outdated"),
+    unknown: t("systemUpdates.unknown"),
+    safe: t("systemUpdates.safe"),
+    approaching: t("systemUpdates.approaching"),
+    imminent: t("systemUpdates.imminent"),
+    past: t("systemUpdates.past"),
+    no_date: "—",
+    no_product_range: t("systemUpdates.noProductRange"),
+  };
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>;
+
+  if (!data?.productRange) {
+    return (
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-8 text-center">
+        <p className="text-sm text-slate-500 dark:text-slate-400">{t("systemUpdates.noProductRange")}</p>
+      </div>
+    );
+  }
+
+  const pr = data.productRange;
+  const details = data.details || {};
+
+  const formatDate = (iso: string | null) => iso ? new Date(iso).toLocaleDateString() : "—";
+
+  const dateFields = [
+    { label: t("systemUpdates.releaseDate"), value: pr.releaseDate, detail: null },
+    { label: t("systemUpdates.endOfSaleDate"), value: pr.endOfSaleDate, detail: details.endOfSale },
+    { label: t("systemUpdates.endOfSupportDate"), value: pr.endOfSupportDate, detail: details.endOfSupport },
+    { label: t("systemUpdates.endOfLifeDate"), value: pr.endOfLifeDate, detail: details.endOfLife },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Score overview */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+        <div className="flex items-start gap-6">
+          {/* Grade badge */}
+          <div className="flex flex-col items-center gap-1">
+            <div
+              className="h-16 w-16 rounded-xl flex items-center justify-center text-2xl font-black text-white"
+              style={{ backgroundColor: gradeColors[data.calculatedGrade] ?? "#94a3b8" }}
+            >
+              {data.calculatedGrade}
+            </div>
+            <span className="text-xs text-slate-400">{t("systemUpdates.score")}</span>
+          </div>
+          {/* Details */}
+          <div className="flex-1 space-y-3">
+            <div>
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{pr.name}</span>
+              <span className="text-xs text-slate-400 ml-2">({pr.pluginSource ?? t("productRanges.manual")})</span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+              <div>
+                <span className="text-xs text-slate-400">{t("systemUpdates.discoveredVersion")}</span>
+                <div className="font-mono text-slate-900 dark:text-slate-100">{node.discoveredVersion ?? "—"}</div>
+              </div>
+              <div>
+                <span className="text-xs text-slate-400">{t("systemUpdates.recommendedVersion")}</span>
+                <div className="font-mono text-slate-900 dark:text-slate-100">{pr.recommendedVersion ?? "—"}</div>
+              </div>
+              <div>
+                <span className="text-xs text-slate-400">{t("systemUpdates.versionStatus")}</span>
+                <div className="text-slate-900 dark:text-slate-100">{statusLabels[details.version?.status] ?? "—"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Lifecycle timeline */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("systemUpdates.lifecycleStatus")}</h3>
+        </div>
+        <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          {dateFields.map((field, i) => (
+            <div key={i} className="flex items-center justify-between px-6 py-3">
+              <span className="text-sm text-slate-600 dark:text-slate-400">{field.label}</span>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-slate-900 dark:text-slate-100">{formatDate(field.value)}</span>
+                {field.detail && (
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    field.detail.status === "past" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
+                    field.detail.status === "imminent" ? "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400" :
+                    field.detail.status === "approaching" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400" :
+                    "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                  }`}>
+                    {statusLabels[field.detail.status] ?? field.detail.status}
+                    {field.detail.months_remaining != null && ` (${Math.round(field.detail.months_remaining)}m)`}
+                    {field.detail.months_ago != null && ` (${Math.round(field.detail.months_ago)}m)`}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Score breakdown */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{t("systemUpdates.score")} — {data.calculatedScore}/100</h3>
+        <div className="space-y-2">
+          {[
+            { label: t("systemUpdates.versionStatus"), pts: details.version?.points, max: 40 },
+            { label: t("systemUpdates.endOfSaleDate"), pts: details.endOfSale?.points, max: 20 },
+            { label: t("systemUpdates.endOfSupportDate"), pts: details.endOfSupport?.points, max: 20 },
+            { label: t("systemUpdates.endOfLifeDate"), pts: details.endOfLife?.points, max: 20 },
+          ].map((item, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <span className="text-xs text-slate-500 w-40 shrink-0">{item.label}</span>
+              <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-slate-500 transition-all"
+                  style={{ width: `${((item.pts ?? 0) / item.max) * 100}%`, backgroundColor: ((item.pts ?? 0) / item.max) >= 0.75 ? "#10b981" : ((item.pts ?? 0) / item.max) >= 0.5 ? "#eab308" : "#f87171" }}
+                />
+              </div>
+              <span className="text-xs text-slate-500 w-14 text-right">{item.pts ?? 0}/{item.max}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

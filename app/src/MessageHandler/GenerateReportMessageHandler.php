@@ -1425,7 +1425,8 @@ class GenerateReportMessageHandler
                 // CLI theme style (shared for all device blocks)
                 $cliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
                 $cliFont = $this->mapFont($cliStyle['font'] ?? 'Consolas');
-                $cliFontSz = $cliFontSize ?? ($cliStyle['size'] ?? 9);
+                $cliHeaderFontSz = (float) ($cliStyle['size'] ?? 9); // header always uses theme size
+                $cliFontSz = $cliFontSize ?? $cliHeaderFontSz;       // content uses block override or theme
                 $cliBg = $this->hexToRgb($cliStyle['bgColor'] ?? '#f1f5f9');
                 $cliText = $this->hexToRgb($cliStyle['textColor'] ?? '#1e293b');
                 $cliBorder = $this->hexToRgb($cliStyle['borderColor'] ?? '#e2e8f0');
@@ -1591,10 +1592,10 @@ class GenerateReportMessageHandler
                 $cliHeaderText = $this->hexToRgb($cliStyle['headerTextColor'] ?? '#ffffff');
 
                 $contentW = $pdf->getPageWidth() - $mLeft - $mRight;
-                $baseLineH = $cliFontSz * 0.3528; // font height in mm
+                $baseLineH = $cliFontSz * 0.3528; // font height in mm (content)
+                $headerBaseLineH = $cliHeaderFontSz * 0.3528; // font height in mm (header)
                 $lineH = $baseLineH * $cliLineSpacing;
-                $lineNumW = $cliShowLineNum ? 10 : 0;
-                $headerH = $cliShowHeader ? ($cliFontSz * 0.3528 + $cliPadding * 2) : 0;
+                $headerH = $cliShowHeader ? ($headerBaseLineH + $cliPadding * 2) : 0;
 
                 // Render one CLI block per entry (one per device, or one for static)
                 foreach ($cliEntries as $entryIdx => $entry) {
@@ -1629,6 +1630,14 @@ class GenerateReportMessageHandler
 
                     if (empty($outputLines)) continue;
 
+                    // Dynamic line number width based on max line number
+                    $maxLineNum = 0;
+                    foreach ($outputLines as $ol) {
+                        if ($ol['type'] === 'line' && $ol['num'] > $maxLineNum) $maxLineNum = $ol['num'];
+                    }
+                    $lineNumDigits = $maxLineNum > 0 ? strlen((string) $maxLineNum) : 1;
+                    $lineNumW = $cliShowLineNum ? ($lineNumDigits * $cliFontSz * 0.2) + 4 : 0;
+
                     // Calculate total box height: header + padding + lines + padding
                     $bodyH = ($cliPadding * 2) + (count($outputLines) * $lineH);
                     $totalBoxH = $headerH + $bodyH;
@@ -1655,27 +1664,27 @@ class GenerateReportMessageHandler
                         // Fill header area on top (no border, top corners rounded)
                         $pdf->SetFillColor($cliHeaderBg[0], $cliHeaderBg[1], $cliHeaderBg[2]);
                         if ($cliBorderRadius > 0) {
-                            $pdf->RoundedRect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, $cliBorderRadius, '1100', 'F');
+                            $pdf->RoundedRect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, $cliBorderRadius, '1001', 'F');
                         } else {
                             $pdf->Rect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, 'F');
                         }
 
                         // Header text: command name on left, device name on right
-                        $pdf->SetFont($cliFont, 'B', $cliFontSz);
+                        $pdf->SetFont($cliFont, 'B', $cliHeaderFontSz);
                         $pdf->SetTextColor($cliHeaderText[0], $cliHeaderText[1], $cliHeaderText[2]);
-                        $headerTextY = $startY + ($headerH - $baseLineH) / 2;
+                        $headerTextY = $startY + ($headerH - $headerBaseLineH) / 2;
                         $headerTextW = $contentW - ($cliPadding * 2);
 
                         // Command name (left)
                         $cmdTitle = !empty($commandName) ? $commandName : '';
                         if (!empty($cmdTitle)) {
-                            $pdf->MultiCell($headerTextW * 0.7, $baseLineH, $cmdTitle, 0, 'L', false, 0, $mLeft + $cliPadding, $headerTextY, true, 0, false, true, 0, 'M');
+                            $pdf->MultiCell($headerTextW * 0.7, $headerBaseLineH, $cmdTitle, 0, 'L', false, 0, $mLeft + $cliPadding, $headerTextY, true, 0, false, true, 0, 'M');
                         }
 
                         // Device name (right)
                         if ($entryLabel) {
-                            $pdf->SetFont($cliFont, '', $cliFontSz - 1);
-                            $pdf->MultiCell($headerTextW * 0.3, $baseLineH, $entryLabel, 0, 'R', false, 0, $mLeft + $cliPadding + $headerTextW * 0.7, $headerTextY, true, 0, false, true, 0, 'M');
+                            $pdf->SetFont($cliFont, '', $cliHeaderFontSz - 1);
+                            $pdf->MultiCell($headerTextW * 0.3, $headerBaseLineH, $entryLabel, 0, 'R', false, 0, $mLeft + $cliPadding + $headerTextW * 0.7, $headerTextY, true, 0, false, true, 0, 'M');
                         }
                     }
 
@@ -1684,11 +1693,16 @@ class GenerateReportMessageHandler
                     $textX = $mLeft + $cliPadding + $lineNumW;
                     $textW = $contentW - ($cliPadding * 2) - $lineNumW;
 
+                    // Clip content to the box area with padding so text doesn't touch the border
+                    $pdf->StartTransform();
+                    $pdf->Rect($mLeft + $cliPadding, $startY, $contentW - ($cliPadding * 2), $totalBoxH, 'CNZ');
+
                     foreach ($outputLines as $ol) {
                         if ($ol['type'] === 'ellipsis') {
                             $pdf->SetFont($cliFont, 'I', $cliFontSz);
                             $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
-                            $pdf->MultiCell($textW, $lineH, '[...]', 0, 'L', false, 0, $textX, $curY, true, 0, false, true, 0, 'M');
+                            $pdf->SetXY($textX, $curY);
+                            $pdf->Cell($textW, $lineH, '[...]', 0, 0, 'L');
                             $curY += $lineH;
                             continue;
                         }
@@ -1743,7 +1757,8 @@ class GenerateReportMessageHandler
                         if ($cliShowLineNum) {
                             $pdf->SetFont($cliFont, '', $cliFontSz);
                             $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
-                            $pdf->MultiCell($lineNumW - 2, $lineH, (string) $lineNum, 0, 'R', false, 0, $mLeft + $cliPadding, $curY, true, 0, false, true, 0, 'M');
+                            $pdf->SetXY($mLeft + $cliPadding, $curY);
+                            $pdf->Cell($lineNumW - 2, $lineH, (string) $lineNum, 0, 0, 'R');
                         }
 
                         // Determine line style from rule
@@ -1793,10 +1808,13 @@ class GenerateReportMessageHandler
                         // Draw text
                         $pdf->SetFont($cliFont, $fontStyle, $cliFontSz);
                         $pdf->SetTextColor($lineTextColor[0], $lineTextColor[1], $lineTextColor[2]);
-                        $pdf->MultiCell($textW, $lineH, $lineText, 0, 'L', false, 0, $textX, $curY, true, 0, false, true, 0, 'M');
+                        $pdf->SetXY($textX, $curY);
+                        $pdf->Cell($textW, $lineH, $lineText, 0, 0, 'L');
 
                         $curY += $lineH;
                     }
+
+                    $pdf->StopTransform();
 
                     // Reset fill color
                     $pdf->SetFillColor($cliBg[0], $cliBg[1], $cliBg[2]);
@@ -1996,8 +2014,11 @@ class GenerateReportMessageHandler
                     $model = $this->em->getRepository(\App\Entity\DeviceModel::class)->find($modelId);
                     if ($model) {
                         $cliFont = 'courier';
-                        $cliSize = 9;
+                        $blockStyle = $block['style'] ?? [];
+                        $cliSize = (float) ($blockStyle['fontSize'] ?? 9);
+                        $titleSize = 9;
                         $lineH = $cliSize * 0.45;
+                        $titleLineH = $titleSize * 0.45;
                         $colW = ($pdf->getPageWidth() - $mLeft - $mRight) / 2;
                         $indent = 10;
 
@@ -2062,73 +2083,128 @@ class GenerateReportMessageHandler
                         }
 
                         // Group lines into blocks (connection script = one block, each command = one block)
-                        $blocks2 = [];
-                        $currentBlock = [];
+                        $cmdBlocks = [];
+                        $currentCmdBlock = [];
                         foreach ($allLines as $line) {
-                            if ($line['type'] === 'title' && !empty($currentBlock)) {
-                                $blocks2[] = $currentBlock;
-                                $currentBlock = [];
+                            if ($line['type'] === 'title' && !empty($currentCmdBlock)) {
+                                $cmdBlocks[] = $currentCmdBlock;
+                                $currentCmdBlock = [];
                             }
-                            $currentBlock[] = $line;
+                            $currentCmdBlock[] = $line;
                         }
-                        if (!empty($currentBlock)) $blocks2[] = $currentBlock;
+                        if (!empty($currentCmdBlock)) $cmdBlocks[] = $currentCmdBlock;
 
                         // Calculate height of each block
-                        $blockHeights = [];
-                        foreach ($blocks2 as $blk) {
+                        $cmdBlockHeights = [];
+                        foreach ($cmdBlocks as $blk) {
                             $h = 0;
                             foreach ($blk as $line) {
-                                if ($line['type'] === 'title') $h += 2; // spacing before title
-                                $h += $lineH + 1;
+                                if ($line['type'] === 'title') {
+                                    $h += 2; // spacing before title
+                                    $h += $titleLineH + 1;
+                                } else {
+                                    $h += $lineH + 1;
+                                }
                             }
-                            $blockHeights[] = $h;
+                            $cmdBlockHeights[] = $h;
                         }
 
-                        // Distribute blocks into two columns without splitting a block
-                        $totalH = array_sum($blockHeights);
-                        $targetH = $totalH / 2;
-                        $col1Blocks = [];
-                        $col2Blocks = [];
-                        $cumH = 0;
-                        $splitDone = false;
-                        foreach ($blocks2 as $bi => $blk) {
-                            if (!$splitDone && $cumH + $blockHeights[$bi] <= $targetH + $blockHeights[$bi] * 0.3) {
-                                $col1Blocks[] = $blk;
-                                $cumH += $blockHeights[$bi];
-                            } else {
-                                $splitDone = true;
-                                $col2Blocks[] = $blk;
-                            }
-                        }
-
-                        // Render columns
+                        // --- Multi-page two-column pagination ---
+                        $pageH = $pdf->getPageHeight();
+                        $fullPageAvailH = $pageH - $mTop - $mBottom;
                         $startY = $pdf->GetY();
+                        $firstPageAvailH = $pageH - $startY - $mBottom;
+
+                        // Build pages: each page has col1 and col2 block lists
+                        $pages = [];
+                        $curPage = ['col1' => [], 'col2' => []];
+                        $col1H = 0.0;
+                        $col2H = 0.0;
+                        $fillingCol = 1;
+                        $curAvailH = $firstPageAvailH;
+
+                        foreach ($cmdBlocks as $bi => $blk) {
+                            $bh = $cmdBlockHeights[$bi];
+
+                            if ($fillingCol === 1) {
+                                if ($col1H + $bh <= $curAvailH) {
+                                    $curPage['col1'][] = $blk;
+                                    $col1H += $bh;
+                                } else {
+                                    // Col1 full, try col2
+                                    $fillingCol = 2;
+                                    if ($col2H + $bh <= $curAvailH) {
+                                        $curPage['col2'][] = $blk;
+                                        $col2H += $bh;
+                                    } else {
+                                        // Both columns full, new page
+                                        $pages[] = $curPage;
+                                        $curPage = ['col1' => [$blk], 'col2' => []];
+                                        $col1H = $bh;
+                                        $col2H = 0.0;
+                                        $curAvailH = $fullPageAvailH;
+                                        $fillingCol = 1;
+                                    }
+                                }
+                            } else {
+                                if ($col2H + $bh <= $curAvailH) {
+                                    $curPage['col2'][] = $blk;
+                                    $col2H += $bh;
+                                } else {
+                                    // Col2 full, new page
+                                    $pages[] = $curPage;
+                                    $curPage = ['col1' => [$blk], 'col2' => []];
+                                    $col1H = $bh;
+                                    $col2H = 0.0;
+                                    $curAvailH = $fullPageAvailH;
+                                    $fillingCol = 1;
+                                }
+                            }
+                        }
+                        if (!empty($curPage['col1']) || !empty($curPage['col2'])) {
+                            $pages[] = $curPage;
+                        }
+
+                        // --- Render pages ---
                         $col1X = $mLeft + $indent;
                         $col2X = $mLeft + $colW;
 
-                        $renderColumn = function (array $colBlocks, float $x, float $startY) use ($pdf, $cliFont, $cliSize, $lineH, $colW, $indent, $bodyRgb): float {
-                            $y = $startY;
+                        $renderColumn = function (array $colBlocks, float $x, float $yStart) use ($pdf, $cliFont, $cliSize, $titleSize, $lineH, $titleLineH, $colW, $indent, $bodyRgb): float {
+                            $y = $yStart;
                             foreach ($colBlocks as $blk) {
                                 foreach ($blk as $line) {
                                     if ($line['type'] === 'title') {
                                         $y += 2;
-                                        $pdf->SetFont($cliFont, 'B', $cliSize);
+                                        $pdf->SetFont($cliFont, 'B', $titleSize);
+                                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                                        $pdf->SetXY($x, $y);
+                                        $pdf->Cell($colW - $indent, $titleLineH, $line['text'], 0, 0, 'L');
+                                        $y += $titleLineH + 1;
                                     } else {
                                         $pdf->SetFont($cliFont, '', $cliSize);
+                                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                                        $pdf->SetXY($x, $y);
+                                        $pdf->Cell($colW - $indent, $lineH, $line['text'], 0, 0, 'L');
+                                        $y += $lineH + 1;
                                     }
-                                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
-                                    $pdf->SetXY($x, $y);
-                                    $pdf->Cell($colW - $indent, $lineH, $line['text'], 0, 0, 'L');
-                                    $y += $lineH + 1;
                                 }
                             }
                             return $y;
                         };
 
-                        $col1EndY = $renderColumn($col1Blocks, $col1X, $startY);
-                        $col2EndY = $renderColumn($col2Blocks, $col2X, $startY);
+                        $isFirstPage = true;
+                        foreach ($pages as $page) {
+                            if (!$isFirstPage) {
+                                $pdf->AddPage();
+                                $startY = $mTop;
+                            }
+                            $isFirstPage = false;
 
-                        $pdf->SetY(max($col1EndY, $col2EndY));
+                            $col1EndY = $renderColumn($page['col1'], $col1X, $startY);
+                            $col2EndY = $renderColumn($page['col2'], $col2X, $startY);
+
+                            $pdf->SetY(max($col1EndY, $col2EndY));
+                        }
                     }
                 }
 
@@ -2148,6 +2224,7 @@ class GenerateReportMessageHandler
                 $pageBreak = !empty($block['pageBreakBefore']);
                 $showMonitoring = !empty($block['showMonitoring']);
                 $showCompliance = !empty($block['showCompliance']);
+                $viewportFrame = $block['viewportFrame'] ?? null;
 
                 if (!$mapId) continue;
 
@@ -2163,7 +2240,7 @@ class GenerateReportMessageHandler
                     $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
                 }
 
-                $svg = $this->renderTopologySvg($map, $topoProto, $showLabels, $showLegend, $showMonitoring, $showCompliance);
+                $svg = $this->renderTopologySvg($map, $topoProto, $showLabels, $showLegend, $showMonitoring, $showCompliance, $viewportFrame);
 
                 // Embed SVG directly via TCPDF
                 $tmpSvg = tempnam(sys_get_temp_dir(), 'topo_') . '.svg';
@@ -2211,7 +2288,7 @@ class GenerateReportMessageHandler
         }
     }
 
-    private function renderTopologySvg(\App\Entity\TopologyMap $map, string $protocol, bool $showLabels, bool $showLegend, bool $showMonitoring = false, bool $showCompliance = false): string
+    private function renderTopologySvg(\App\Entity\TopologyMap $map, string $protocol, bool $showLabels, bool $showLegend, bool $showMonitoring = false, bool $showCompliance = false, ?array $viewportFrame = null): string
     {
         $devices = $this->em->getRepository(\App\Entity\TopologyDevice::class)->findBy(['map' => $map]);
         $linkQb = $this->em->createQueryBuilder()
@@ -2243,7 +2320,6 @@ class GenerateReportMessageHandler
 
         // Build device position map
         $devicePositions = [];
-        $minX = PHP_INT_MAX; $minY = PHP_INT_MAX; $maxX = PHP_INT_MIN; $maxY = PHP_INT_MIN;
 
         foreach ($devices as $d) {
             $key = (string) $d->getId();
@@ -2252,30 +2328,44 @@ class GenerateReportMessageHandler
             $x = (float) $pos['x'];
             $y = (float) $pos['y'];
             $devicePositions[$key] = ['x' => $x, 'y' => $y, 'device' => $d];
-            $minX = min($minX, $x - $nodeW);
-            $minY = min($minY, $y - $nodeH);
-            $maxX = max($maxX, $x + $nodeW);
-            $maxY = max($maxY, $y + $nodeH);
-        }
-
-        // Include zones in bounding box
-        foreach ($zones as $z) {
-            $zPos = $layout[$z['id']] ?? $z['position'] ?? null;
-            if (!$zPos) continue;
-            $zx = (float) $zPos['x']; $zy = (float) $zPos['y'];
-            $zw = (float) ($z['width'] ?? 200) / 2; $zh = (float) ($z['height'] ?? 150) / 2;
-            $minX = min($minX, $zx - $zw); $minY = min($minY, $zy - $zh);
-            $maxX = max($maxX, $zx + $zw); $maxY = max($maxY, $zy + $zh);
         }
 
         if (empty($devicePositions)) {
             return '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><text x="200" y="50" text-anchor="middle" fill="#94a3b8" font-size="14">No positioned devices</text></svg>';
         }
 
-        $pad = 60;
-        $minX -= $pad; $minY -= $pad; $maxX += $pad; $maxY += $pad;
-        $vw = $maxX - $minX;
-        $vh = $maxY - $minY;
+        // Determine viewport bounds
+        if ($viewportFrame !== null) {
+            // Use user-defined viewport frame
+            $minX = (float) $viewportFrame['x'];
+            $minY = (float) $viewportFrame['y'];
+            $vw = (float) $viewportFrame['width'];
+            $vh = (float) $viewportFrame['height'];
+        } else {
+            // Auto-fit: compute from all device positions + zones + padding
+            $minX = PHP_INT_MAX; $minY = PHP_INT_MAX; $maxX = PHP_INT_MIN; $maxY = PHP_INT_MIN;
+
+            foreach ($devicePositions as $dp) {
+                $minX = min($minX, $dp['x'] - $nodeW);
+                $minY = min($minY, $dp['y'] - $nodeH);
+                $maxX = max($maxX, $dp['x'] + $nodeW);
+                $maxY = max($maxY, $dp['y'] + $nodeH);
+            }
+
+            foreach ($zones as $z) {
+                $zPos = $layout[$z['id']] ?? $z['position'] ?? null;
+                if (!$zPos) continue;
+                $zx = (float) $zPos['x']; $zy = (float) $zPos['y'];
+                $zw = (float) ($z['width'] ?? 200) / 2; $zh = (float) ($z['height'] ?? 150) / 2;
+                $minX = min($minX, $zx - $zw); $minY = min($minY, $zy - $zh);
+                $maxX = max($maxX, $zx + $zw); $maxY = max($maxY, $zy + $zh);
+            }
+
+            $pad = 60;
+            $minX -= $pad; $minY -= $pad; $maxX += $pad; $maxY += $pad;
+            $vw = $maxX - $minX;
+            $vh = $maxY - $minY;
+        }
         $svgW = 800;
         $svgH = $svgW * ($vh / max($vw, 1));
 
@@ -2291,7 +2381,14 @@ class GenerateReportMessageHandler
         unset($dp);
 
         $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' . $svgW . '" height="' . round($svgH) . '" viewBox="0 0 ' . round($vw) . ' ' . round($vh) . '">';
+        $svg .= '<defs><clipPath id="vp"><rect x="0" y="0" width="' . round($vw) . '" height="' . round($vh) . '"/></clipPath></defs>';
         $svg .= '<rect width="' . round($vw) . '" height="' . round($vh) . '" fill="white"/>';
+        $svg .= '<g clip-path="url(#vp)">';
+
+        // Helper: check if a rectangle overlaps the viewport (all in offset coordinates)
+        $inView = function (float $rx, float $ry, float $rw, float $rh) use ($vw, $vh): bool {
+            return $rx + $rw > 0 && $rx < $vw && $ry + $rh > 0 && $ry < $vh;
+        };
 
         // Zones (background)
         usort($zones, fn($a, $b) => ($a['layer'] ?? 0) - ($b['layer'] ?? 0));
@@ -2300,6 +2397,7 @@ class GenerateReportMessageHandler
             if (!$zPos) continue;
             $zx = (float) $zPos['x'] + $ox; $zy = (float) $zPos['y'] + $oy;
             $zw = (float) ($z['width'] ?? 200); $zh = (float) ($z['height'] ?? 150);
+            if (!$inView($zx - $zw / 2, $zy - $zh / 2, $zw, $zh)) continue;
             $style = $z['style'] ?? [];
             $bg = $style['bgColor'] ?? '#dbeafe';
             $bgOp = (float) ($style['bgOpacity'] ?? 0.3);
@@ -2338,6 +2436,10 @@ class GenerateReportMessageHandler
                 $tKey = (string) $l->getTargetDevice()->getId();
                 $sp = $devicePositions[$sKey];
                 $tp = $devicePositions[$tKey];
+                // Skip edge if both endpoints are completely outside the viewport
+                $sIn = $sp['x'] >= 0 && $sp['x'] <= $vw && $sp['y'] >= 0 && $sp['y'] <= $vh;
+                $tIn = $tp['x'] >= 0 && $tp['x'] <= $vw && $tp['y'] >= 0 && $tp['y'] <= $vh;
+                if (!$sIn && !$tIn) continue;
                 $color = $edgeColor ?: ($protocolColors[$l->getProtocol()] ?? '#94a3b8');
 
                 $mx = ($sp['x'] + $tp['x']) / 2;
@@ -2363,23 +2465,41 @@ class GenerateReportMessageHandler
                     $my = $cy;
                 }
 
-                // Port labels on edge — rotated to follow link direction
+                // Port labels — placed at 30% from source along the link path
                 if ($showLabels) {
                     $ports = array_filter([$l->getSourcePort(), $l->getTargetPort()]);
                     if ($ports) {
-                        $edx = $tp['x'] - $sp['x'];
-                        $edy = $tp['y'] - $sp['y'];
-                        $angleDeg = rad2deg(atan2($edy, $edx));
+                        // Position at 30% along the link (not midpoint) to avoid overlap
+                        $t = 0.5;
+                        if ($count > 1) {
+                            // For bezier curves: Q(t) = (1-t)²·S + 2(1-t)t·C + t²·T
+                            $t1 = 1 - $t;
+                            $lblX = $t1 * $t1 * $sp['x'] + 2 * $t1 * $t * $mx + $t * $t * $tp['x'];
+                            $lblY = $t1 * $t1 * $sp['y'] + 2 * $t1 * $t * $my + $t * $t * $tp['y'];
+                            // Tangent at t for rotation
+                            $tanX = 2 * $t1 * ($mx - $sp['x']) + 2 * $t * ($tp['x'] - $mx);
+                            $tanY = 2 * $t1 * ($my - $sp['y']) + 2 * $t * ($tp['y'] - $my);
+                        } else {
+                            // Straight line: lerp at 30%
+                            $lblX = $sp['x'] + $t * ($tp['x'] - $sp['x']);
+                            $lblY = $sp['y'] + $t * ($tp['y'] - $sp['y']);
+                            $tanX = $tp['x'] - $sp['x'];
+                            $tanY = $tp['y'] - $sp['y'];
+                        }
+                        $angleDeg = rad2deg(atan2($tanY, $tanX));
                         if ($angleDeg > 90) $angleDeg -= 180;
                         if ($angleDeg < -90) $angleDeg += 180;
-                        // Small perpendicular offset so label sits just above the line
-                        $elen = max(sqrt($edx * $edx + $edy * $edy), 1);
-                        $pnx = -$edy / $elen;
-                        $pny = $edx / $elen;
-                        $lbx = round($mx + $pnx * 5, 1);
-                        $lby = round($my + $pny * 5, 1);
-                        // Manual baseline offset (+2.5 ≈ half of font-size 7)
-                        $svg .= '<text x="' . $lbx . '" y="' . round($lby + 2.5, 1) . '" text-anchor="middle" fill="#64748b" font-size="7" transform="rotate(' . round($angleDeg, 1) . ',' . $lbx . ',' . $lby . ')">' . htmlspecialchars(implode(' — ', $ports)) . '</text>';
+                        // Perpendicular — always push label "above" the line (toward negative Y)
+                        $tanLen = max(sqrt($tanX * $tanX + $tanY * $tanY), 1);
+                        $pnx = -$tanY / $tanLen;
+                        $pny = $tanX / $tanLen;
+                        if ($pny > 0 || ($pny == 0 && $pnx > 0)) {
+                            $pnx = -$pnx;
+                            $pny = -$pny;
+                        }
+                        $lbx = round($lblX + $pnx * 6, 1);
+                        $lby = round($lblY + $pny * 6, 1);
+                        $svg .= '<text x="' . $lbx . '" y="' . $lby . '" text-anchor="middle" fill="#64748b" font-size="7" transform="rotate(' . round($angleDeg, 1) . ',' . $lbx . ',' . $lby . ')">' . htmlspecialchars(implode(' — ', $ports)) . '</text>';
                     }
                 }
             }
@@ -2398,6 +2518,9 @@ class GenerateReportMessageHandler
             $shape = $so['shape'] ?? $nodeShape;
             $w = (float) ($so['width'] ?? $nodeW);
             $h = (float) ($so['height'] ?? $nodeH);
+
+            // Skip node if completely outside the viewport
+            if (!$inView($x - $w / 2, $y - $h / 2, $w, $h)) continue;
 
             if ($d->isExternal()) {
                 $border = '#94a3b8';
@@ -2477,7 +2600,7 @@ class GenerateReportMessageHandler
             }
         }
 
-        $svg .= '</svg>';
+        $svg .= '</g></svg>';
         return $svg;
     }
 

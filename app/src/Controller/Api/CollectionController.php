@@ -141,6 +141,35 @@ class CollectionController extends AbstractController
         ], Response::HTTP_CREATED);
     }
 
+    #[Route('/extract', methods: ['POST'])]
+    public function extract(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $nodeIds = $data['nodeIds'] ?? [];
+
+        if (empty($nodeIds)) {
+            return $this->json(['error' => 'No nodes specified'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $nodes = $em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
+        $dispatched = 0;
+
+        foreach ($nodes as $node) {
+            // Find the latest completed collection with 'latest' tag
+            $row = $em->getConnection()->fetchAssociative(
+                'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1',
+                ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED, 'tag' => '%"latest"%']
+            );
+
+            if ($row) {
+                $this->bus->dispatch(new ProcessInventoryMessage((int) $row['id']));
+                $dispatched++;
+            }
+        }
+
+        return $this->json(['dispatched' => $dispatched]);
+    }
+
     #[Route('/by-node/{id}', methods: ['GET'])]
     public function byNode(Node $node, EntityManagerInterface $em): JsonResponse
     {

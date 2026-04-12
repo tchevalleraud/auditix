@@ -46,8 +46,20 @@ class Node
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $discoveredVersion = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $productModel = null;
+
     #[ORM\Column(length: 1, nullable: true)]
-    private ?string $score = null; // A, B, C, D, E, F
+    private ?string $score = null; // A, B, C, D, E, F (combined global grade)
+
+    #[ORM\Column(length: 1, nullable: true)]
+    private ?string $complianceScore = null; // A, B, C, D, E, F
+
+    #[ORM\Column(length: 1, nullable: true)]
+    private ?string $vulnerabilityScore = null; // A, B, C, D, E, F
+
+    #[ORM\Column(length: 1, nullable: true)]
+    private ?string $systemUpdateScore = null; // A, B, C, D, E, F
 
     #[ORM\Column(length: 10)]
     private string $policy = 'audit'; // audit, enforce
@@ -93,8 +105,16 @@ class Node
     public function setDiscoveredModel(?string $v): static { $this->discoveredModel = $v; return $this; }
     public function getDiscoveredVersion(): ?string { return $this->discoveredVersion; }
     public function setDiscoveredVersion(?string $v): static { $this->discoveredVersion = $v; return $this; }
+    public function getProductModel(): ?string { return $this->productModel; }
+    public function setProductModel(?string $v): static { $this->productModel = $v; return $this; }
     public function getScore(): ?string { return $this->score; }
     public function setScore(?string $v): static { $this->score = $v; return $this; }
+    public function getComplianceScore(): ?string { return $this->complianceScore; }
+    public function setComplianceScore(?string $v): static { $this->complianceScore = $v; return $this; }
+    public function getVulnerabilityScore(): ?string { return $this->vulnerabilityScore; }
+    public function setVulnerabilityScore(?string $v): static { $this->vulnerabilityScore = $v; return $this; }
+    public function getSystemUpdateScore(): ?string { return $this->systemUpdateScore; }
+    public function setSystemUpdateScore(?string $v): static { $this->systemUpdateScore = $v; return $this; }
     public function getPolicy(): string { return $this->policy; }
     public function setPolicy(string $v): static { $this->policy = $v; return $this; }
     public function getComplianceEvaluating(): ?string { return $this->complianceEvaluating; }

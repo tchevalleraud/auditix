@@ -29,6 +29,9 @@ import {
   ChevronDown,
   FolderTree,
   Network,
+  ShieldAlert,
+  RefreshCw,
+  Layers,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -77,6 +80,18 @@ const contextNav: NavCategory[] = [
     items: [
       { key: "sidebar.compliancePolicies", href: "/compliance/policies", icon: BookOpen },
       { key: "sidebar.complianceRules", href: "/compliance/rules", icon: ClipboardCheck },
+    ],
+  },
+  {
+    label: "sidebar.catVulnerabilities",
+    items: [
+      { key: "sidebar.vulnerabilities", href: "/vulnerabilities", icon: ShieldAlert },
+    ],
+  },
+  {
+    label: "sidebar.catSystemUpdates",
+    items: [
+      { key: "sidebar.productRanges", href: "/product-ranges", icon: Layers },
     ],
   },
   {

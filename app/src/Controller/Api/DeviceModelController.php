@@ -31,6 +31,7 @@ class DeviceModelController extends AbstractController
             ],
             'connectionScript' => $m->getConnectionScript(),
             'sendCtrlChar' => $m->getSendCtrlChar(),
+            'nvdKeyword' => $m->getNvdKeyword(),
             'createdAt' => $m->getCreatedAt()->format('c'),
         ];
     }
@@ -82,6 +83,7 @@ class DeviceModelController extends AbstractController
         $model->setDescription($data['description'] ?? null);
         $model->setConnectionScript($data['connectionScript'] ?? null);
         $model->setSendCtrlChar($data['sendCtrlChar'] ?? null);
+        $model->setNvdKeyword($data['nvdKeyword'] ?? null);
         $model->setManufacturer($manufacturer);
         $model->setContext($context);
 
@@ -153,6 +155,9 @@ class DeviceModelController extends AbstractController
         $model->setConnectionScript($data['connectionScript'] ?? null);
         if (array_key_exists('sendCtrlChar', $data)) {
             $model->setSendCtrlChar($data['sendCtrlChar'] ?: null);
+        }
+        if (array_key_exists('nvdKeyword', $data)) {
+            $model->setNvdKeyword($data['nvdKeyword'] ?: null);
         }
         $model->setManufacturer($manufacturer);
 

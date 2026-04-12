@@ -385,6 +385,7 @@ class CollectNodeMessageHandler
                 if (!$ext->isMultiline() && $ext->getNodeField()) {
                     $value = $this->extractNodeFieldValue($ext, $text);
                     if ($value !== null) {
+                        $value = $this->applyTranslation($rule, $ext, $value);
                         $nodeFieldUpdates[$ext->getNodeField()] = $value;
                     }
                 }
@@ -397,6 +398,7 @@ class CollectNodeMessageHandler
                 'hostname' => $node->setHostname($value),
                 'discoveredModel' => $node->setDiscoveredModel($value),
                 'discoveredVersion' => $node->setDiscoveredVersion($value),
+                'productModel' => $node->setProductModel($value),
                 default => null,
             };
         }
@@ -599,10 +601,18 @@ class CollectNodeMessageHandler
 
             // Resolve values
             if ($hasValueMap) {
+                $seenLabels = [];
                 foreach ($ext->getValueMap() as $vm) {
                     $label = $vm['label'] ?? 'Value';
                     $group = $vm['group'] ?? 1;
                     $value = $m[$group] ?? '';
+                    $value = $this->applyTranslation($rule, $ext, $value);
+
+                    // Deduplicate labels within the same value_map
+                    if (isset($seenLabels[$label])) {
+                        $seenLabels[$label]->setValue($value);
+                        continue;
+                    }
 
                     $entry = new NodeInventoryEntry();
                     $entry->setNode($node);
@@ -615,12 +625,14 @@ class CollectNodeMessageHandler
                     $entry->setCollection($collection);
                     $entry->setUpdatedAt(new \DateTimeImmutable());
                     $this->em->persist($entry);
+                    $seenLabels[$label] = $entry;
                 }
             } else {
                 $vg = $ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT
                     ? ($ext->getValueGroup() ?? 2)
                     : ($ext->getValueGroup() ?? 1);
                 $value = $m[$vg] ?? $m[1] ?? $m[0] ?? '';
+                $value = $this->applyTranslation($rule, $ext, $value);
 
                 $entry = new NodeInventoryEntry();
                 $entry->setNode($node);
@@ -651,6 +663,92 @@ class CollectNodeMessageHandler
         }
 
         return null;
+    }
+
+    /**
+     * Apply translations defined on the rule to transform an extracted value.
+     */
+    private function applyTranslation(CollectionRule $rule, CollectionRuleExtract $ext, string $value): string
+    {
+        $translations = $rule->getTranslations();
+        if (!$translations) return $value;
+
+        // Find translation entry for this extract
+        $translation = null;
+        foreach ($translations as $t) {
+            if (($t['extractId'] ?? null) === $ext->getId()) {
+                $translation = $t;
+                break;
+            }
+        }
+        if (!$translation || empty($translation['conditionTree']['blocks'])) return $value;
+
+        // Evaluate condition tree blocks (if / else-if / else)
+        $result = $this->evaluateTranslationBlocks($translation['conditionTree']['blocks'], $value);
+
+        return $result ?? $value;
+    }
+
+    private function evaluateTranslationBlocks(array $blocks, string $value): ?string
+    {
+        foreach ($blocks as $block) {
+            $type = $block['type'] ?? 'if';
+
+            if ($type === 'else') {
+                $resultValue = $block['result']['value'] ?? null;
+                return $resultValue ?? $value;
+            }
+
+            // Evaluate conditions
+            $logic = $block['logic'] ?? 'and';
+            $conditions = $block['conditions'] ?? [];
+            $matched = $this->evaluateTranslationConditions($conditions, $value, $logic);
+
+            if ($matched) {
+                // Check for nested children
+                if (!empty($block['children'])) {
+                    return $this->evaluateTranslationBlocks($block['children'], $value);
+                }
+                $resultValue = $block['result']['value'] ?? null;
+                return $resultValue ?? $value;
+            }
+        }
+
+        return null; // No block matched
+    }
+
+    private function evaluateTranslationConditions(array $conditions, string $value, string $logic): bool
+    {
+        if (empty($conditions)) return true;
+
+        foreach ($conditions as $cond) {
+            $operator = $cond['operator'] ?? 'equals';
+            $compareValue = $cond['value'] ?? '';
+            $result = $this->compareTranslationValue($value, $operator, $compareValue);
+
+            if ($logic === 'or' && $result) return true;
+            if ($logic === 'and' && !$result) return false;
+        }
+
+        return $logic === 'and';
+    }
+
+    private function compareTranslationValue(string $value, string $operator, ?string $compareValue): bool
+    {
+        return match ($operator) {
+            'equals' => $value === ($compareValue ?? ''),
+            'not_equals' => $value !== ($compareValue ?? ''),
+            'contains' => str_contains($value, $compareValue ?? ''),
+            'not_contains' => !str_contains($value, $compareValue ?? ''),
+            'matches' => (bool) @preg_match('/' . ($compareValue ?? '') . '/', $value),
+            'greater_than' => (float) $value > (float) ($compareValue ?? '0'),
+            'less_than' => (float) $value < (float) ($compareValue ?? '0'),
+            'exists' => $value !== '',
+            'not_exists' => $value === '',
+            'is_empty' => $value === '',
+            'is_not_empty' => $value !== '',
+            default => false,
+        };
     }
 
     private function resolveRules($model): array

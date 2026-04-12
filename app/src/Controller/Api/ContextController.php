@@ -29,6 +29,15 @@ class ContextController extends AbstractController
             'isDefault' => $c->isDefault(),
             'publicEnabled' => $c->isPublicEnabled(),
             'publicToken' => $c->getPublicToken(),
+            'vulnerabilityEnabled' => $c->isVulnerabilityEnabled(),
+            'nvdApiKey' => $c->getNvdApiKey() ? '••••••••' : null,
+            'vulnerabilitySyncIntervalHours' => $c->getVulnerabilitySyncIntervalHours(),
+            'vulnerabilityScoreWeight' => $c->getVulnerabilityScoreWeight(),
+            'complianceScoreWeight' => $c->getComplianceScoreWeight(),
+            'systemUpdateEnabled' => $c->isSystemUpdateEnabled(),
+            'systemUpdateScoreWeight' => $c->getSystemUpdateScoreWeight(),
+            'lastVulnerabilitySyncAt' => $c->getLastVulnerabilitySyncAt()?->format('c'),
+            'lastVulnerabilitySyncStatus' => $c->getLastVulnerabilitySyncStatus(),
             'userCount' => $c->getUsers()->count(),
             'createdAt' => $c->getCreatedAt()->format('c'),
         ];
@@ -119,6 +128,35 @@ class ContextController extends AbstractController
         }
         if (isset($data['regenerateToken']) && $data['regenerateToken']) {
             $context->generatePublicToken();
+        }
+        if (array_key_exists('vulnerabilityEnabled', $data)) {
+            $context->setVulnerabilityEnabled((bool) $data['vulnerabilityEnabled']);
+        }
+        if (array_key_exists('nvdApiKey', $data) && $data['nvdApiKey'] !== '••••••••') {
+            $context->setNvdApiKey($data['nvdApiKey'] ?: null);
+        }
+        if (array_key_exists('vulnerabilitySyncIntervalHours', $data)) {
+            $context->setVulnerabilitySyncIntervalHours((int) $data['vulnerabilitySyncIntervalHours']);
+        }
+        if (array_key_exists('systemUpdateEnabled', $data)) {
+            $context->setSystemUpdateEnabled((bool) $data['systemUpdateEnabled']);
+        }
+        if (array_key_exists('vulnerabilityScoreWeight', $data) || array_key_exists('systemUpdateScoreWeight', $data) || array_key_exists('complianceScoreWeight', $data)) {
+            $vulnW = max(0, min(1, (float) ($data['vulnerabilityScoreWeight'] ?? $context->getVulnerabilityScoreWeight())));
+            $suW = max(0, min(1, (float) ($data['systemUpdateScoreWeight'] ?? $context->getSystemUpdateScoreWeight())));
+            $compW = max(0, min(1, (float) ($data['complianceScoreWeight'] ?? $context->getComplianceScoreWeight())));
+
+            // Normalize so all weights sum to 1.0
+            $total = $compW + $vulnW + $suW;
+            if ($total > 0) {
+                $compW = round($compW / $total, 2);
+                $vulnW = round($vulnW / $total, 2);
+                $suW = round(1.0 - $compW - $vulnW, 2);
+            }
+
+            $context->setComplianceScoreWeight($compW);
+            $context->setVulnerabilityScoreWeight($vulnW);
+            $context->setSystemUpdateScoreWeight($suW);
         }
 
         $em->flush();

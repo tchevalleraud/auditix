@@ -52,6 +52,7 @@ import SubscriptExt from "@tiptap/extension-subscript";
 import SuperscriptExt from "@tiptap/extension-superscript";
 import { TextStyle, Color } from "@tiptap/extension-text-style";
 import { Highlight } from "@tiptap/extension-highlight";
+import ViewportFrameSelector from "@/components/topology/ViewportFrameSelector";
 
 // --- Block types ---
 
@@ -211,6 +212,9 @@ export interface CommandListBlock {
   manufacturerId: number | null;
   modelId: number | null;
   pageBreakBefore?: boolean;
+  style?: {
+    fontSize: number;
+  };
 }
 
 export interface TopologyBlock {
@@ -225,6 +229,12 @@ export interface TopologyBlock {
   showCompliance: boolean;
   caption: string;
   pageBreakBefore?: boolean;
+  viewportFrame?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 function normalizeCell(cell: string | TableCell): TableCell {
@@ -317,7 +327,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     } else if (type === "action_list") {
       block = { id, type: "action_list", title: "", actions: [], showPriorityBadge: true };
     } else if (type === "command_list") {
-      block = { id, type: "command_list", manufacturerId: null, modelId: null };
+      block = { id, type: "command_list", manufacturerId: null, modelId: null, style: { fontSize: 9 } };
     } else if (type === "topology") {
       block = { id, type: "topology", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
     } else {
@@ -3648,9 +3658,12 @@ function CommandListProperties({
   const [models, setModels] = useState<{ id: number; name: string; manufacturer: { id: number } }[]>([]);
   const [preview, setPreview] = useState<{ folderName: string; commands: { name: string; commands: string }[] }[]>([]);
   const [connectionScript, setConnectionScript] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"content" | "style">("content");
 
   const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
   const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  const style = block.style ?? { fontSize: 9 };
 
   useEffect(() => {
     if (!current) return;
@@ -3676,46 +3689,99 @@ function CommandListProperties({
 
   const filteredModels = block.manufacturerId ? models.filter((m) => m.manufacturer?.id === block.manufacturerId) : models;
 
+  const tabCls = (active: boolean) =>
+    `px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+      active
+        ? "border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400"
+        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600"
+    }`;
+
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className={labelCls}>{t("structure.cmdManufacturer")}</label>
-          <select value={block.manufacturerId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, manufacturerId: e.target.value ? Number(e.target.value) : null, modelId: null })} className={inputCls}>
-            <option value="">--</option>
-            {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className={labelCls}>{t("structure.cmdModel")}</label>
-          <select value={block.modelId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, modelId: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
-            <option value="">--</option>
-            {filteredModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
-        </div>
+    <div className="space-y-4">
+      {/* Tabs */}
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={tabCls(activeTab === "content")} onClick={() => setActiveTab("content")}>
+          {t("structure.cmdTabContent")}
+        </button>
+        <button type="button" className={tabCls(activeTab === "style")} onClick={() => setActiveTab("style")}>
+          {t("structure.cmdTabStyle")}
+        </button>
       </div>
-      {block.modelId && (
-        <div>
-          <label className={labelCls}>{t("structure.cmdPreview")}</label>
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 max-h-80 overflow-y-auto font-mono text-xs text-slate-800 dark:text-slate-200 space-y-1">
-            {connectionScript && connectionScript.split("\n").filter((l) => l.trim()).map((line, i) => (
-              <div key={`cs-${i}`} className="text-slate-500 dark:text-slate-400">{line}</div>
-            ))}
-            {preview.map((group, gi) => (
-              <div key={gi}>
-                {group.commands.map((cmd, ci) => (
-                  <div key={`${gi}-${ci}`} className="mt-2">
-                    <div className="font-bold text-slate-900 dark:text-slate-100"># {cmd.name.toUpperCase()}</div>
-                    {cmd.commands.split("\n").filter((l) => l.trim()).map((line, li) => (
-                      <div key={`${gi}-${ci}-${li}`}>{line}</div>
+
+      {activeTab === "content" && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>{t("structure.cmdManufacturer")}</label>
+              <select value={block.manufacturerId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, manufacturerId: e.target.value ? Number(e.target.value) : null, modelId: null })} className={inputCls}>
+                <option value="">--</option>
+                {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>{t("structure.cmdModel")}</label>
+              <select value={block.modelId ?? ""} onChange={(e) => updateBlock(block.id, { ...block, modelId: e.target.value ? Number(e.target.value) : null })} className={inputCls}>
+                <option value="">--</option>
+                {filteredModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={block.pageBreakBefore ?? false}
+              onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+              className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+          </label>
+
+          {block.modelId && (
+            <div>
+              <label className={labelCls}>{t("structure.cmdPreview")}</label>
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-4 max-h-80 overflow-y-auto font-mono text-xs text-slate-800 dark:text-slate-200 space-y-1">
+                {connectionScript && connectionScript.split("\n").filter((l) => l.trim()).map((line, i) => (
+                  <div key={`cs-${i}`} className="text-slate-500 dark:text-slate-400">{line}</div>
+                ))}
+                {preview.map((group, gi) => (
+                  <div key={gi}>
+                    {group.commands.map((cmd, ci) => (
+                      <div key={`${gi}-${ci}`} className="mt-2">
+                        <div className="font-bold text-slate-900 dark:text-slate-100"># {cmd.name.toUpperCase()}</div>
+                        {cmd.commands.split("\n").filter((l) => l.trim()).map((line, li) => (
+                          <div key={`${gi}-${ci}-${li}`}>{line}</div>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 ))}
+                {preview.length === 0 && !connectionScript && (
+                  <div className="text-slate-400 italic">{t("structure.cmdNoCommands")}</div>
+                )}
               </div>
-            ))}
-            {preview.length === 0 && !connectionScript && (
-              <div className="text-slate-400 italic">{t("structure.cmdNoCommands")}</div>
-            )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "style" && (
+        <div className="space-y-5">
+          {/* Command content font size */}
+          <div>
+            <label className={labelCls}>{t("structure.cmdFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={5}
+                max={14}
+                step={0.5}
+                value={style.fontSize}
+                onChange={(e) => updateBlock(block.id, { style: { fontSize: Number(e.target.value) } })}
+                className="flex-1 accent-blue-600"
+              />
+              <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{style.fontSize}pt</span>
+            </div>
           </div>
         </div>
       )}
@@ -3762,7 +3828,7 @@ function TopologyBlockProperties({
         ) : (
           <select
             value={block.topologyMapId ?? ""}
-            onChange={(e) => updateBlock(block.id, { topologyMapId: e.target.value ? Number(e.target.value) : null })}
+            onChange={(e) => updateBlock(block.id, { topologyMapId: e.target.value ? Number(e.target.value) : null, viewportFrame: null })}
             className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
           >
             <option value="">{t("structure.topologySelectMap")}</option>
@@ -3796,6 +3862,16 @@ function TopologyBlockProperties({
           <option value="isis">ISIS</option>
         </select>
       </div>
+
+      {/* Viewport Frame Selector */}
+      {block.topologyMapId && (
+        <ViewportFrameSelector
+          mapId={block.topologyMapId}
+          protocol={block.protocol}
+          frame={block.viewportFrame ?? null}
+          onFrameChange={(frame) => updateBlock(block.id, { viewportFrame: frame })}
+        />
+      )}
 
       {/* Width */}
       <div className="space-y-1.5">

@@ -16,6 +16,8 @@ import {
   CheckCircle2,
   XCircle,
   ShieldCheck,
+  ScanSearch,
+  ArrowUpCircle,
   HelpCircle,
   Ban,
   Minus,
@@ -41,6 +43,8 @@ interface NodeItem {
   policy: string;
   discoveredModel: string | null;
   discoveredVersion: string | null;
+  productModel: string | null;
+  systemUpdateScore: string | null;
   complianceEvaluating: string | null;
   isReachable: boolean | null;
   lastPingAt: string | null;
@@ -68,6 +72,34 @@ export default function NodesPage() {
   const [complianceHelpOpen, setComplianceHelpOpen] = useState(false);
   // Compliance evaluation status per node: pending | running
   const [complianceStatus, setComplianceStatus] = useState<Record<number, string>>({});
+  // Product ranges for version upgrade detection
+  const [productRanges, setProductRanges] = useState<{ name: string; recommendedVersion: string | null }[]>([]);
+
+  /** Check if a node's version is behind the recommended version from its product range */
+  const getUpgradeInfo = useCallback((node: NodeItem): { needsUpgrade: boolean; recommended: string } | null => {
+    if (!node.productModel || !node.discoveredVersion) return null;
+    // Find matching product ranges (by hardware name prefix in productModel)
+    const candidates = productRanges.filter((pr) => {
+      const hwName = pr.name.replace(/\s*\(.*$/, "");
+      return node.productModel!.toLowerCase().includes(hwName.toLowerCase());
+    });
+    if (candidates.length === 0) return null;
+    // Disambiguate by version major (Fabric Engine 7-9.x vs Switch Engine/EXOS 30+.x)
+    let match = candidates[0];
+    if (candidates.length > 1) {
+      const vMajor = parseInt(node.discoveredVersion.split(".")[0], 10);
+      for (const c of candidates) {
+        if (!c.recommendedVersion) continue;
+        const rMajor = parseInt(c.recommendedVersion.split(".")[0], 10);
+        if (Math.abs(vMajor - rMajor) <= 5) { match = c; break; }
+      }
+    }
+    if (!match.recommendedVersion) return null;
+    // Compare versions
+    const cmp = node.discoveredVersion.localeCompare(match.recommendedVersion, undefined, { numeric: true, sensitivity: "base" });
+    if (cmp >= 0) return null; // up to date
+    return { needsUpgrade: true, recommended: match.recommendedVersion };
+  }, [productRanges]);
 
   // Action dropdown, bulk delete, bulk add
   const [actionMenuOpen, setActionMenuOpen] = useState<false | "actions" | "add" | "edit">(false);
@@ -105,14 +137,19 @@ export default function NodesPage() {
 
   const loadNodes = useCallback(async () => {
     if (!current) return;
-    const res = await fetch(`/api/nodes?context=${current.id}`);
-    if (res.ok) {
-      const data: NodeItem[] = await res.json();
+    const [nodesRes, prRes] = await Promise.all([
+      fetch(`/api/nodes?context=${current.id}`),
+      fetch(`/api/product-ranges?context=${current.id}`),
+    ]);
+    if (nodesRes.ok) {
+      const data: NodeItem[] = await nodesRes.json();
       setNodes(data);
-      // Restore compliance evaluating status from persisted state
       const evaluating: Record<number, string> = {};
       data.forEach((n) => { if (n.complianceEvaluating) evaluating[n.id] = n.complianceEvaluating; });
       setComplianceStatus((prev) => ({ ...evaluating, ...prev }));
+    }
+    if (prRes.ok) {
+      setProductRanges(await prRes.json());
     }
     setFetchLoading(false);
   }, [current]);
@@ -318,6 +355,21 @@ export default function NodesPage() {
     }
   };
 
+  const handleExtraction = async () => {
+    if (!current || selected.size === 0) return;
+    const nodeIds = Array.from(selected);
+    try {
+      await fetch("/api/collections/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ nodeIds }),
+      });
+    } finally {
+      setSelected(new Set());
+    }
+  };
+
   const loadEditLists = () => {
     if (!current) return;
     fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers);
@@ -470,6 +522,10 @@ export default function NodesPage() {
                       <button onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                         <Play className="h-4 w-4 text-emerald-500" />
                         {t("nodes.collectSelected", { count: String(selected.size) })}
+                      </button>
+                      <button onClick={() => { handleExtraction(); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                        <ScanSearch className="h-4 w-4 text-amber-500" />
+                        {t("nodes.extractSelected", { count: String(selected.size) })}
                       </button>
                       <button onClick={() => { handleEvaluateCompliance(); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                         <ShieldCheck className="h-4 w-4 text-violet-500" />
@@ -711,7 +767,22 @@ export default function NodesPage() {
                     {/* Version */}
                     <td className="px-4 py-2">
                       <span className="text-sm text-slate-700 dark:text-slate-300">
-                        {node.discoveredVersion || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
+                        {node.discoveredVersion ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            {node.discoveredVersion}
+                            {(() => {
+                              const info = getUpgradeInfo(node);
+                              if (!info) return null;
+                              return (
+                                <span title={`${t("systemUpdates.recommendedVersion")}: ${info.recommended}`}>
+                                  <ArrowUpCircle className="h-3.5 w-3.5 text-amber-500" />
+                                </span>
+                              );
+                            })()}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>
+                        )}
                       </span>
                     </td>
 

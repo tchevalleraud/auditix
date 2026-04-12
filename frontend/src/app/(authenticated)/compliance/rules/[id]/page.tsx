@@ -45,6 +45,7 @@ interface DataSource {
   resultMode?: "capture" | "match" | "count" | null;
   valueMap?: { group: number; label: string }[] | null;
   keyGroup?: number | null;
+  multiRow?: boolean;
 }
 
 interface RuleDetail {
@@ -833,14 +834,16 @@ export default function ComplianceRuleEditPage() {
     } finally { setSavingConditions(false); }
   };
 
-  const runEvaluate = async (nodeId: number) => {
+  const [debugMode, setDebugMode] = useState(false);
+  const runEvaluate = async (nodeId: number, debug = false) => {
     setEvaluating(true);
     setEvalResult(null);
+    setDebugMode(debug);
     try {
       const res = await fetch(`/api/compliance-rules/${ruleId}/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeId }),
+        body: JSON.stringify({ nodeId, debug }),
       });
       setEvalResult(await res.json());
     } finally { setEvaluating(false); }
@@ -1064,6 +1067,27 @@ export default function ComplianceRuleEditPage() {
             </div>
           </div>
           <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="p-6 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance_rules.cloneRule")}</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_rules.cloneRuleDesc")}</p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const res = await fetch(`/api/compliance-rules/${ruleId}/clone`, { method: "POST" });
+                    if (res.ok) {
+                      const cloned = await res.json();
+                      window.location.href = `/compliance/rules/${cloned.id}`;
+                    }
+                  }}
+                  className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Copy className="h-4 w-4" />
+                  {t("compliance_rules.cloneRule")}
+                </button>
+              </div>
+            </div>
             <div className="p-6">
               <div className="flex items-center justify-between">
                 <div>
@@ -1120,6 +1144,11 @@ export default function ComplianceRuleEditPage() {
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${src.type === "ssh" ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300" : "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300"}`}>
                         {src.type}
                       </span>
+                      {src.multiRow && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
+                          {t("compliance.multiRow")}
+                        </span>
+                      )}
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-slate-100">{src.name || "(sans nom)"}</span>
                       {src.command && <span className="text-xs text-slate-400 dark:text-slate-500 truncate max-w-[300px]">{src.command}</span>}
                     </div>
@@ -1232,6 +1261,20 @@ export default function ComplianceRuleEditPage() {
                           </div>
                         );
                       })()}
+                      {/* Multi-row toggle */}
+                      {src.resultMode === "capture" && src.valueMap && src.valueMap.length > 0 && (
+                        <div className="space-y-1.5">
+                          <label className={labelCls}>{t("compliance.multiRow")}</label>
+                          <div className="flex gap-2">
+                            {([false, true] as const).map((val) => (
+                              <button key={String(val)} onClick={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], multiRow: val }; setDataSources(ns); }}
+                                className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${(src.multiRow ?? false) === val ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+                                {val ? t("compliance.multiRowYes") : t("compliance.multiRowNo")}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1297,18 +1340,56 @@ export default function ComplianceRuleEditPage() {
                           <CheckCircle className="h-4 w-4 text-emerald-500" />
                           <span className="text-sm font-medium text-emerald-700 dark:text-emerald-400">{t("compliance_rules.testSuccess")}</span>
                         </div>
-                        {!!(testResult as Record<string, unknown>).fields && (
-                          <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                            <table className="w-full text-sm">
-                              <thead><tr className="bg-slate-50 dark:bg-slate-800/50"><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Variable</th><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{t("compliance_rules.fieldValue")}</th></tr></thead>
-                              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {Object.entries((testResult as Record<string, unknown>).fields as Record<string, unknown>).map(([k, v]) => (
-                                  <tr key={k}><td className="px-3 py-2 font-mono text-xs text-blue-600 dark:text-blue-400">{k}</td><td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-md truncate">{String(v ?? "null")}</td></tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
+                        {!!(testResult as Record<string, unknown>).fields && (() => {
+                          const fields = (testResult as Record<string, unknown>).fields as Record<string, unknown>;
+                          // Detect $rows for multi-row table display
+                          const rowEntries = Object.entries(fields).filter(([k]) => k.endsWith(".$rows"));
+                          const scalarFields = Object.entries(fields).filter(([k, v]) => !Array.isArray(v));
+
+                          return (
+                            <div className="space-y-3">
+                              {/* Multi-row tables */}
+                              {rowEntries.map(([k, v]) => {
+                                const srcName = k.replace(".$rows", "");
+                                const rows = v as Record<string, string>[];
+                                if (!rows.length) return null;
+                                const cols = Object.keys(rows[0]).filter((c) => c !== "_key");
+                                return (
+                                  <div key={k}>
+                                    <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-1">{srcName} — {rows.length} {t("compliance.rows")}</p>
+                                    <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-x-auto">
+                                      <table className="w-full text-sm">
+                                        <thead><tr className="bg-slate-50 dark:bg-slate-800/50">
+                                          {rows[0]._key !== undefined && <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Key</th>}
+                                          {cols.map((c) => <th key={c} className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{c}</th>)}
+                                        </tr></thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                          {rows.map((row, ri) => (
+                                            <tr key={ri}>
+                                              {row._key !== undefined && <td className="px-3 py-2 font-mono text-xs font-semibold text-blue-600 dark:text-blue-400">{row._key}</td>}
+                                              {cols.map((c) => <td key={c} className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300">{row[c] ?? ""}</td>)}
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                              {/* Scalar fields */}
+                              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                <table className="w-full text-sm">
+                                  <thead><tr className="bg-slate-50 dark:bg-slate-800/50"><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Variable</th><th className="px-3 py-2 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">{t("compliance_rules.fieldValue")}</th></tr></thead>
+                                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                    {scalarFields.map(([k, v]) => (
+                                      <tr key={k}><td className="px-3 py-2 font-mono text-xs text-blue-600 dark:text-blue-400">{k}</td><td className="px-3 py-2 font-mono text-xs text-slate-700 dark:text-slate-300 max-w-md truncate">{String(v ?? "null")}</td></tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -1337,6 +1418,14 @@ export default function ComplianceRuleEditPage() {
                   >
                     <HelpCircle className="h-4 w-4" />
                   </button>
+                  {dataSources.some((s) => s.multiRow) && (
+                    <button
+                      onClick={() => setShowMultiRowModal(true)}
+                      className="flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-2.5 text-sm font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors"
+                    >
+                      {t("compliance_rules.multiRowTitle")}
+                    </button>
+                  )}
                   {conditionTree && (
                     <button
                       onClick={() => { setShowEvalModal(true); setEvalResult(null); setEvalNodeSearch(""); }}
@@ -1579,7 +1668,7 @@ export default function ComplianceRuleEditPage() {
       {/* Evaluate modal */}
       {showEvalModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+          <div className={`bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto ${debugMode ? "max-w-5xl" : "max-w-2xl"}`}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("compliance_rules.evaluateRule")}</h3>
               <button onClick={() => setShowEvalModal(false)} className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
@@ -1605,23 +1694,32 @@ export default function ComplianceRuleEditPage() {
                     <div className="px-3 py-6 text-center text-sm text-slate-400">{t("compliance_rules.testNoNodes")}</div>
                   ) : (
                     filteredEvalNodes.slice(0, 30).map((n) => (
-                      <button
-                        key={n.id}
-                        onClick={() => runEvaluate(n.id)}
-                        disabled={evaluating}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
-                      >
-                        {n.manufacturer?.logo ? (
-                          <img src={`/api/logos/${n.manufacturer.logo}`} alt={n.manufacturer.name} className="h-5 w-5 object-contain shrink-0" />
-                        ) : (
-                          <Server className="h-4 w-4 text-slate-400 shrink-0" />
-                        )}
-                        <div className="text-left min-w-0">
-                          <p className="font-medium truncate">{n.name || n.hostname || n.ipAddress}</p>
-                          {(n.name || n.hostname) && <p className="text-xs text-slate-400 truncate">{n.ipAddress}</p>}
-                        </div>
-                        {evaluating && <Loader2 className="h-4 w-4 animate-spin text-slate-400 ml-auto shrink-0" />}
-                      </button>
+                      <div key={n.id} className="flex items-center gap-1 px-2 py-1.5">
+                        <button
+                          onClick={() => runEvaluate(n.id, false)}
+                          disabled={evaluating}
+                          className="flex-1 flex items-center gap-3 px-2 py-1.5 rounded-lg text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                        >
+                          {n.manufacturer?.logo ? (
+                            <img src={`/api/logos/${n.manufacturer.logo}`} alt={n.manufacturer.name} className="h-5 w-5 object-contain shrink-0" />
+                          ) : (
+                            <Server className="h-4 w-4 text-slate-400 shrink-0" />
+                          )}
+                          <div className="text-left min-w-0">
+                            <p className="font-medium truncate">{n.name || n.hostname || n.ipAddress}</p>
+                            {(n.name || n.hostname) && <p className="text-xs text-slate-400 truncate">{n.ipAddress}</p>}
+                          </div>
+                          {evaluating && <Loader2 className="h-4 w-4 animate-spin text-slate-400 ml-auto shrink-0" />}
+                        </button>
+                        <button
+                          onClick={() => runEvaluate(n.id, true)}
+                          disabled={evaluating}
+                          title={t("compliance.debug")}
+                          className="shrink-0 px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+                        >
+                          Debug
+                        </button>
+                      </div>
                     ))
                   )}
                 </div>
@@ -1683,7 +1781,26 @@ export default function ComplianceRuleEditPage() {
                               </span>
                             )}
                           </div>
-                          {message && <p className="text-sm text-slate-600 dark:text-slate-300">{message}</p>}
+                          {message && <p className="text-sm text-slate-600 dark:text-slate-300 whitespace-pre-line">{message}</p>}
+                          {/* Multi-row per-line results */}
+                          {(evaluation.multiRowResults as { key: string | number; evaluation: Record<string, unknown> }[] | undefined)?.map((rr, ri) => {
+                            const rs = rr.evaluation?.status as string;
+                            const rm = rr.evaluation?.message as string | undefined;
+                            return (
+                              <div key={ri} className={`mt-2 flex items-start gap-2 rounded-lg px-3 py-2 border text-xs ${
+                                rs === "compliant" ? "border-emerald-200 dark:border-emerald-500/20 bg-emerald-50 dark:bg-emerald-500/5"
+                                : rs === "non_compliant" ? "border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/5"
+                                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                              }`}>
+                                {rs === "compliant" ? <CheckCircle className="h-3.5 w-3.5 text-emerald-500 shrink-0 mt-0.5" /> : <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0 mt-0.5" />}
+                                <div>
+                                  <span className="font-semibold text-slate-700 dark:text-slate-200">[{String(rr.key)}]</span>
+                                  <span className="ml-1.5 text-slate-500 dark:text-slate-400">{t(`compliance_rules.status_${rs}`)}</span>
+                                  {rm && <span className="ml-1.5 text-slate-600 dark:text-slate-300">— {rm}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
                           {(evaluation.recommendation as string | undefined) && (
                             <div className="mt-3 rounded-lg border border-amber-200 dark:border-amber-500/20 bg-amber-50 dark:bg-amber-500/5 overflow-hidden">
                               <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-amber-200 dark:border-amber-500/20">
@@ -1701,6 +1818,86 @@ export default function ComplianceRuleEditPage() {
                         </div>
                       )}
 
+                    </div>
+                  );
+                })()}
+
+                {/* Debug trace */}
+                {debugMode && !!(evalResult as Record<string, unknown>)?.debug && (() => {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const dbg = (evalResult as Record<string, unknown>).debug as any;
+                  const isMultiRow = dbg.multiRow === true;
+
+                  const renderBlockTrace = (blocks: { block: number; type: string; logic: string; blockResult: boolean | null; skipped?: boolean; executed?: boolean; conditions: { index: number; condition: Record<string, string>; result: boolean | null; details: { field?: string; value?: unknown; operator?: string; expected?: unknown; pass?: boolean; error?: string }[] }[] }[]) => (
+                    <>
+                      {blocks.map((block, bi) => (
+                        <div key={bi} className={`rounded-lg border overflow-hidden ${block.skipped ? "border-slate-100 dark:border-slate-800 opacity-40" : "border-slate-200 dark:border-slate-700"}`}>
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 dark:bg-slate-800/50">
+                            <span className="text-[10px] font-bold uppercase text-slate-400">{block.type}</span>
+                            {block.type !== "else" && <span className="text-[10px] text-slate-500">({block.logic})</span>}
+                            {block.skipped ? (
+                              <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-100 text-slate-400 dark:bg-slate-700 dark:text-slate-500">SKIPPED</span>
+                            ) : block.executed ? (
+                              <span className="ml-auto px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">EXECUTED</span>
+                            ) : (
+                              <span className={`ml-auto px-1.5 py-0.5 rounded text-[9px] font-bold ${block.blockResult ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" : "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"}`}>
+                                {block.blockResult ? "MATCH" : "NO MATCH"}
+                              </span>
+                            )}
+                          </div>
+                          {!block.skipped && block.conditions.map((cond, ci) => (
+                            <div key={ci} className="border-t border-slate-100 dark:border-slate-800 px-3 py-1.5 flex items-center gap-2">
+                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cond.result ? "bg-emerald-500" : "bg-red-500"}`} />
+                              <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300">
+                                {cond.condition.source}.{cond.condition.field}
+                              </span>
+                              <span className="text-[10px] text-slate-400">{cond.condition.operator}</span>
+                              <span className="text-[11px] font-mono text-blue-600 dark:text-blue-400">&quot;{cond.condition.value}&quot;</span>
+                              <span className="text-[10px] text-slate-400">→</span>
+                              <span className="text-[11px] font-mono text-slate-500">&quot;{String(cond.details[0]?.value ?? "null")}&quot;</span>
+                              <span className={`ml-auto text-[9px] font-bold ${cond.result ? "text-emerald-600" : "text-red-600"}`}>
+                                {cond.result ? "✓" : "✗"}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </>
+                  );
+
+                  return (
+                    <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">{t("compliance.debugTrace")}</h4>
+
+                      {isMultiRow ? (
+                        <div className="space-y-4">
+                          {(dbg.rowTraces as { key: string | number; rowData: Record<string, string>; evaluation: Record<string, unknown>; blocks: typeof dbg.trace }[]).map((row, ri) => {
+                            const st = row.evaluation?.status as string;
+                            return (
+                              <div key={ri} className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+                                <div className="flex items-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+                                  <span className="text-xs font-bold text-slate-900 dark:text-slate-100">Row: {String(row.key)}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">{Object.entries(row.rowData).map(([k, v]) => `${k}=${v}`).join(", ")}</span>
+                                  <span className={`ml-auto px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    st === "compliant" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                    : st === "non_compliant" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+                                    : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400"
+                                  }`}>
+                                    {st?.toUpperCase().replace("_", " ") ?? "N/A"}
+                                  </span>
+                                </div>
+                                <div className="p-3 space-y-2">
+                                  {renderBlockTrace(row.blocks)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {renderBlockTrace(dbg.trace ?? [])}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}

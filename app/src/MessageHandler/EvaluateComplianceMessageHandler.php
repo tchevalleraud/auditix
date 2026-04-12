@@ -9,6 +9,7 @@ use App\Entity\ComplianceRuleFolder;
 use App\Entity\Node;
 use App\Message\EvaluateComplianceMessage;
 use App\Service\ComplianceEvaluator;
+use App\Service\VulnerabilityScoreCalculator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
@@ -21,6 +22,7 @@ class EvaluateComplianceMessageHandler
         private readonly EntityManagerInterface $em,
         private readonly HubInterface $hub,
         private readonly ComplianceEvaluator $evaluator,
+        private readonly VulnerabilityScoreCalculator $vulnCalculator,
     ) {}
 
     public function __invoke(EvaluateComplianceMessage $message): void
@@ -104,8 +106,18 @@ class EvaluateComplianceMessageHandler
             }
         }
 
-        $grade = ComplianceEvaluator::calculateGrade($globalScorable, $globalPenalty);
-        $node->setScore($grade);
+        $complianceGrade = ComplianceEvaluator::calculateGrade($globalScorable, $globalPenalty);
+        $node->setComplianceScore($complianceGrade);
+
+        // Combine with vulnerability sub-score if enabled
+        $context = $node->getContext();
+        if ($context && $context->isVulnerabilityEnabled()) {
+            $grade = $this->vulnCalculator->recalculateNodeScore($node);
+        } else {
+            $grade = $complianceGrade;
+            $node->setScore($grade);
+        }
+
         $node->setComplianceEvaluating(null);
 
         $this->em->flush();
@@ -182,6 +194,8 @@ class EvaluateComplianceMessageHandler
             'policyId' => $policy->getId(),
             'nodeId' => $node->getId(),
             'score' => $grade,
+            'complianceScore' => $node->getComplianceScore(),
+            'vulnerabilityScore' => $node->getVulnerabilityScore(),
             'stats' => $stats,
             'total' => $total,
             'evaluatedAt' => (new \DateTimeImmutable())->format('c'),

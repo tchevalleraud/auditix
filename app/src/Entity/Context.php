@@ -43,6 +43,33 @@ class Context
     private ?string $publicToken = null;
 
     #[ORM\Column]
+    private bool $vulnerabilityEnabled = false;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $nvdApiKey = null;
+
+    #[ORM\Column]
+    private int $vulnerabilitySyncIntervalHours = 24;
+
+    #[ORM\Column]
+    private float $vulnerabilityScoreWeight = 0.3;
+
+    #[ORM\Column]
+    private float $complianceScoreWeight = 0.7;
+
+    #[ORM\Column]
+    private bool $systemUpdateEnabled = false;
+
+    #[ORM\Column]
+    private float $systemUpdateScoreWeight = 0.0;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastVulnerabilitySyncAt = null;
+
+    #[ORM\Column(length: 20, nullable: true)]
+    private ?string $lastVulnerabilitySyncStatus = null;
+
+    #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
     /** @var Collection<int, User> */
@@ -173,4 +200,23 @@ class Context
         $this->publicToken = bin2hex(random_bytes(32));
         return $this->publicToken;
     }
+
+    public function isVulnerabilityEnabled(): bool { return $this->vulnerabilityEnabled; }
+    public function setVulnerabilityEnabled(bool $v): static { $this->vulnerabilityEnabled = $v; return $this; }
+    public function getNvdApiKey(): ?string { return $this->nvdApiKey; }
+    public function setNvdApiKey(?string $v): static { $this->nvdApiKey = $v; return $this; }
+    public function getVulnerabilitySyncIntervalHours(): int { return $this->vulnerabilitySyncIntervalHours; }
+    public function setVulnerabilitySyncIntervalHours(int $v): static { $this->vulnerabilitySyncIntervalHours = max(1, $v); return $this; }
+    public function getVulnerabilityScoreWeight(): float { return $this->vulnerabilityScoreWeight; }
+    public function setVulnerabilityScoreWeight(float $v): static { $this->vulnerabilityScoreWeight = $v; return $this; }
+    public function getComplianceScoreWeight(): float { return $this->complianceScoreWeight; }
+    public function setComplianceScoreWeight(float $v): static { $this->complianceScoreWeight = $v; return $this; }
+    public function isSystemUpdateEnabled(): bool { return $this->systemUpdateEnabled; }
+    public function setSystemUpdateEnabled(bool $v): static { $this->systemUpdateEnabled = $v; return $this; }
+    public function getSystemUpdateScoreWeight(): float { return $this->systemUpdateScoreWeight; }
+    public function setSystemUpdateScoreWeight(float $v): static { $this->systemUpdateScoreWeight = $v; return $this; }
+    public function getLastVulnerabilitySyncAt(): ?\DateTimeImmutable { return $this->lastVulnerabilitySyncAt; }
+    public function setLastVulnerabilitySyncAt(?\DateTimeImmutable $v): static { $this->lastVulnerabilitySyncAt = $v; return $this; }
+    public function getLastVulnerabilitySyncStatus(): ?string { return $this->lastVulnerabilitySyncStatus; }
+    public function setLastVulnerabilitySyncStatus(?string $v): static { $this->lastVulnerabilitySyncStatus = $v; return $this; }
 }

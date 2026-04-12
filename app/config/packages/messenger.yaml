@@ -58,6 +58,26 @@ framework:
                 retry_strategy:
                     max_retries: 3
                     multiplier: 2
+            vulnerability:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: vulnerability
+                    queues:
+                        vulnerability: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
+            system_update:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    exchange:
+                        name: system_update
+                    queues:
+                        system_update: ~
+                retry_strategy:
+                    max_retries: 3
+                    multiplier: 2
             failed: 'doctrine://default?queue_name=failed'
 
         default_bus: messenger.bus.default
@@ -77,3 +97,7 @@ framework:
 
             App\Message\EvaluateComplianceMessage: compliance
             App\Message\GenerateReportMessage: generator
+
+            App\Message\SyncCveMessage: vulnerability
+            App\Message\RecalculateNodeScoreMessage: vulnerability
+            App\Message\SyncLifecycleMessage: system_update

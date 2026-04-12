@@ -35,6 +35,9 @@ class DeviceModel
     #[ORM\Column(length: 1, nullable: true)]
     private ?string $sendCtrlChar = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $nvdKeyword = null;
+
     #[ORM\ManyToMany(targetEntity: CollectionCommand::class, inversedBy: 'models')]
     #[ORM\JoinTable(name: 'device_model_collection_command')]
     private Collection $manualCommands;
@@ -157,6 +160,9 @@ class DeviceModel
         $this->manualRules->removeElement($rule);
         return $this;
     }
+
+    public function getNvdKeyword(): ?string { return $this->nvdKeyword; }
+    public function setNvdKeyword(?string $v): static { $this->nvdKeyword = $v; return $this; }
 
     public function getCreatedAt(): \DateTimeImmutable
     {

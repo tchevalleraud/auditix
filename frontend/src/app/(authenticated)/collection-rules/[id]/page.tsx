@@ -35,6 +35,7 @@ import {
   ChevronRight,
   FolderOpen,
   Copy,
+  Languages,
 } from "lucide-react";
 
 interface ExtractItem {
@@ -66,6 +67,25 @@ interface InventoryCategory {
   keyLabel: string | null;
 }
 
+interface TranslationCondition {
+  operator: string;
+  value: string;
+}
+
+interface TranslationBlock {
+  type: "if" | "else_if" | "else";
+  logic?: "and" | "or";
+  conditions?: TranslationCondition[];
+  result: { value: string | null };
+  children?: TranslationBlock[];
+}
+
+interface TranslationEntry {
+  extractId: number;
+  extractName: string;
+  conditionTree: { blocks: TranslationBlock[] };
+}
+
 interface RuleDetail {
   id: number;
   name: string;
@@ -76,6 +96,7 @@ interface RuleDetail {
   tag: string | null;
   folderId: number | null;
   extracts: ExtractItem[];
+  translations: TranslationEntry[] | null;
   createdAt: string;
 }
 
@@ -97,7 +118,7 @@ const HIGHLIGHT_COLORS = [
   { bg: "bg-pink-200/60 dark:bg-pink-500/30", text: "text-pink-800 dark:text-pink-200", badge: "bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 border-pink-300 dark:border-pink-700" },
 ];
 
-const tabKeys = ["collect", "extracts", "test", "edit"] as const;
+const tabKeys = ["collect", "extracts", "translations", "test", "edit"] as const;
 type TabKey = (typeof tabKeys)[number];
 
 export default function CollectionRuleEditPage() {
@@ -575,6 +596,7 @@ export default function CollectionRuleEditPage() {
     fullMatch: string;
     groups: { index: number; value: string; label: string; isKey: boolean }[];
     key: string | null;
+    translation: { original: string; translated: string; hasTranslation: boolean } | null;
   };
 
   // Compute highlighted output for test results
@@ -619,6 +641,18 @@ export default function CollectionRuleEditPage() {
             key = k;
           }
 
+          // Compute translation info for the primary value
+          let translationInfo: MatchDetail["translation"] = null;
+          const hasTranslation = rule?.translations?.some((tr) => tr.extractId === ext.id) ?? false;
+          if (hasTranslation) {
+            const vg = ext.keyMode === "extract" ? (ext.valueGroup ?? 2) : (ext.valueGroup ?? 1);
+            const originalVal = ext.valueMap && ext.valueMap.length > 0
+              ? (match[ext.valueMap[0].group] ?? "")
+              : (match[vg] ?? match[1] ?? match[0]);
+            const translatedVal = applyFrontendTranslation(rule, ext.id, originalVal);
+            translationInfo = { original: originalVal, translated: translatedVal, hasTranslation: true };
+          }
+
           matchDetails.push({
             matchId: mid,
             extractIdx: idx,
@@ -627,6 +661,7 @@ export default function CollectionRuleEditPage() {
             fullMatch: match[0],
             groups,
             key,
+            translation: translationInfo,
           });
         };
 
@@ -734,11 +769,15 @@ export default function CollectionRuleEditPage() {
         const columns: Record<string, string> = {};
         if (hasValueMap) {
           ext.valueMap!.forEach((vm) => {
-            columns[`col:${vm.label}`] = m[vm.group] ?? "";
+            let val = m[vm.group] ?? "";
+            val = applyFrontendTranslation(rule, ext.id, val);
+            columns[`col:${vm.label}`] = val;
           });
         } else {
           const vg = ext.keyMode === "extract" ? (ext.valueGroup ?? 2) : (ext.valueGroup ?? 1);
-          columns["col:Value#1"] = m[vg] ?? m[1] ?? m[0];
+          let val = m[vg] ?? m[1] ?? m[0];
+          val = applyFrontendTranslation(rule, ext.id, val);
+          columns["col:Value#1"] = val;
         }
         rows.push({ key, columns });
       };
@@ -904,6 +943,7 @@ export default function CollectionRuleEditPage() {
   const tabs: { key: TabKey; label: string; icon: React.ReactNode }[] = [
     { key: "collect", label: t("collection_rules.tabCollect"), icon: <Terminal className="h-4 w-4" /> },
     { key: "extracts", label: t("collection_rules.tabExtracts"), icon: <ScanSearch className="h-4 w-4" /> },
+    { key: "translations", label: t("collection_rules.tabTranslations"), icon: <Languages className="h-4 w-4" /> },
     { key: "test", label: t("collection_rules.tabTest"), icon: <FlaskConical className="h-4 w-4" /> },
     { key: "edit", label: t("collection_rules.tabEdit"), icon: <Pencil className="h-4 w-4" /> },
   ];
@@ -1578,6 +1618,7 @@ export default function CollectionRuleEditPage() {
                                 <option value="hostname">{t("collection_rules.extractNodeFieldHostname")}</option>
                                 <option value="discoveredModel">{t("collection_rules.extractNodeFieldModel")}</option>
                                 <option value="discoveredVersion">{t("collection_rules.extractNodeFieldVersion")}</option>
+                                <option value="productModel">{t("collection_rules.extractNodeFieldProductModel")}</option>
                               </select>
                               {extractNodeField && (
                                 <div>
@@ -1621,6 +1662,23 @@ export default function CollectionRuleEditPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Translations tab */}
+      {activeTab === "translations" && rule && (
+        <TranslationsTab
+          rule={rule}
+          onSave={async (translations) => {
+            await fetch(`/api/collection-rules/${ruleId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ translations }),
+            });
+            setRule({ ...rule, translations });
+          }}
+          t={t}
+        />
       )}
 
       {/* Test tab */}
@@ -1881,6 +1939,25 @@ export default function CollectionRuleEditPage() {
                               </div>
                             </div>
                           )}
+
+                          {/* Translation */}
+                          {detail.translation?.hasTranslation && (
+                            <div>
+                              <span className="block text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-1">{t("collection_rules.tabTranslations")}</span>
+                              <div className="rounded-md bg-slate-100/60 dark:bg-slate-800/40 px-2.5 py-2 space-y-1">
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-slate-400 shrink-0">in:</span>
+                                  <code className="font-mono text-slate-600 dark:text-slate-400 break-all">{detail.translation.original}</code>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-slate-400 shrink-0">out:</span>
+                                  <code className={`font-mono break-all ${detail.translation.original !== detail.translation.translated ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-slate-600 dark:text-slate-400"}`}>
+                                    {detail.translation.translated}
+                                  </code>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1986,3 +2063,306 @@ export default function CollectionRuleEditPage() {
 
 const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const btnPrimaryCls = "flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors";
+
+/* ─── Translation evaluation (shared by test tab and components) ─── */
+
+function applyFrontendTranslation(rule: RuleDetail | null, extractId: number, value: string): string {
+  if (!rule?.translations) return value;
+  const tr = rule.translations.find((t) => t.extractId === extractId);
+  if (!tr?.conditionTree?.blocks) return value;
+  return evaluateTranslationBlocks(tr.conditionTree.blocks, value) ?? value;
+}
+
+function evaluateTranslationBlocks(blocks: TranslationBlock[], value: string): string | null {
+  for (const block of blocks) {
+    if (block.type === "else") {
+      return block.result.value ?? value;
+    }
+    const logic = block.logic ?? "and";
+    const conditions = block.conditions ?? [];
+    if (evaluateTranslationConditions(conditions, value, logic)) {
+      if (block.children?.length) {
+        return evaluateTranslationBlocks(block.children, value);
+      }
+      return block.result.value ?? value;
+    }
+  }
+  return null;
+}
+
+function evaluateTranslationConditions(conditions: TranslationCondition[], value: string, logic: string): boolean {
+  if (conditions.length === 0) return true;
+  for (const cond of conditions) {
+    const result = compareTranslationValue(value, cond.operator, cond.value);
+    if (logic === "or" && result) return true;
+    if (logic === "and" && !result) return false;
+  }
+  return logic === "and";
+}
+
+function compareTranslationValue(value: string, operator: string, compareValue: string): boolean {
+  switch (operator) {
+    case "equals": return value === compareValue;
+    case "not_equals": return value !== compareValue;
+    case "contains": return value.includes(compareValue);
+    case "not_contains": return !value.includes(compareValue);
+    case "matches": try { return new RegExp(compareValue).test(value); } catch { return false; }
+    case "greater_than": return parseFloat(value) > parseFloat(compareValue);
+    case "less_than": return parseFloat(value) < parseFloat(compareValue);
+    case "is_empty": return value === "";
+    case "is_not_empty": return value !== "";
+    default: return false;
+  }
+}
+
+/* ─── Translations Tab ─── */
+
+const OPERATORS = [
+  { key: "equals", label: "equals" },
+  { key: "not_equals", label: "not equals" },
+  { key: "contains", label: "contains" },
+  { key: "not_contains", label: "not contains" },
+  { key: "matches", label: "matches (regex)" },
+  { key: "greater_than", label: ">" },
+  { key: "less_than", label: "<" },
+  { key: "is_empty", label: "is empty", noValue: true },
+  { key: "is_not_empty", label: "is not empty", noValue: true },
+];
+
+function TranslationsTab({ rule, onSave, t }: {
+  rule: RuleDetail;
+  onSave: (translations: TranslationEntry[]) => Promise<void>;
+  t: (k: string) => string;
+}) {
+  const [translations, setTranslations] = useState<TranslationEntry[]>(rule.translations ?? []);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [addingExtractId, setAddingExtractId] = useState("");
+
+  const extracts = rule.extracts;
+  const usedExtractIds = translations.map((tr) => tr.extractId);
+  const availableExtracts = extracts.filter((e) => !usedExtractIds.includes(e.id));
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(translations);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const addTranslation = () => {
+    const extId = Number(addingExtractId);
+    const ext = extracts.find((e) => e.id === extId);
+    if (!ext) return;
+    setTranslations([...translations, {
+      extractId: ext.id,
+      extractName: ext.name,
+      conditionTree: {
+        blocks: [{
+          type: "if",
+          logic: "and",
+          conditions: [{ operator: "contains", value: "" }],
+          result: { value: "" },
+        }],
+      },
+    }]);
+    setAddingExtractId("");
+  };
+
+  const removeTranslation = (idx: number) => {
+    setTranslations(translations.filter((_, i) => i !== idx));
+  };
+
+  const updateTranslation = (idx: number, entry: TranslationEntry) => {
+    setTranslations(translations.map((tr, i) => i === idx ? entry : tr));
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Add translation */}
+      <div className="flex items-center gap-3">
+        <select value={addingExtractId} onChange={(e) => setAddingExtractId(e.target.value)} className={inputCls + " max-w-xs"}>
+          <option value="">{t("collection_rules.translationSelectExtract")}</option>
+          {availableExtracts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+        <button onClick={addTranslation} disabled={!addingExtractId}
+          className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 disabled:opacity-50">
+          <Plus className="h-4 w-4" /> {t("collection_rules.translationAdd")}
+        </button>
+      </div>
+
+      {translations.length === 0 && (
+        <div className="text-center py-12 text-sm text-slate-400">{t("collection_rules.translationNoTranslations")}</div>
+      )}
+
+      {translations.map((tr, idx) => (
+        <div key={idx} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+            <div>
+              <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{tr.extractName}</span>
+              <span className="text-xs text-slate-400 ml-2">({t("collection_rules.translationExtract")})</span>
+            </div>
+            <button onClick={() => removeTranslation(idx)} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+              <Trash2 className="h-4 w-4 text-red-400" />
+            </button>
+          </div>
+          <div className="p-6">
+            <TranslationBlockEditor
+              blocks={tr.conditionTree.blocks}
+              onChange={(blocks) => updateTranslation(idx, { ...tr, conditionTree: { blocks } })}
+              t={t}
+            />
+          </div>
+        </div>
+      ))}
+
+      {translations.length > 0 && (
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} disabled={saving} className={btnPrimaryCls}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+            {saved ? t("common.save") : t("common.save")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TranslationBlockEditor({ blocks, onChange, t }: {
+  blocks: TranslationBlock[];
+  onChange: (blocks: TranslationBlock[]) => void;
+  t: (k: string) => string;
+}) {
+  const updateBlock = (idx: number, block: TranslationBlock) => {
+    onChange(blocks.map((b, i) => i === idx ? block : b));
+  };
+
+  const removeBlock = (idx: number) => {
+    onChange(blocks.filter((_, i) => i !== idx));
+  };
+
+  const addElseIf = () => {
+    const insertIdx = blocks.findIndex((b) => b.type === "else");
+    const newBlock: TranslationBlock = {
+      type: "else_if", logic: "and",
+      conditions: [{ operator: "contains", value: "" }],
+      result: { value: "" },
+    };
+    if (insertIdx >= 0) {
+      const newBlocks = [...blocks];
+      newBlocks.splice(insertIdx, 0, newBlock);
+      onChange(newBlocks);
+    } else {
+      onChange([...blocks, newBlock]);
+    }
+  };
+
+  const addElse = () => {
+    if (blocks.some((b) => b.type === "else")) return;
+    onChange([...blocks, { type: "else", result: { value: null } }]);
+  };
+
+  const hasElse = blocks.some((b) => b.type === "else");
+
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, idx) => (
+        <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+          {/* Block header */}
+          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 uppercase">
+                {block.type === "if" ? t("collection_rules.translationIf") :
+                 block.type === "else_if" ? t("collection_rules.translationElseIf") :
+                 t("collection_rules.translationElse")}
+              </span>
+              {block.type !== "else" && block.conditions && block.conditions.length > 1 && (
+                <select value={block.logic ?? "and"}
+                  onChange={(e) => updateBlock(idx, { ...block, logic: e.target.value as "and" | "or" })}
+                  className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-1.5 py-0.5">
+                  <option value="and">AND</option>
+                  <option value="or">OR</option>
+                </select>
+              )}
+            </div>
+            {idx > 0 && (
+              <button onClick={() => removeBlock(idx)} className="p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                <X className="h-3.5 w-3.5 text-red-400" />
+              </button>
+            )}
+          </div>
+
+          <div className="p-4 space-y-3">
+            {/* Conditions (not for else) */}
+            {block.type !== "else" && (
+              <div className="space-y-2">
+                {(block.conditions ?? []).map((cond, ci) => (
+                  <div key={ci} className="flex items-center gap-2">
+                    <select value={cond.operator}
+                      onChange={(e) => {
+                        const newConds = [...(block.conditions ?? [])];
+                        newConds[ci] = { ...cond, operator: e.target.value };
+                        updateBlock(idx, { ...block, conditions: newConds });
+                      }}
+                      className="text-sm rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 w-40">
+                      {OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
+                    </select>
+                    {!OPERATORS.find((o) => o.key === cond.operator && (o as any).noValue) && (
+                      <input type="text" value={cond.value}
+                        onChange={(e) => {
+                          const newConds = [...(block.conditions ?? [])];
+                          newConds[ci] = { ...cond, value: e.target.value };
+                          updateBlock(idx, { ...block, conditions: newConds });
+                        }}
+                        placeholder={t("collection_rules.translationValue")}
+                        className={inputCls + " flex-1"} />
+                    )}
+                    {(block.conditions ?? []).length > 1 && (
+                      <button onClick={() => {
+                        const newConds = (block.conditions ?? []).filter((_, j) => j !== ci);
+                        updateBlock(idx, { ...block, conditions: newConds });
+                      }} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                        <X className="h-3.5 w-3.5 text-red-400" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button onClick={() => {
+                  const newConds = [...(block.conditions ?? []), { operator: "contains", value: "" }];
+                  updateBlock(idx, { ...block, conditions: newConds });
+                }} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  + {t("collection_rules.translationAddCondition")}
+                </button>
+              </div>
+            )}
+
+            {/* Result value */}
+            <div>
+              <label className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.translationResult")}</label>
+              <input type="text"
+                value={block.result.value ?? ""}
+                onChange={(e) => updateBlock(idx, { ...block, result: { value: e.target.value || null } })}
+                placeholder={t("collection_rules.translationKeepOriginal")}
+                className={inputCls} />
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {/* Add buttons */}
+      <div className="flex items-center gap-2">
+        <button onClick={addElseIf}
+          className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
+          + {t("collection_rules.translationAddElseIf")}
+        </button>
+        {!hasElse && (
+          <button onClick={addElse}
+            className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
+            + {t("collection_rules.translationAddElse")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

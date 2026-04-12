@@ -21,7 +21,7 @@ interface ContextUser {
   avatar: string | null;
 }
 
-type TabKey = "general" | "monitoring" | "retention" | "members" | "lab";
+type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "members" | "lab";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -47,6 +47,23 @@ export default function SettingsPage() {
   const [retentionSaving, setRetentionSaving] = useState(false);
   const [retentionSaved, setRetentionSaved] = useState(false);
 
+  // Vulnerability
+  const [vulnEnabled, setVulnEnabled] = useState(false);
+  const [nvdApiKey, setNvdApiKey] = useState("");
+  const [vulnSyncInterval, setVulnSyncInterval] = useState(24);
+  const [vulnWeight, setVulnWeight] = useState(0.3);
+  const [vulnSaving, setVulnSaving] = useState(false);
+  const [vulnSaved, setVulnSaved] = useState(false);
+  const [vulnSyncing, setVulnSyncing] = useState(false);
+
+  // System Updates
+  const [suEnabled, setSuEnabled] = useState(false);
+  const [suWeight, setSuWeight] = useState(0.0);
+  const [suSaving, setSuSaving] = useState(false);
+  const [suSaved, setSuSaved] = useState(false);
+  const [plugins, setPlugins] = useState<any[]>([]);
+  const [pluginSyncing, setPluginSyncing] = useState<string | null>(null);
+
   // Lab
   const [publicEnabled, setPublicEnabled] = useState(false);
   const [publicToken, setPublicToken] = useState<string | null>(null);
@@ -71,6 +88,12 @@ export default function SettingsPage() {
       setSnmpPollIntervalSeconds(current.snmpPollIntervalSeconds ?? 60);
       setIcmpPollIntervalSeconds(current.icmpPollIntervalSeconds ?? 60);
       setIsDefault(current.isDefault);
+      setVulnEnabled(current.vulnerabilityEnabled ?? false);
+      setNvdApiKey(current.nvdApiKey ?? "");
+      setVulnSyncInterval(current.vulnerabilitySyncIntervalHours ?? 24);
+      setVulnWeight(current.vulnerabilityScoreWeight ?? 0.3);
+      setSuEnabled(current.systemUpdateEnabled ?? false);
+      setSuWeight(current.systemUpdateScoreWeight ?? 0.0);
       setPublicEnabled(current.publicEnabled ?? false);
       setPublicToken(current.publicToken ?? null);
     }
@@ -229,6 +252,8 @@ export default function SettingsPage() {
     { key: "general", label: t("settings.tabGeneral") },
     { key: "monitoring", label: t("settings.tabMonitoring") },
     { key: "retention", label: t("settings.tabRetention") },
+    { key: "vulnerability", label: t("settings.tabVulnerability") },
+    { key: "systemUpdates", label: t("settings.tabSystemUpdates") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
     { key: "lab" as TabKey, label: t("settings.tabLab") },
   ];
@@ -522,6 +547,254 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {tab === "vulnerability" && (
+        <div className="space-y-6">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-white">{t("settings.tabVulnerability")}</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{t("settings.vulnEnabledHelp")}</p>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Enable toggle */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className={labelClass}>{t("settings.vulnEnabled")}</label>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVulnEnabled(!vulnEnabled)}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${vulnEnabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
+                >
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${vulnEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+
+              {vulnEnabled && (
+                <>
+                  {/* NVD API Key */}
+                  <div>
+                    <label className={labelClass}>{t("settings.vulnApiKey")}</label>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{t("settings.vulnApiKeyHelp")}</p>
+                    <input
+                      type="password"
+                      value={nvdApiKey}
+                      onChange={(e) => setNvdApiKey(e.target.value)}
+                      className={inputClass}
+                      placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                    />
+                  </div>
+
+                  {/* Sync interval */}
+                  <div>
+                    <label className={labelClass}>{t("settings.vulnSyncInterval")}</label>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{t("settings.vulnSyncIntervalHelp")}</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={168}
+                        value={vulnSyncInterval}
+                        onChange={(e) => setVulnSyncInterval(Math.max(1, parseInt(e.target.value) || 1))}
+                        className={inputClass + " w-24"}
+                      />
+                      <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.hours")}</span>
+                    </div>
+                  </div>
+
+                  {/* Score weights */}
+                  <div>
+                    <label className={labelClass}>{t("settings.vulnWeightLabel")}</label>
+                    <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{t("settings.vulnWeightHelp")}</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs text-slate-500 dark:text-slate-400">{t("settings.complianceWeight")}</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={Math.round((1 - vulnWeight) * 100) / 100}
+                          onChange={(e) => {
+                            const cw = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                            setVulnWeight(Math.round((1 - cw) * 100) / 100);
+                          }}
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 dark:text-slate-400">{t("settings.vulnerabilityWeight")}</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={vulnWeight}
+                          onChange={(e) => setVulnWeight(Math.max(0, Math.min(1, parseFloat(e.target.value) || 0)))}
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sync now */}
+                  <div className="flex items-center gap-4">
+                    <button
+                      onClick={async () => {
+                        if (!current?.id) return;
+                        setVulnSyncing(true);
+                        await fetch("/api/vulnerabilities/sync", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ contextId: current.id }),
+                        });
+                        setTimeout(() => setVulnSyncing(false), 2000);
+                      }}
+                      disabled={vulnSyncing}
+                      className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                    >
+                      {vulnSyncing ? t("settings.vulnSyncing") : t("settings.vulnSyncNow")}
+                    </button>
+                    {current?.lastVulnerabilitySyncAt && (
+                      <span className="text-xs text-slate-400">
+                        {t("settings.vulnLastSync").replace("{date}", new Date(current.lastVulnerabilitySyncAt).toLocaleString())}
+                      </span>
+                    )}
+                    {!current?.lastVulnerabilitySyncAt && (
+                      <span className="text-xs text-slate-400">{t("settings.vulnNeverSynced")}</span>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Save button */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={async () => {
+                    if (!current?.id) return;
+                    setVulnSaving(true);
+                    const res = await fetch(`/api/contexts/${current.id}`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        name: current.name,
+                        vulnerabilityEnabled: vulnEnabled,
+                        nvdApiKey: nvdApiKey || null,
+                        vulnerabilitySyncIntervalHours: vulnSyncInterval,
+                        vulnerabilityScoreWeight: vulnWeight,
+                      }),
+                    });
+                    if (res.ok) {
+                      setVulnSaved(true);
+                      setTimeout(() => setVulnSaved(false), 2000);
+                      reload();
+                    }
+                    setVulnSaving(false);
+                  }}
+                  disabled={vulnSaving}
+                  className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors disabled:opacity-50"
+                >
+                  {vulnSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : vulnSaved ? <Check className="h-4 w-4" /> : null}
+                  {vulnSaved ? t("settings.saved") : t("common.save")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "systemUpdates" && (
+        <div className="space-y-6">
+          {/* Enable toggle */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.systemUpdateEnabled")}</h2>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.systemUpdateEnabledHelp")}</p>
+              </div>
+              <button type="button" onClick={() => setSuEnabled(!suEnabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${suEnabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${suEnabled ? "translate-x-6" : "translate-x-1"}`} />
+              </button>
+            </div>
+
+            {/* Score weights (all 3) */}
+            <div>
+              <label className={labelClass}>{t("settings.vulnWeightLabel")}</label>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">{t("settings.vulnWeightHelp")}</p>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 dark:text-slate-400">{t("settings.complianceWeight")}</label>
+                  <input type="number" min={0} max={1} step={0.05}
+                    value={Math.round((1 - vulnWeight - suWeight) * 100) / 100}
+                    onChange={(e) => {
+                      const cw = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                      const remaining = Math.max(0, 1 - cw);
+                      const ratio = vulnWeight + suWeight > 0 ? vulnWeight / (vulnWeight + suWeight) : 0.5;
+                      setVulnWeight(Math.round(remaining * ratio * 100) / 100);
+                      setSuWeight(Math.round(remaining * (1 - ratio) * 100) / 100);
+                    }}
+                    className={inputClass} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 dark:text-slate-400">{t("settings.vulnerabilityWeight")}</label>
+                  <input type="number" min={0} max={1} step={0.05}
+                    value={vulnWeight}
+                    onChange={(e) => {
+                      const vw = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                      setVulnWeight(vw);
+                      const compW = Math.round((1 - vw - suWeight) * 100) / 100;
+                      if (compW < 0) setSuWeight(Math.round((1 - vw) * 100) / 100);
+                    }}
+                    className={inputClass} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 dark:text-slate-400">{t("settings.systemUpdateWeight")}</label>
+                  <input type="number" min={0} max={1} step={0.05}
+                    value={suWeight}
+                    onChange={(e) => {
+                      const sw = Math.max(0, Math.min(1, parseFloat(e.target.value) || 0));
+                      setSuWeight(sw);
+                      const compW = Math.round((1 - vulnWeight - sw) * 100) / 100;
+                      if (compW < 0) setVulnWeight(Math.round((1 - sw) * 100) / 100);
+                    }}
+                    className={inputClass} />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={async () => {
+                setSuSaving(true);
+                const compW = Math.round((1 - vulnWeight - suWeight) * 100) / 100;
+                await fetch(`/api/contexts/${current?.id}`, {
+                  method: "PUT", credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    name: current?.name, systemUpdateEnabled: suEnabled,
+                    complianceScoreWeight: Math.max(0, compW),
+                    vulnerabilityScoreWeight: vulnWeight,
+                    systemUpdateScoreWeight: suWeight,
+                  }),
+                });
+                setSuSaving(false); setSuSaved(true); reload();
+                setTimeout(() => setSuSaved(false), 2000);
+              }}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors">
+                {suSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : suSaved ? <Check className="h-4 w-4" /> : null}
+                {suSaved ? t("settings.saved") : t("common.save")}
+              </button>
+            </div>
+          </div>
+
+          {/* Vendor plugins */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.pluginsTitle")}</h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.pluginsHelp")}</p>
+            <PluginManager contextId={current?.id} t={t} plugins={plugins} setPlugins={setPlugins} pluginSyncing={pluginSyncing} setPluginSyncing={setPluginSyncing} />
+          </div>
+        </div>
+      )}
+
       {tab === "lab" && (
         <div className="space-y-6">
           {/* Enable/Disable */}
@@ -620,6 +893,79 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ─── Plugin Manager ─── */
+
+function PluginManager({ contextId, t, plugins, setPlugins, pluginSyncing, setPluginSyncing }: {
+  contextId: number | undefined;
+  t: (k: string, v?: Record<string, string>) => string;
+  plugins: any[];
+  setPlugins: (p: any[]) => void;
+  pluginSyncing: string | null;
+  setPluginSyncing: (s: string | null) => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!contextId || loaded) return;
+    (async () => {
+      const res = await fetch(`/api/plugins?context=${contextId}`, { credentials: "include" });
+      if (res.ok) setPlugins(await res.json());
+      setLoaded(true);
+    })();
+  }, [contextId, loaded, setPlugins]);
+
+  const togglePlugin = async (identifier: string, enabled: boolean) => {
+    await fetch(`/api/plugins/${identifier}?context=${contextId}`, {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    setPlugins(plugins.map((p) => p.identifier === identifier ? { ...p, enabled } : p));
+  };
+
+  const syncPlugin = async (identifier: string) => {
+    setPluginSyncing(identifier);
+    await fetch(`/api/plugins/${identifier}/sync?context=${contextId}`, {
+      method: "POST", credentials: "include",
+    });
+    setTimeout(() => setPluginSyncing(null), 3000);
+  };
+
+  if (!loaded) return <div className="text-sm text-slate-400">...</div>;
+  if (plugins.length === 0) return <p className="text-sm text-slate-400">{t("settings.pluginNoPlugins")}</p>;
+
+  return (
+    <div className="divide-y divide-slate-100 dark:divide-slate-800">
+      {plugins.map((plugin) => (
+        <div key={plugin.identifier} className="flex items-center justify-between py-3">
+          <div>
+            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{plugin.displayName}</span>
+            <span className="ml-2 text-xs text-slate-400">{plugin.supportedManufacturers?.join(", ")}</span>
+            {plugin.lastSyncAt && (
+              <p className="text-xs text-slate-400 mt-0.5">
+                {t("settings.pluginLastSync", { date: new Date(plugin.lastSyncAt).toLocaleString() })}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button type="button" onClick={() => togglePlugin(plugin.identifier, !plugin.enabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${plugin.enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}>
+              <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${plugin.enabled ? "translate-x-5" : "translate-x-1"}`} />
+            </button>
+            {plugin.enabled && (
+              <button onClick={() => syncPlugin(plugin.identifier)}
+                disabled={pluginSyncing === plugin.identifier}
+                className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50">
+                {pluginSyncing === plugin.identifier ? t("settings.pluginSyncing") : t("settings.pluginSyncNow")}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

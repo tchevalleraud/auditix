@@ -49,6 +49,7 @@ class CollectionRuleController extends AbstractController
                 $this->serializeExtract(...),
                 $r->getExtracts()->toArray()
             )),
+            'translations' => $r->getTranslations(),
             'createdAt' => $r->getCreatedAt()->format('c'),
         ];
     }
@@ -333,6 +334,9 @@ class CollectionRuleController extends AbstractController
         if (array_key_exists('folderId', $data)) {
             $folder = $data['folderId'] ? $em->getRepository(CollectionRuleFolder::class)->find($data['folderId']) : null;
             $rule->setFolder($folder);
+        }
+        if (array_key_exists('translations', $data)) {
+            $rule->setTranslations($data['translations']);
         }
 
         $em->flush();

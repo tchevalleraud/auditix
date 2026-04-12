@@ -12,8 +12,13 @@ use App\Entity\Node;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\NodeTag;
 use App\Entity\Profile;
+use App\Entity\Cve;
+use App\Entity\CveDeviceModel;
+use App\Service\SystemUpdateScoreCalculator;
+use App\Service\VulnerabilityScoreCalculator;
 use App\Message\EvaluateComplianceMessage;
 use App\Message\PingNodeMessage;
+use App\Message\RecalculateNodeScoreMessage;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -45,9 +50,13 @@ class NodeController extends AbstractController
             'ipAddress' => $n->getIpAddress(),
             'hostname' => $n->getHostname(),
             'score' => $n->getScore(),
+            'complianceScore' => $n->getComplianceScore(),
+            'vulnerabilityScore' => $n->getVulnerabilityScore(),
+            'systemUpdateScore' => $n->getSystemUpdateScore(),
             'policy' => $n->getPolicy(),
             'discoveredModel' => $n->getDiscoveredModel(),
             'discoveredVersion' => $n->getDiscoveredVersion(),
+            'productModel' => $n->getProductModel(),
             'complianceEvaluating' => $n->getComplianceEvaluating(),
             'isReachable' => $n->getIsReachable(),
             'lastPingAt' => $n->getLastPingAt()?->format('c'),
@@ -324,6 +333,8 @@ class NodeController extends AbstractController
             )->setParameter('node', $node)->getResult();
 
             if (empty($policies)) {
+                // No compliance policies — still recalculate vulnerability score only
+                $this->bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
                 continue;
             }
 
@@ -357,6 +368,9 @@ class NodeController extends AbstractController
         if ($dispatched > 0) {
             $node->setScore(null);
             $node->setComplianceEvaluating('pending');
+        } else {
+            // No compliance policies — still recalculate vulnerability score only
+            $this->bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
         }
         $em->flush();
 
@@ -391,6 +405,66 @@ class NodeController extends AbstractController
         }
 
         return $this->json($stats);
+    }
+
+    #[Route('/{id}/vulnerabilities', methods: ['GET'])]
+    public function vulnerabilities(Node $node, EntityManagerInterface $em): JsonResponse
+    {
+        $model = $node->getModel();
+        $context = $node->getContext();
+
+        if (!$model || !$context) {
+            return $this->json([
+                'vulnerabilityScore' => null,
+                'cves' => [],
+                'stats' => ['total' => 0, 'bySeverity' => []],
+            ]);
+        }
+
+        // Get CVEs affecting this node's model
+        $cves = $em->createQuery(
+            'SELECT c FROM App\Entity\Cve c
+             JOIN App\Entity\CveDeviceModel cdm WITH cdm.cve = c
+             WHERE cdm.deviceModel = :model AND c.context = :ctx
+             ORDER BY c.cvssScore DESC'
+        )->setParameter('model', $model)->setParameter('ctx', $context)->getResult();
+
+        $nodeVersion = $node->getDiscoveredVersion();
+        $bySeverity = [];
+        $items = [];
+        foreach ($cves as $cve) {
+            $sev = $cve->getSeverity();
+            $affected = true;
+            if ($nodeVersion) {
+                $affected = VulnerabilityScoreCalculator::isVersionAffected($nodeVersion, [
+                    'version_start_including' => $cve->getVersionStartIncluding(),
+                    'version_end_excluding' => $cve->getVersionEndExcluding(),
+                    'version_end_including' => $cve->getVersionEndIncluding(),
+                ]);
+            }
+            if (!$affected) {
+                continue;
+            }
+            $bySeverity[$sev] = ($bySeverity[$sev] ?? 0) + 1;
+            $items[] = [
+                'id' => $cve->getId(),
+                'cveId' => $cve->getCveId(),
+                'description' => $cve->getDescription(),
+                'cvssScore' => $cve->getCvssScore(),
+                'cvssVector' => $cve->getCvssVector(),
+                'severity' => $sev,
+                'publishedAt' => $cve->getPublishedAt()?->format('c'),
+            ];
+        }
+
+        return $this->json([
+            'vulnerabilityScore' => $node->getVulnerabilityScore(),
+            'cves' => $items,
+            'stats' => [
+                'total' => count($cves),
+                'bySeverity' => $bySeverity,
+            ],
+        ]);
     }
 
     #[Route('/{id}/compliance', methods: ['GET'])]
@@ -457,6 +531,34 @@ class NodeController extends AbstractController
         return $this->json([
             'score' => $node->getScore(),
             'policies' => array_values($policyMap),
+        ]);
+    }
+
+    #[Route('/{id}/system-updates', methods: ['GET'])]
+    public function systemUpdates(Node $node, SystemUpdateScoreCalculator $calculator): JsonResponse
+    {
+        $result = $calculator->calculateForNode($node);
+        $productRange = $calculator->findProductRange($node);
+
+        return $this->json([
+            'systemUpdateScore' => $node->getSystemUpdateScore(),
+            'calculatedScore' => $result['score'],
+            'calculatedGrade' => $result['grade'],
+            'details' => $result['details'],
+            'productRange' => $productRange ? [
+                'id' => $productRange->getId(),
+                'name' => $productRange->getName(),
+                'recommendedVersion' => $productRange->getRecommendedVersion(),
+                'currentVersion' => $productRange->getCurrentVersion(),
+                'releaseDate' => $productRange->getReleaseDate()?->format('c'),
+                'endOfSaleDate' => $productRange->getEndOfSaleDate()?->format('c'),
+                'endOfSupportDate' => $productRange->getEndOfSupportDate()?->format('c'),
+                'endOfLifeDate' => $productRange->getEndOfLifeDate()?->format('c'),
+                'pluginSource' => $productRange->getPluginSource(),
+                'lastSyncedAt' => $productRange->getLastSyncedAt()?->format('c'),
+            ] : null,
+            'productModel' => $node->getProductModel(),
+            'discoveredVersion' => $node->getDiscoveredVersion(),
         ]);
     }
 }

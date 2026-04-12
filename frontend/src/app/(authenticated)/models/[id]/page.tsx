@@ -5,7 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Activity, Cpu, MemoryStick, HardDrive, Thermometer, Clock, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Activity, Cpu, MemoryStick, HardDrive, Thermometer, Clock, ArrowDownToLine, ArrowUpFromLine, ShieldAlert } from "lucide-react";
 
 interface ManufacturerOption {
   id: number;
@@ -19,6 +19,7 @@ interface ModelDetail {
   description: string | null;
   connectionScript: string | null;
   sendCtrlChar: string | null;
+  nvdKeyword: string | null;
   manufacturer: ManufacturerOption;
   createdAt: string;
 }
@@ -68,7 +69,7 @@ interface MonitoringOidItem {
   enabled: boolean;
 }
 
-type Tab = "edit" | "script" | "collection" | "rules" | "monitoring";
+type Tab = "edit" | "script" | "nvd" | "collection" | "rules" | "monitoring";
 
 export default function ModelDetailPage() {
   const router = useRouter();
@@ -95,6 +96,7 @@ export default function ModelDetailPage() {
   // Script form state
   const [connectionScript, setConnectionScript] = useState("");
   const [sendCtrlChar, setSendCtrlChar] = useState("");
+  const [nvdKeyword, setNvdKeyword] = useState("");
   const [savingScript, setSavingScript] = useState(false);
   const [savedScript, setSavedScript] = useState(false);
 
@@ -158,6 +160,7 @@ export default function ModelDetailPage() {
       setManufacturerId(found.manufacturer.id);
       setConnectionScript(found.connectionScript ?? "");
       setSendCtrlChar(found.sendCtrlChar ?? "");
+      setNvdKeyword(found.nvdKeyword ?? "");
     }
     setFetchLoading(false);
   }, [modelId, current]);
@@ -249,6 +252,7 @@ export default function ModelDetailPage() {
           description: model.description,
           connectionScript: connectionScript || null,
           sendCtrlChar: sendCtrlChar || null,
+          nvdKeyword: nvdKeyword || null,
           manufacturerId: model.manufacturer.id,
         }),
       });
@@ -400,6 +404,7 @@ export default function ModelDetailPage() {
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "edit", label: t("models.tabEdit"), icon: <Pencil className="h-4 w-4" /> },
     { key: "script", label: t("models.tabScript"), icon: <TerminalSquare className="h-4 w-4" /> },
+    { key: "nvd", label: t("models.tabNvd"), icon: <ShieldAlert className="h-4 w-4" /> },
     { key: "collection", label: t("models.tabCollection"), icon: <Terminal className="h-4 w-4" /> },
     { key: "rules", label: t("models.tabRules"), icon: <FileSearch className="h-4 w-4" /> },
     { key: "monitoring", label: t("models.tabMonitoring"), icon: <Activity className="h-4 w-4" /> },
@@ -558,6 +563,41 @@ export default function ModelDetailPage() {
               />
             </div>
 
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="submit"
+                disabled={savingScript}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("common.save")}
+              </button>
+              {savedScript && (
+                <span className="text-sm text-green-600 dark:text-green-400">{t("models.saved")}</span>
+              )}
+            </div>
+          </form>
+        </div>
+      )}
+
+      {activeTab === "nvd" && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+          <form onSubmit={handleSaveScript} className="p-6 space-y-5">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+                {t("models.nvdKeywordLabel")}
+              </label>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mb-2">
+                {t("models.nvdKeywordHelp")}
+              </p>
+              <input
+                type="text"
+                value={nvdKeyword}
+                onChange={(e) => setNvdKeyword(e.target.value)}
+                className={inputCls}
+                placeholder={t("models.nvdKeywordPlaceholder")}
+              />
+            </div>
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"

@@ -51,6 +51,9 @@ class CollectionRule
     #[ORM\OrderBy(['position' => 'ASC'])]
     private Collection $extracts;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $translations = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -84,5 +87,7 @@ class CollectionRule
     public function getExtracts(): Collection { return $this->extracts; }
     public function addExtract(CollectionRuleExtract $e): static { if (!$this->extracts->contains($e)) { $this->extracts->add($e); $e->setRule($this); } return $this; }
     public function removeExtract(CollectionRuleExtract $e): static { $this->extracts->removeElement($e); return $this; }
+    public function getTranslations(): ?array { return $this->translations; }
+    public function setTranslations(?array $v): static { $this->translations = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

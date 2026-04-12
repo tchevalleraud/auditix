@@ -258,11 +258,32 @@ class ComplianceRuleController extends AbstractController
         ]);
     }
 
+    #[Route('/{id}/clone', methods: ['POST'])]
+    public function clone(ComplianceRule $rule, EntityManagerInterface $em): JsonResponse
+    {
+        $clone = new ComplianceRule();
+        $clone->setName($rule->getName() . ' (copy)');
+        $clone->setIdentifier($rule->getIdentifier() ? $rule->getIdentifier() . '_copy' : null);
+        $clone->setDescription($rule->getDescription());
+        $clone->setEnabled(false);
+        $clone->setContext($rule->getContext());
+        $clone->setFolder($rule->getFolder());
+        $clone->setDataSources($rule->getDataSources());
+        $clone->setConditionTree($rule->getConditionTree());
+        $clone->setMultiRowMessages($rule->getMultiRowMessages());
+
+        $em->persist($clone);
+        $em->flush();
+
+        return $this->json($this->serializeRule($clone), Response::HTTP_CREATED);
+    }
+
     #[Route('/{id}/evaluate', methods: ['POST'])]
     public function evaluate(ComplianceRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $data = json_decode($request->getContent(), true);
         $nodeId = $data['nodeId'] ?? null;
+        $debug = !empty($data['debug']);
 
         if (!$nodeId) {
             return $this->json(['error' => 'nodeId is required'], Response::HTTP_BAD_REQUEST);
@@ -275,7 +296,7 @@ class ComplianceRuleController extends AbstractController
 
         $result = $this->evaluator->evaluateRule($rule, $node);
 
-        return $this->json([
+        $response = [
             'success' => true,
             'node' => [
                 'id' => $node->getId(),
@@ -283,7 +304,131 @@ class ComplianceRuleController extends AbstractController
                 'ipAddress' => $node->getIpAddress(),
             ],
             'evaluation' => $result,
-        ]);
+        ];
+
+        if ($debug) {
+            $fields = $this->evaluator->getAllSourceFields($rule, $node);
+            $conditionTree = $rule->getConditionTree();
+
+            // Detect multi-row source
+            $multiRowSource = null;
+            foreach ($rule->getDataSources() as $src) {
+                if (!empty($src['multiRow'])) {
+                    $name = $src['name'] ?? 'default';
+                    $rows = $fields["$name.\$rows"] ?? null;
+                    if (is_array($rows) && !empty($rows)) {
+                        $multiRowSource = ['name' => $name, 'rows' => $rows];
+                        break;
+                    }
+                }
+            }
+
+            if ($multiRowSource && !empty($conditionTree['blocks'])) {
+                // Per-row debug: evaluate each row independently through the full if/else_if/else chain
+                $srcName = $multiRowSource['name'];
+                $rowTraces = [];
+
+                foreach ($multiRowSource['rows'] as $row) {
+                    $rowKey = $row['_key'] ?? count($rowTraces);
+                    $rowFields = $fields;
+                    foreach ($row as $label => $val) {
+                        if ($label === '_key') { $rowFields["$srcName.\$key"] = $val; }
+                        else { $rowFields["$srcName.$label"] = is_string($val) ? trim($val) : $val; }
+                    }
+
+                    $rowTrace = ['key' => $rowKey, 'rowData' => array_filter($row, fn($k) => $k !== '_key', ARRAY_FILTER_USE_KEY), 'blocks' => []];
+                    $matched = false;
+
+                    foreach ($conditionTree['blocks'] as $blockIdx => $block) {
+                        $blockType = $block['type'] ?? 'if';
+                        $blockDebug = ['block' => $blockIdx, 'type' => $blockType, 'logic' => $block['logic'] ?? 'and', 'conditions' => []];
+
+                        if ($matched) {
+                            $blockDebug['blockResult'] = null;
+                            $blockDebug['skipped'] = true;
+                            $rowTrace['blocks'][] = $blockDebug;
+                            continue;
+                        }
+
+                        if ($blockType === 'else') {
+                            $blockDebug['blockResult'] = true;
+                            $blockDebug['executed'] = true;
+                            $matched = true;
+                            $rowTrace['blocks'][] = $blockDebug;
+                            continue;
+                        }
+
+                        foreach ($block['conditions'] ?? [] as $condIdx => $cond) {
+                            $condDebug = ['index' => $condIdx, 'condition' => $cond, 'details' => []];
+                            $source = $cond['source'] ?? '';
+                            $field = $cond['field'] ?? '$value';
+                            $key = $source ? "$source.$field" : $field;
+                            $val = $rowFields[$key] ?? null;
+                            $pass = $this->evaluator->compareValue($val, $cond['operator'] ?? '', $cond['value'] ?? null);
+                            $condDebug['result'] = $pass;
+                            $condDebug['details'][] = [
+                                'field' => $key,
+                                'value' => is_array($val) ? json_encode($val) : $val,
+                                'operator' => $cond['operator'] ?? '',
+                                'expected' => $cond['value'] ?? null,
+                                'pass' => $pass,
+                            ];
+                            $blockDebug['conditions'][] = $condDebug;
+                        }
+
+                        $blockResult = $this->evaluator->evaluateConditions($block, $rowFields, $node);
+                        $blockDebug['blockResult'] = $blockResult;
+                        $blockDebug['executed'] = $blockResult;
+                        if ($blockResult) $matched = true;
+                        $rowTrace['blocks'][] = $blockDebug;
+                    }
+
+                    // Get the per-row evaluation result
+                    $rowEval = $this->evaluator->evaluateBlocks($conditionTree['blocks'], $rowFields, $node);
+                    $rowTrace['evaluation'] = $rowEval ?? ['status' => 'not_applicable', 'severity' => null, 'message' => null];
+                    $rowTraces[] = $rowTrace;
+                }
+
+                $response['debug'] = [
+                    'multiRow' => true,
+                    'fields' => $fields,
+                    'rowTraces' => $rowTraces,
+                ];
+            } else {
+                // Single-row debug
+                $debugTrace = [];
+                if (!empty($conditionTree['blocks'])) {
+                    $matched = false;
+                    foreach ($conditionTree['blocks'] as $blockIdx => $block) {
+                        $blockType = $block['type'] ?? 'if';
+                        $blockDebug = ['block' => $blockIdx, 'type' => $blockType, 'logic' => $block['logic'] ?? 'and', 'conditions' => []];
+
+                        if ($matched) { $blockDebug['blockResult'] = null; $blockDebug['skipped'] = true; $debugTrace[] = $blockDebug; continue; }
+                        if ($blockType === 'else') { $blockDebug['blockResult'] = true; $blockDebug['executed'] = true; $matched = true; $debugTrace[] = $blockDebug; continue; }
+
+                        foreach ($block['conditions'] ?? [] as $condIdx => $cond) {
+                            $condDebug = ['index' => $condIdx, 'condition' => $cond, 'details' => []];
+                            $source = $cond['source'] ?? '';
+                            $field = $cond['field'] ?? '$value';
+                            $key = $source ? "$source.$field" : $field;
+                            $val = $fields[$key] ?? null;
+                            $pass = $this->evaluator->compareValue($val, $cond['operator'] ?? '', $cond['value'] ?? null);
+                            $condDebug['result'] = $pass;
+                            $condDebug['details'][] = ['field' => $key, 'value' => is_array($val) ? json_encode($val) : $val, 'operator' => $cond['operator'] ?? '', 'expected' => $cond['value'] ?? null, 'pass' => $pass];
+                            $blockDebug['conditions'][] = $condDebug;
+                        }
+                        $blockResult = $this->evaluator->evaluateConditions($block, $fields, $node);
+                        $blockDebug['blockResult'] = $blockResult;
+                        $blockDebug['executed'] = $blockResult;
+                        if ($blockResult) $matched = true;
+                        $debugTrace[] = $blockDebug;
+                    }
+                }
+                $response['debug'] = ['multiRow' => false, 'fields' => $fields, 'trace' => $debugTrace];
+            }
+        }
+
+        return $this->json($response);
     }
 
     // Source data fetching and evaluation logic is now in ComplianceEvaluator service

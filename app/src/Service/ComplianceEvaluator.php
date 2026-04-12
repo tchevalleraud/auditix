@@ -52,6 +52,23 @@ class ComplianceEvaluator
             return ['status' => 'error', 'severity' => null, 'message' => $fields['_error']];
         }
 
+        // Detect multi-row sources → evaluate per row independently
+        $multiRowSource = null;
+        foreach ($rule->getDataSources() as $src) {
+            if (!empty($src['multiRow'])) {
+                $name = $src['name'] ?? 'default';
+                $rows = $fields["$name.\$rows"] ?? null;
+                if (is_array($rows) && !empty($rows)) {
+                    $multiRowSource = ['name' => $name, 'rows' => $rows];
+                    break;
+                }
+            }
+        }
+
+        if ($multiRowSource) {
+            return $this->evaluateMultiRow($rule, $node, $conditionTree, $fields, $multiRowSource);
+        }
+
         $evaluation = $this->evaluateBlocks($conditionTree['blocks'], $fields, $node);
         if ($evaluation === null) {
             return ['status' => 'not_applicable', 'severity' => null, 'message' => null];
@@ -71,6 +88,69 @@ class ComplianceEvaluator
     }
 
     /**
+     * Multi-row evaluation: run the condition tree independently for each row.
+     * Final result = worst status across all rows.
+     */
+    private function evaluateMultiRow(ComplianceRule $rule, Node $node, array $conditionTree, array $fields, array $multiRowSource): array
+    {
+        $statusPriority = ['compliant' => 0, 'not_applicable' => 1, 'skipped' => 2, 'error' => 3, 'non_compliant' => 4];
+        $srcName = $multiRowSource['name'];
+        $worst = null;
+        $rowResults = [];
+
+        foreach ($multiRowSource['rows'] as $row) {
+            // Inject this row's values as source.field (overriding any previous)
+            $rowFields = $fields;
+            foreach ($row as $label => $val) {
+                if ($label === '_key') {
+                    $rowFields["$srcName.\$key"] = $val;
+                } else {
+                    $rowFields["$srcName.$label"] = is_string($val) ? trim($val) : $val;
+                }
+            }
+
+            $rowEval = $this->evaluateBlocks($conditionTree['blocks'], $rowFields, $node);
+            $rowKey = $row['_key'] ?? count($rowResults);
+
+            if ($rowEval === null) {
+                $rowEval = ['status' => 'not_applicable', 'severity' => null, 'message' => null];
+            }
+            $rowResults[] = ['key' => $rowKey, 'evaluation' => $rowEval];
+
+            if (!$worst || ($statusPriority[$rowEval['status']] ?? 0) > ($statusPriority[$worst['status']] ?? 0)) {
+                $worst = $rowEval;
+            }
+        }
+
+        $result = $worst ?? ['status' => 'not_applicable', 'severity' => null, 'message' => null];
+        $result['multiRowResults'] = $rowResults;
+
+        // Use multiRowMessages for the global message if configured
+        $multiRowMessages = $rule->getMultiRowMessages();
+        if (!empty($multiRowMessages) && isset($multiRowMessages[$result['status']])) {
+            $result['message'] = $multiRowMessages[$result['status']];
+        } else {
+            // Build a summary message from per-row results
+            $summary = [];
+            foreach ($rowResults as $rr) {
+                $key = $rr['key'];
+                $st = $rr['evaluation']['status'] ?? 'unknown';
+                $msg = $rr['evaluation']['message'] ?? '';
+                $summary[] = "[$key] $st" . ($msg ? ": $msg" : '');
+            }
+            $result['message'] = implode("\n", $summary);
+        }
+
+        // Resolve recommendation template
+        if (!empty($result['recommendation'])) {
+            $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
+            $result['recommendation'] = $this->resolveTemplate($result['recommendation'], $fields, $expectedValues);
+        }
+
+        return $result;
+    }
+
+    /**
      * Collect fields from all data sources defined on the rule.
      * Returns a flat dict with keys like "sourceName.$value", "sourceName.$match", etc.
      */
@@ -87,6 +167,7 @@ class ComplianceEvaluator
             $resultMode = $src['resultMode'] ?? null;
             $valueMap = $src['valueMap'] ?? null;
             $keyGroup = $src['keyGroup'] ?? null;
+            $multiRow = !empty($src['multiRow']);
 
             if (!$command) {
                 $allFields['_error'] = "Source \"$name\": no command configured";
@@ -128,8 +209,18 @@ class ComplianceEvaluator
                     $captures = $this->extractCapture($pattern, $foundContent, $valueMap, $keyGroup);
                     $allFields["$name.\$count"] = count($captures);
 
-                    if (!empty($captures) && is_array($captures[0])) {
-                        // Use first match for field values
+                    if ($multiRow && !empty($captures) && is_array($captures[0] ?? null)) {
+                        // Multi-row: store ALL matches indexed by key or row number
+                        $allFields["$name.\$rows"] = $captures;
+                        foreach ($captures as $i => $row) {
+                            $rowKey = isset($row['_key']) && $row['_key'] !== null ? $row['_key'] : (string) $i;
+                            foreach ($row as $label => $val) {
+                                if ($label === '_key') continue;
+                                $allFields["$name.$rowKey.$label"] = $val;
+                            }
+                        }
+                    } elseif (!empty($captures) && is_array($captures[0] ?? null)) {
+                        // Single-row: use first match only (existing behavior)
                         $first = $captures[0];
                         foreach ($first as $label => $val) {
                             if ($label === '_key') {
@@ -315,8 +406,28 @@ class ComplianceEvaluator
             // Source field lookup: "sourceName.fieldName"
             $source = $cond['source'] ?? '';
             $field = $cond['field'] ?? '$value';
-            $key = $source ? "$source.$field" : $field;
-            $fieldValue = $fields[$key] ?? null;
+
+            // Multi-row wildcard: source.*.field → check ALL rows
+            if (str_contains($field, '*.')) {
+                $actualField = str_replace('*.', '', $field);
+                $rows = $fields["$source.\$rows"] ?? null;
+                if (is_array($rows) && !empty($rows)) {
+                    $operator = $cond['operator'] ?? '';
+                    $compareValue = $cond['value'] ?? null;
+                    // ALL rows must match the condition
+                    foreach ($rows as $row) {
+                        $rowVal = isset($row[$actualField]) ? trim((string) $row[$actualField]) : null;
+                        if (!$this->compareValue($rowVal, $operator, $compareValue)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }
+                return false; // no rows = condition fails
+            } else {
+                $key = $source ? "$source.$field" : $field;
+                $fieldValue = $fields[$key] ?? null;
+            }
         }
 
         return $this->compareValue($fieldValue, $cond['operator'] ?? '', $cond['value'] ?? null);
@@ -325,7 +436,7 @@ class ComplianceEvaluator
     /**
      * Compare a field value against operator and compare value.
      */
-    private function compareValue(mixed $fieldValue, string $operator, mixed $compareValue): bool
+    public function compareValue(mixed $fieldValue, string $operator, mixed $compareValue): bool
     {
         if (is_array($fieldValue)) {
             $fieldValue = json_encode($fieldValue);

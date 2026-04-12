@@ -120,6 +120,21 @@ class DashboardController extends AbstractController
             ],
             'monitoring' => $context->isMonitoringEnabled(),
             'compliance' => $compliance,
+            'vulnerabilities' => $this->buildVulnerabilitySection($contextId, $context, $em),
+            'systemUpdates' => $this->buildSystemUpdateSection($contextId, $context, $em),
+            'topology' => [
+                'maps' => (int) $em->createQuery('SELECT COUNT(m) FROM App\Entity\TopologyMap m WHERE m.context = :ctx')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'devices' => (int) $em->createQuery('SELECT COUNT(d) FROM App\Entity\TopologyDevice d WHERE d.map IN (SELECT m.id FROM App\Entity\TopologyMap m WHERE m.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'links' => (int) $em->createQuery('SELECT COUNT(l) FROM App\Entity\TopologyLink l WHERE l.map IN (SELECT m.id FROM App\Entity\TopologyMap m WHERE m.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+            ],
+            'reports' => [
+                'total' => (int) $em->createQuery('SELECT COUNT(r) FROM App\Entity\Report r WHERE r.context = :ctx')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'generated' => (int) $em->createQuery('SELECT COUNT(r) FROM App\Entity\Report r WHERE r.context = :ctx AND r.generatedAt IS NOT NULL')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+            ],
+            'automations' => [
+                'schedulers' => 0,
+                'active' => 0,
+            ],
         ]);
     }
 
@@ -275,6 +290,123 @@ class DashboardController extends AbstractController
             'topUnhealthyNodes' => $topUnhealthyNodes,
             'topViolatedRules' => $topViolatedRules,
             'lastEvaluatedAt' => $lastEvaluatedAt,
+        ];
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function buildSystemUpdateSection(int $contextId, Context $context, EntityManagerInterface $em): array
+    {
+        if (!$context->isSystemUpdateEnabled()) {
+            return ['enabled' => false];
+        }
+
+        $conn = $em->getConnection();
+
+        // Total product ranges
+        $totalRanges = (int) $conn->fetchOne(
+            'SELECT COUNT(*) FROM product_range WHERE context_id = ?',
+            [$contextId]
+        );
+
+        // Nodes with a productModel field set
+        $nodesWithRange = (int) $conn->fetchOne(
+            'SELECT COUNT(*) FROM node WHERE context_id = ? AND product_model IS NOT NULL',
+            [$contextId]
+        );
+
+        // Distribution by system update grade
+        $gradeRows = $conn->fetchAllAssociative(
+            'SELECT system_update_score AS grade, COUNT(*) AS cnt FROM node
+             WHERE context_id = ? AND system_update_score IS NOT NULL
+             GROUP BY system_update_score',
+            [$contextId]
+        );
+        $byGrade = ['A' => 0, 'B' => 0, 'C' => 0, 'D' => 0, 'E' => 0, 'F' => 0];
+        foreach ($gradeRows as $row) {
+            if (isset($byGrade[$row['grade']])) {
+                $byGrade[$row['grade']] = (int) $row['cnt'];
+            }
+        }
+
+        // Nodes past end-of-life (match node.product_model against product_range names)
+        $pastEol = (int) $conn->fetchOne(
+            'SELECT COUNT(*) FROM node n
+             WHERE n.context_id = ? AND n.product_model IS NOT NULL
+             AND EXISTS (
+                 SELECT 1 FROM product_range pr
+                 WHERE pr.context_id = n.context_id
+                 AND pr.end_of_life_date IS NOT NULL AND pr.end_of_life_date < NOW()
+                 AND n.product_model ILIKE CONCAT(\'%\', SPLIT_PART(pr.name, \' (\', 1), \'%\')
+             )',
+            [$contextId]
+        );
+
+        // Nodes past end-of-support
+        $pastEos = (int) $conn->fetchOne(
+            'SELECT COUNT(*) FROM node n
+             WHERE n.context_id = ? AND n.product_model IS NOT NULL
+             AND EXISTS (
+                 SELECT 1 FROM product_range pr
+                 WHERE pr.context_id = n.context_id
+                 AND pr.end_of_support_date IS NOT NULL AND pr.end_of_support_date < NOW()
+                 AND n.product_model ILIKE CONCAT(\'%\', SPLIT_PART(pr.name, \' (\', 1), \'%\')
+             )',
+            [$contextId]
+        );
+
+        return [
+            'enabled' => true,
+            'totalRanges' => $totalRanges,
+            'nodesWithRange' => $nodesWithRange,
+            'byGrade' => $byGrade,
+            'pastEndOfLife' => $pastEol,
+            'pastEndOfSupport' => $pastEos,
+        ];
+    }
+
+    /**
+     * @return array<string,mixed>
+     */
+    private function buildVulnerabilitySection(int $contextId, Context $context, EntityManagerInterface $em): array
+    {
+        if (!$context->isVulnerabilityEnabled()) {
+            return ['enabled' => false];
+        }
+
+        $conn = $em->getConnection();
+
+        $total = (int) $conn->fetchOne('SELECT COUNT(*) FROM cve WHERE context_id = ?', [$contextId]);
+
+        $sevRows = $conn->fetchAllAssociative(
+            'SELECT severity, COUNT(*) as cnt FROM cve WHERE context_id = ? GROUP BY severity',
+            [$contextId]
+        );
+        $bySeverity = [];
+        foreach ($sevRows as $row) {
+            $bySeverity[$row['severity']] = (int) $row['cnt'];
+        }
+
+        $topModels = $conn->fetchAllAssociative(
+            'SELECT dm.name, e.name as manufacturer, COUNT(cdm.id) as cve_count
+             FROM cve_device_model cdm
+             JOIN device_model dm ON dm.id = cdm.device_model_id
+             JOIN editor e ON e.id = dm.manufacturer_id
+             JOIN cve c ON c.id = cdm.cve_id
+             WHERE c.context_id = ?
+             GROUP BY dm.name, e.name
+             ORDER BY cve_count DESC LIMIT 5',
+            [$contextId]
+        );
+
+        return [
+            'enabled' => true,
+            'total' => $total,
+            'bySeverity' => $bySeverity,
+            'topAffectedModels' => $topModels,
+            'lastSyncAt' => $context->getLastVulnerabilitySyncAt()?->format('c'),
+            'lastSyncStatus' => $context->getLastVulnerabilitySyncStatus(),
         ];
     }
 }
