@@ -16,6 +16,7 @@ class TopologyLink
     public const PROTOCOL_OSPF = 'ospf';
     public const PROTOCOL_BGP = 'bgp';
     public const PROTOCOL_ISIS = 'isis';
+    public const PROTOCOL_MANUAL = 'manual';
 
     public const STATUS_UP = 'up';
     public const STATUS_DOWN = 'down';
@@ -68,6 +69,9 @@ class TopologyLink
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $styleOverride = null;
 
+    #[ORM\Column(type: 'boolean', options: ['default' => false])]
+    private bool $isManual = false;
+
     #[ORM\Column]
     private \DateTimeImmutable $discoveredAt;
 
@@ -97,6 +101,8 @@ class TopologyLink
     public function setMetadata(?array $v): static { $this->metadata = $v; return $this; }
     public function getStyleOverride(): ?array { return $this->styleOverride; }
     public function setStyleOverride(?array $v): static { $this->styleOverride = $v; return $this; }
+    public function getIsManual(): bool { return $this->isManual; }
+    public function setIsManual(bool $v): static { $this->isManual = $v; return $this; }
     public function getDiscoveredAt(): \DateTimeImmutable { return $this->discoveredAt; }
     public function setDiscoveredAt(\DateTimeImmutable $v): static { $this->discoveredAt = $v; return $this; }
 }

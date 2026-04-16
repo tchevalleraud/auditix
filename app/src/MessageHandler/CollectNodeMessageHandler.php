@@ -8,6 +8,7 @@ use App\Entity\CollectionFolder;
 use App\Entity\CollectionRule;
 use App\Entity\CollectionRuleExtract;
 use App\Entity\CollectionRuleFolder;
+use App\Entity\InventoryCategory;
 use App\Entity\Node;
 use App\Entity\NodeInventoryEntry;
 use Doctrine\ORM\EntityManagerInterface;
@@ -366,6 +367,9 @@ class CollectNodeMessageHandler
             ->getQuery()
             ->execute();
 
+        // Reset dedup index for this node
+        $this->entryIndex = [];
+
         $nodeFieldUpdates = [];
 
         foreach ($rules as $rule) {
@@ -538,7 +542,7 @@ class CollectNodeMessageHandler
         $separator = $ext->getBlockSeparator();
         if (!$separator) return;
 
-        $separatorRegex = '/' . $separator . '/m';
+        $separatorRegex = '~' . $separator . '~m';
         if (@preg_match_all($separatorRegex, $text, $matches, PREG_OFFSET_CAPTURE) === false || empty($matches[0])) {
             return;
         }
@@ -566,17 +570,21 @@ class CollectNodeMessageHandler
      * mode, or a single block in block mode). If $blockKey is provided, it
      * overrides the normal key resolution for all entries created.
      */
+    /** @var array<string, NodeInventoryEntry> Track persisted entries to avoid duplicate key violations */
+    private array $entryIndex = [];
+
     private function applyExtractOnText(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection, ?string $blockKey): void
     {
         $regex = $ext->getRegex();
         $hasValueMap = $ext->getValueMap() && count($ext->getValueMap()) > 0;
         $categoryName = $ext->getCategory() ? $ext->getCategory()->getName() : 'Uncategorized';
+        $catId = $ext->getCategory()?->getId() ?? 0;
 
         $lines = explode("\n", $text);
 
         foreach ($lines as $rawLine) {
             $line = rtrim($rawLine, "\r");
-            if (!preg_match('/' . $regex . '/', $line, $m)) {
+            if (!preg_match('~' . $regex . '~', $line, $m)) {
                 continue;
             }
 
@@ -601,31 +609,13 @@ class CollectNodeMessageHandler
 
             // Resolve values
             if ($hasValueMap) {
-                $seenLabels = [];
                 foreach ($ext->getValueMap() as $vm) {
                     $label = $vm['label'] ?? 'Value';
                     $group = $vm['group'] ?? 1;
                     $value = $m[$group] ?? '';
                     $value = $this->applyTranslation($rule, $ext, $value);
 
-                    // Deduplicate labels within the same value_map
-                    if (isset($seenLabels[$label])) {
-                        $seenLabels[$label]->setValue($value);
-                        continue;
-                    }
-
-                    $entry = new NodeInventoryEntry();
-                    $entry->setNode($node);
-                    $entry->setCategory($ext->getCategory());
-                    $entry->setCategoryName($categoryName);
-                    $entry->setEntryKey($key);
-                    $entry->setColLabel($label);
-                    $entry->setValue($value);
-                    $entry->setRule($rule);
-                    $entry->setCollection($collection);
-                    $entry->setUpdatedAt(new \DateTimeImmutable());
-                    $this->em->persist($entry);
-                    $seenLabels[$label] = $entry;
+                    $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, $label, $value, $rule, $collection);
                 }
             } else {
                 $vg = $ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT
@@ -634,19 +624,36 @@ class CollectNodeMessageHandler
                 $value = $m[$vg] ?? $m[1] ?? $m[0] ?? '';
                 $value = $this->applyTranslation($rule, $ext, $value);
 
-                $entry = new NodeInventoryEntry();
-                $entry->setNode($node);
-                $entry->setCategory($ext->getCategory());
-                $entry->setCategoryName($categoryName);
-                $entry->setEntryKey($key);
-                $entry->setColLabel('Value#1');
-                $entry->setValue($value);
-                $entry->setRule($rule);
-                $entry->setCollection($collection);
-                $entry->setUpdatedAt(new \DateTimeImmutable());
-                $this->em->persist($entry);
+                $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, 'Value#1', $value, $rule, $collection);
             }
         }
+    }
+
+    private function upsertEntry(
+        Node $node, ?InventoryCategory $category, string $categoryName, int $catId,
+        string $key, string $label, string $value,
+        CollectionRule $rule, Collection $collection,
+    ): void {
+        $indexKey = "$catId:$key:$label";
+        if (isset($this->entryIndex[$indexKey])) {
+            // Update existing entry in this batch
+            $this->entryIndex[$indexKey]->setValue($value);
+            $this->entryIndex[$indexKey]->setUpdatedAt(new \DateTimeImmutable());
+            return;
+        }
+
+        $entry = new NodeInventoryEntry();
+        $entry->setNode($node);
+        $entry->setCategory($category);
+        $entry->setCategoryName($categoryName);
+        $entry->setEntryKey($key);
+        $entry->setColLabel($label);
+        $entry->setValue($value);
+        $entry->setRule($rule);
+        $entry->setCollection($collection);
+        $entry->setUpdatedAt(new \DateTimeImmutable());
+        $this->em->persist($entry);
+        $this->entryIndex[$indexKey] = $entry;
     }
 
     private function extractNodeFieldValue(CollectionRuleExtract $ext, string $text): ?string
@@ -657,7 +664,7 @@ class CollectNodeMessageHandler
 
         foreach ($lines as $rawLine) {
             $line = rtrim($rawLine, "\r");
-            if (preg_match('/' . $regex . '/', $line, $m)) {
+            if (preg_match('~' . $regex . '~', $line, $m)) {
                 return $m[$group] ?? null;
             }
         }
@@ -740,7 +747,7 @@ class CollectNodeMessageHandler
             'not_equals' => $value !== ($compareValue ?? ''),
             'contains' => str_contains($value, $compareValue ?? ''),
             'not_contains' => !str_contains($value, $compareValue ?? ''),
-            'matches' => (bool) @preg_match('/' . ($compareValue ?? '') . '/', $value),
+            'matches' => (bool) @preg_match('~' . ($compareValue ?? '') . '~', $value),
             'greater_than' => (float) $value > (float) ($compareValue ?? '0'),
             'less_than' => (float) $value < (float) ($compareValue ?? '0'),
             'exists' => $value !== '',

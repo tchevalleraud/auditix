@@ -266,12 +266,10 @@ class TopologyMapController extends AbstractController
             if ($d->getNode()) {
                 $node = $d->getNode();
                 $deviceByNodeId[$node->getId()] = $d;
-                // Index by all known identifiers of this node
                 if ($node->getName()) $deviceByKey[strtolower($node->getName())] = $d;
                 if ($node->getHostname()) $deviceByKey[strtolower($node->getHostname())] = $d;
                 if ($node->getIpAddress()) $deviceByKey[strtolower($node->getIpAddress())] = $d;
             }
-            // Also index by device name and mgmt address
             $deviceByKey[strtolower($d->getName())] = $d;
             if ($d->getMgmtAddress()) $deviceByKey[strtolower($d->getMgmtAddress())] = $d;
             if ($d->getChassisId()) $deviceByKey[strtolower($d->getChassisId())] = $d;
@@ -280,132 +278,29 @@ class TopologyMapController extends AbstractController
         $stats = ['linksCreated' => 0, 'linksUpdated' => 0, 'errors' => []];
 
         foreach ($linkRules as $rule) {
-            $protocol = $rule['protocol'] ?? 'lldp';
+            $rule = $this->normalizeRule($rule);
+            $protocol = $rule['protocol'];
             $categoryId = $rule['inventoryCategoryId'] ?? null;
-            $remoteNameCol = $rule['remoteNameColumn'] ?? null;
-            $remotePortCol = $rule['remotePortColumn'] ?? null;
-            $chassisCol = $rule['chassisIdColumn'] ?? null;
-            $mgmtCol = $rule['mgmtAddressColumn'] ?? null;
-            $weightCol = $rule['weightColumn'] ?? null;
+            $destNodeCol = $rule['destNodeColumn'] ?? null;
 
-            if (!$categoryId || !$remoteNameCol) {
-                $stats['errors'][] = 'Missing inventoryCategoryId or remoteNameColumn in rule';
+            if (!$categoryId || !$destNodeCol) {
+                $stats['errors'][] = 'Missing inventoryCategoryId or destNodeColumn in rule';
                 continue;
             }
 
-            // Delete existing links for this protocol on this map
+            // Delete existing auto-generated links for this protocol (preserve manual links)
             $em->createQueryBuilder()
                 ->delete(TopologyLink::class, 'l')
-                ->where('l.map = :map AND l.protocol = :proto')
+                ->where('l.map = :map AND l.protocol = :proto AND l.isManual = false')
                 ->setParameter('map', $map)
                 ->setParameter('proto', $protocol)
                 ->getQuery()
                 ->execute();
 
-            // In-memory index to deduplicate bidirectional links (A→B == B→A)
-            $createdLinks = []; // "minDeviceId:maxDeviceId:minPort:maxPort" → true
-
-            // For each device that has a node, read its inventory in this category
-            foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
-                $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                    'node' => $sourceDevice->getNode(),
-                    'category' => $categoryId,
-                ]);
-
-                // Group entries by entryKey (= local port)
-                $byKey = [];
-                foreach ($entries as $entry) {
-                    $byKey[$entry->getEntryKey()][$entry->getColLabel()] = $entry->getValue();
-                }
-
-                foreach ($byKey as $localPort => $cols) {
-                    $remoteName = $cols[$remoteNameCol] ?? null;
-                    if (!$remoteName) continue;
-
-                    $remotePort = $remotePortCol ? ($cols[$remotePortCol] ?? null) : null;
-                    $chassisId = $chassisCol ? ($cols[$chassisCol] ?? null) : null;
-                    $mgmtAddress = $mgmtCol ? ($cols[$mgmtCol] ?? null) : null;
-                    $weight = $weightCol && isset($cols[$weightCol]) && is_numeric($cols[$weightCol]) ? (int) $cols[$weightCol] : null;
-
-                    // Find target device by correlating: name, chassis, IP
-                    $targetDevice = $deviceByKey[strtolower($remoteName)] ?? null;
-                    if (!$targetDevice && $chassisId) {
-                        $targetDevice = $deviceByKey[strtolower($chassisId)] ?? null;
-                    }
-                    if (!$targetDevice && $mgmtAddress) {
-                        $targetDevice = $deviceByKey[strtolower($mgmtAddress)] ?? null;
-                    }
-
-                    // Still not found → look up a Node in the context by name/hostname/IP
-                    if (!$targetDevice) {
-                        $targetNode = null;
-                        foreach (['name', 'hostname', 'ipAddress'] as $field) {
-                            $targetNode = $em->getRepository(Node::class)->findOneBy([
-                                'context' => $context,
-                                $field => $remoteName,
-                            ]);
-                            if ($targetNode) break;
-                        }
-                        // Also try by mgmt IP
-                        if (!$targetNode && $mgmtAddress) {
-                            $targetNode = $em->getRepository(Node::class)->findOneBy([
-                                'context' => $context,
-                                'ipAddress' => $mgmtAddress,
-                            ]);
-                        }
-
-                        // If we found a known node that already has a device, use it
-                        if ($targetNode && isset($deviceByNodeId[$targetNode->getId()])) {
-                            $targetDevice = $deviceByNodeId[$targetNode->getId()];
-                        } else {
-                            // Create a new device (external if no node found)
-                            $targetDevice = new TopologyDevice();
-                            $targetDevice->setMap($map);
-                            $targetDevice->setNode($targetNode);
-                            $targetDevice->setName($remoteName);
-                            $targetDevice->setChassisId($chassisId);
-                            $targetDevice->setMgmtAddress($mgmtAddress);
-                            $em->persist($targetDevice);
-                            $em->flush();
-
-                            if ($targetNode) {
-                                $deviceByNodeId[$targetNode->getId()] = $targetDevice;
-                            }
-                        }
-
-                        // Index the new device for future lookups
-                        $deviceByKey[strtolower($remoteName)] = $targetDevice;
-                        if ($chassisId) $deviceByKey[strtolower($chassisId)] = $targetDevice;
-                        if ($mgmtAddress) $deviceByKey[strtolower($mgmtAddress)] = $targetDevice;
-                    }
-
-                    // Deduplicate bidirectional: canonical key is sorted device IDs + sorted ports
-                    $srcId = $sourceDevice->getId();
-                    $tgtId = $targetDevice->getId();
-                    $minId = min($srcId, $tgtId);
-                    $maxId = max($srcId, $tgtId);
-                    $portA = ($srcId <= $tgtId) ? ($localPort ?? '') : ($remotePort ?? '');
-                    $portB = ($srcId <= $tgtId) ? ($remotePort ?? '') : ($localPort ?? '');
-                    $linkKey = "$minId:$maxId:$portA:$portB";
-
-                    if (isset($createdLinks[$linkKey])) {
-                        // Already created from the other direction, skip
-                        continue;
-                    }
-                    $createdLinks[$linkKey] = true;
-
-                    $link = new TopologyLink();
-                    $link->setMap($map);
-                    $link->setSourceDevice($sourceDevice);
-                    $link->setTargetDevice($targetDevice);
-                    $link->setProtocol($protocol);
-                    $link->setSourcePort($localPort);
-                    $link->setTargetPort($remotePort);
-                    $link->setStatus('up');
-                    $link->setWeight($weight);
-                    $em->persist($link);
-                    $stats['linksCreated']++;
-                }
+            if ($protocol === 'isis') {
+                $this->generateIsisLinks($rule, $map, $context, $deviceByNodeId, $deviceByKey, $em, $stats);
+            } else {
+                $this->generateStandardLinks($rule, $map, $context, $deviceByNodeId, $deviceByKey, $em, $stats);
             }
         }
 
@@ -413,6 +308,290 @@ class TopologyMapController extends AbstractController
         $em->flush();
 
         return $this->json($stats);
+    }
+
+    /**
+     * Normalize a link rule for backward compatibility.
+     */
+    private function normalizeRule(array $rule): array
+    {
+        if (empty($rule['destNodeColumn']) && !empty($rule['remoteNameColumn'])) {
+            $rule['destNodeColumn'] = $rule['remoteNameColumn'];
+        }
+        if (empty($rule['nodeMatchField'])) {
+            $rule['nodeMatchField'] = 'auto';
+        }
+        if (empty($rule['metricColumn']) && !empty($rule['weightColumn'])) {
+            $rule['metricColumn'] = $rule['weightColumn'];
+        }
+        return $rule;
+    }
+
+    /**
+     * Resolve a target device from an identifier value using nodeMatchField.
+     */
+    private function resolveTargetDevice(
+        string $destValue,
+        string $nodeMatchField,
+        array &$deviceByKey,
+        array &$deviceByNodeId,
+        Context $context,
+        EntityManagerInterface $em,
+        TopologyMap $map,
+    ): ?TopologyDevice {
+        $lowerDest = strtolower($destValue);
+
+        if ($nodeMatchField === 'auto') {
+            // Legacy behavior: try all identifiers
+            $target = $deviceByKey[$lowerDest] ?? null;
+            if ($target) return $target;
+
+            // Try Node lookup in context
+            $targetNode = null;
+            foreach (['name', 'hostname', 'ipAddress'] as $field) {
+                $targetNode = $em->getRepository(Node::class)->findOneBy(['context' => $context, $field => $destValue]);
+                if ($targetNode) break;
+            }
+        } else {
+            // Specific field: match against that field only
+            $target = null;
+            foreach ($deviceByNodeId as $device) {
+                $node = $device->getNode();
+                if (!$node) continue;
+                $fieldValue = match ($nodeMatchField) {
+                    'name' => $node->getName(),
+                    'hostname' => $node->getHostname(),
+                    'ipAddress' => $node->getIpAddress(),
+                    'chassisId' => $device->getChassisId(),
+                    'mgmtAddress' => $device->getMgmtAddress(),
+                    default => null,
+                };
+                if ($fieldValue && strtolower($fieldValue) === $lowerDest) {
+                    return $device;
+                }
+            }
+            // Also try in deviceByKey as fallback
+            $target = $deviceByKey[$lowerDest] ?? null;
+            if ($target) return $target;
+
+            // Try Node lookup using specific field
+            $nodeField = match ($nodeMatchField) {
+                'name' => 'name',
+                'hostname' => 'hostname',
+                'ipAddress' => 'ipAddress',
+                'chassisId' => null,
+                'mgmtAddress' => 'ipAddress',
+                default => null,
+            };
+            $targetNode = null;
+            if ($nodeField) {
+                $targetNode = $em->getRepository(Node::class)->findOneBy(['context' => $context, $nodeField => $destValue]);
+            }
+        }
+
+        // If we found a known node that already has a device, use it
+        if (isset($targetNode) && $targetNode && isset($deviceByNodeId[$targetNode->getId()])) {
+            return $deviceByNodeId[$targetNode->getId()];
+        }
+
+        // Create external device
+        $targetDevice = new TopologyDevice();
+        $targetDevice->setMap($map);
+        $targetDevice->setNode($targetNode ?? null);
+        $targetDevice->setName($destValue);
+        $em->persist($targetDevice);
+        $em->flush();
+
+        if (isset($targetNode) && $targetNode) {
+            $deviceByNodeId[$targetNode->getId()] = $targetDevice;
+        }
+        $deviceByKey[$lowerDest] = $targetDevice;
+
+        return $targetDevice;
+    }
+
+    /**
+     * Generate links using standard approach (LLDP, CDP, STP, OSPF, BGP).
+     */
+    private function generateStandardLinks(
+        array $rule, TopologyMap $map, Context $context,
+        array &$deviceByNodeId, array &$deviceByKey,
+        EntityManagerInterface $em, array &$stats,
+    ): void {
+        $protocol = $rule['protocol'];
+        $categoryId = $rule['inventoryCategoryId'];
+        $destNodeCol = $rule['destNodeColumn'];
+        $nodeMatchField = $rule['nodeMatchField'];
+        $localPortCol = $rule['localPortColumn'] ?? '';
+        $remotePortCol = $rule['remotePortColumn'] ?? '';
+        $weightCol = $rule['metricColumn'] ?? ($rule['weightColumn'] ?? '');
+
+        $createdLinks = [];
+
+        foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                'node' => $sourceDevice->getNode(),
+                'category' => $categoryId,
+            ]);
+
+            $byKey = [];
+            foreach ($entries as $entry) {
+                $byKey[$entry->getEntryKey()][$entry->getColLabel()] = $entry->getValue();
+            }
+
+            foreach ($byKey as $entryKey => $cols) {
+                $remoteName = $cols[$destNodeCol] ?? null;
+                if (!$remoteName) continue;
+
+                $localPort = ($localPortCol && isset($cols[$localPortCol])) ? $cols[$localPortCol] : $entryKey;
+                $remotePort = $remotePortCol ? ($cols[$remotePortCol] ?? null) : null;
+                $weight = ($weightCol && isset($cols[$weightCol]) && is_numeric($cols[$weightCol])) ? (int) $cols[$weightCol] : null;
+
+                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map);
+                if (!$targetDevice) continue;
+
+                // Deduplicate bidirectional
+                $srcId = $sourceDevice->getId();
+                $tgtId = $targetDevice->getId();
+                $minId = min($srcId, $tgtId);
+                $maxId = max($srcId, $tgtId);
+                $portA = ($srcId <= $tgtId) ? ($localPort ?? '') : ($remotePort ?? '');
+                $portB = ($srcId <= $tgtId) ? ($remotePort ?? '') : ($localPort ?? '');
+                $linkKey = "$minId:$maxId:$portA:$portB";
+                if (isset($createdLinks[$linkKey])) continue;
+                $createdLinks[$linkKey] = true;
+
+                $link = new TopologyLink();
+                $link->setMap($map);
+                $link->setSourceDevice($sourceDevice);
+                $link->setTargetDevice($targetDevice);
+                $link->setProtocol($protocol);
+                $link->setSourcePort($localPort);
+                $link->setTargetPort($remotePort);
+                $link->setStatus('up');
+                $link->setWeight($weight);
+                $em->persist($link);
+                $stats['linksCreated']++;
+            }
+        }
+    }
+
+    /**
+     * Generate ISIS links with bidirectional port matching.
+     */
+    private function generateIsisLinks(
+        array $rule, TopologyMap $map, Context $context,
+        array &$deviceByNodeId, array &$deviceByKey,
+        EntityManagerInterface $em, array &$stats,
+    ): void {
+        $categoryId = $rule['inventoryCategoryId'];
+        $destNodeCol = $rule['destNodeColumn'];
+        $nodeMatchField = $rule['nodeMatchField'];
+        $ifaceCol = $rule['sourceInterfaceColumn'] ?? '';
+        $metricCol = $rule['metricColumn'] ?? '';
+
+        // Phase 1: Collect all directed adjacencies
+        $directedEdges = [];
+
+        foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                'node' => $sourceDevice->getNode(),
+                'category' => $categoryId,
+            ]);
+
+            $byKey = [];
+            foreach ($entries as $entry) {
+                $byKey[$entry->getEntryKey()][$entry->getColLabel()] = $entry->getValue();
+            }
+
+            foreach ($byKey as $entryKey => $cols) {
+                $remoteName = $cols[$destNodeCol] ?? null;
+                if (!$remoteName) continue;
+
+                $localIface = ($ifaceCol && isset($cols[$ifaceCol])) ? $cols[$ifaceCol] : $entryKey;
+                $metric = ($metricCol && isset($cols[$metricCol]) && is_numeric($cols[$metricCol])) ? (int) $cols[$metricCol] : null;
+
+                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map);
+                if (!$targetDevice) continue;
+
+                $directedEdges[] = [
+                    'source' => $sourceDevice,
+                    'target' => $targetDevice,
+                    'localPort' => $localIface,
+                    'metric' => $metric,
+                ];
+            }
+        }
+
+        // Phase 2: Group by device pair and match bidirectionally
+        $pairMap = [];
+        foreach ($directedEdges as $edge) {
+            $sId = $edge['source']->getId();
+            $tId = $edge['target']->getId();
+            $minId = min($sId, $tId);
+            $maxId = max($sId, $tId);
+            $key = "$minId:$maxId";
+            $direction = ($sId <= $tId) ? 'ab' : 'ba';
+            $pairMap[$key][$direction][] = $edge;
+        }
+
+        foreach ($pairMap as $sides) {
+            $ab = $sides['ab'] ?? [];
+            $ba = $sides['ba'] ?? [];
+            $matchedBa = [];
+
+            foreach ($ab as $eAB) {
+                $found = false;
+                foreach ($ba as $i => $eBA) {
+                    if (in_array($i, $matchedBa, true)) continue;
+                    // Match: B's local port becomes A's remote port
+                    $link = new TopologyLink();
+                    $link->setMap($map);
+                    $link->setSourceDevice($eAB['source']);
+                    $link->setTargetDevice($eAB['target']);
+                    $link->setProtocol('isis');
+                    $link->setSourcePort($eAB['localPort']);
+                    $link->setTargetPort($eBA['localPort']);
+                    $link->setWeight($eAB['metric'] ?? $eBA['metric']);
+                    $link->setStatus('up');
+                    $em->persist($link);
+                    $stats['linksCreated']++;
+                    $matchedBa[] = $i;
+                    $found = true;
+                    break;
+                }
+                if (!$found) {
+                    // Unmatched A→B: no remote port info
+                    $link = new TopologyLink();
+                    $link->setMap($map);
+                    $link->setSourceDevice($eAB['source']);
+                    $link->setTargetDevice($eAB['target']);
+                    $link->setProtocol('isis');
+                    $link->setSourcePort($eAB['localPort']);
+                    $link->setTargetPort(null);
+                    $link->setWeight($eAB['metric']);
+                    $link->setStatus('up');
+                    $em->persist($link);
+                    $stats['linksCreated']++;
+                }
+            }
+
+            // Remaining unmatched B→A edges
+            foreach ($ba as $i => $eBA) {
+                if (in_array($i, $matchedBa, true)) continue;
+                $link = new TopologyLink();
+                $link->setMap($map);
+                $link->setSourceDevice($eBA['source']);
+                $link->setTargetDevice($eBA['target']);
+                $link->setProtocol('isis');
+                $link->setSourcePort($eBA['localPort']);
+                $link->setTargetPort(null);
+                $link->setWeight($eBA['metric']);
+                $link->setStatus('up');
+                $em->persist($link);
+                $stats['linksCreated']++;
+            }
+        }
     }
 
     /**
@@ -437,6 +616,8 @@ class TopologyMapController extends AbstractController
 
         $layout = $map->getLayout() ?? [];
 
+        $designConfig = $map->getDesignConfig();
+
         $nodesPayload = array_map(function (TopologyDevice $d) use ($layout) {
             $node = $d->getNode();
             $position = $layout[(string)$d->getId()] ?? null;
@@ -460,23 +641,119 @@ class TopologyMapController extends AbstractController
             ];
         }, $devices);
 
-        $edgesPayload = array_map(fn(TopologyLink $l) => [
-            'id' => (string) $l->getId(),
-            'source' => (string) $l->getSourceDevice()->getId(),
-            'target' => (string) $l->getTargetDevice()->getId(),
-            'protocol' => $l->getProtocol(),
-            'sourcePort' => $l->getSourcePort(),
-            'targetPort' => $l->getTargetPort(),
-            'status' => $l->getStatus(),
-            'weight' => $l->getWeight(),
-            'metadata' => $l->getMetadata(),
-            'styleOverride' => $l->getStyleOverride(),
-        ], $links);
+        // Collect inventory-based style rule columns for edge enrichment
+        $invRuleColumns = [];
+        $styleRules = $designConfig['styleRules'] ?? [];
+        foreach ($styleRules as $rule) {
+            if (($rule['condition'] ?? '') === 'linkInventory' && !empty($rule['inventoryCategoryId']) && !empty($rule['inventoryColumn'])) {
+                $invRuleColumns[] = ['categoryId' => $rule['inventoryCategoryId'], 'column' => $rule['inventoryColumn']];
+            }
+        }
+
+        // Pre-load inventory data for link enrichment if needed
+        $deviceInventoryCache = [];
+        if (!empty($invRuleColumns)) {
+            foreach ($devices as $d) {
+                $node = $d->getNode();
+                if (!$node) continue;
+                foreach ($invRuleColumns as $rc) {
+                    $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                        'node' => $node,
+                        'category' => $rc['categoryId'],
+                        'colLabel' => $rc['column'],
+                    ]);
+                    foreach ($entries as $entry) {
+                        $deviceInventoryCache[$d->getId()][$entry->getEntryKey()][$rc['column']] = $entry->getValue();
+                    }
+                }
+            }
+        }
+
+        $edgesPayload = array_map(function (TopologyLink $l) use ($deviceInventoryCache) {
+            $edge = [
+                'id' => (string) $l->getId(),
+                'source' => (string) $l->getSourceDevice()->getId(),
+                'target' => (string) $l->getTargetDevice()->getId(),
+                'protocol' => $l->getProtocol(),
+                'sourcePort' => $l->getSourcePort(),
+                'targetPort' => $l->getTargetPort(),
+                'status' => $l->getStatus(),
+                'weight' => $l->getWeight(),
+                'metadata' => $l->getMetadata(),
+                'isManual' => $l->getIsManual(),
+                'styleOverride' => $l->getStyleOverride(),
+            ];
+
+            // Enrich with inventory data for linkInventory style rules
+            if (!empty($deviceInventoryCache)) {
+                $srcId = $l->getSourceDevice()->getId();
+                $srcPort = $l->getSourcePort();
+                if ($srcPort && isset($deviceInventoryCache[$srcId][$srcPort])) {
+                    foreach ($deviceInventoryCache[$srcId][$srcPort] as $col => $val) {
+                        $edge['inv_' . $col] = $val;
+                    }
+                }
+                // Also check target side as fallback
+                $tgtId = $l->getTargetDevice()->getId();
+                $tgtPort = $l->getTargetPort();
+                if ($tgtPort && isset($deviceInventoryCache[$tgtId][$tgtPort])) {
+                    foreach ($deviceInventoryCache[$tgtId][$tgtPort] as $col => $val) {
+                        if (!isset($edge['inv_' . $col])) {
+                            $edge['inv_' . $col] = $val;
+                        }
+                    }
+                }
+            }
+
+            return $edge;
+        }, $links);
 
         $protocols = array_values(array_unique(array_filter(array_map(fn($l) => $l->getProtocol(), $links))));
 
+        // Compute ISIS areas per device if protocol filter is isis
+        $isisAreas = []; // deviceId => [area1, area2, ...]
+        $allIsisAreas = [];
+        if ($protocolFilter === 'isis') {
+            $linkRules = $map->getLinkRules();
+            foreach ($linkRules as $rule) {
+                if (($rule['protocol'] ?? '') === 'isis' && !empty($rule['areaCategoryId']) && !empty($rule['areaColumn'])) {
+                    $areaCatId = $rule['areaCategoryId'];
+                    $areaCol = $rule['areaColumn'];
+                    foreach ($devices as $d) {
+                        $node = $d->getNode();
+                        if (!$node) continue;
+                        $areaEntries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                            'node' => $node,
+                            'category' => $areaCatId,
+                            'colLabel' => $areaCol,
+                        ]);
+                        $areas = [];
+                        foreach ($areaEntries as $entry) {
+                            $val = $entry->getValue();
+                            if ($val !== null && $val !== '') {
+                                $areas[] = $val;
+                            }
+                        }
+                        $areas = array_values(array_unique($areas));
+                        if (!empty($areas)) {
+                            $isisAreas[$d->getId()] = $areas;
+                            foreach ($areas as $a) $allIsisAreas[$a] = true;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Enrich nodes with ISIS areas
+        if (!empty($isisAreas)) {
+            foreach ($nodesPayload as &$np) {
+                $np['isisAreas'] = $isisAreas[(int)$np['id']] ?? [];
+            }
+            unset($np);
+        }
+
         // Build zones payload: merge definitions from designConfig with positions from layout
-        $designConfig = $map->getDesignConfig();
         $zoneDefs = $designConfig['zones'] ?? [];
         $zonesPayload = array_map(function (array $z) use ($layout) {
             $z['position'] = $layout[$z['id']] ?? null;
@@ -490,6 +767,7 @@ class TopologyMapController extends AbstractController
             'zones' => $zonesPayload,
             'availableProtocols' => $protocols,
             'designConfig' => $designConfig,
+            'isisAreas' => array_values(array_keys($allIsisAreas)),
         ]);
     }
 
@@ -523,5 +801,116 @@ class TopologyMapController extends AbstractController
         $link->setStyleOverride($data['styleOverride'] ?? null);
         $em->flush();
         return $this->json(['ok' => true]);
+    }
+
+    /**
+     * Create a manual link between two devices.
+     */
+    #[Route('/{id}/links', methods: ['POST'])]
+    public function createLink(TopologyMap $map, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+
+        $sourceDeviceId = $data['sourceDeviceId'] ?? null;
+        $targetDeviceId = $data['targetDeviceId'] ?? null;
+        $sourcePort = $data['sourcePort'] ?? null;
+        $targetPort = $data['targetPort'] ?? null;
+
+        if (!$sourceDeviceId || !$targetDeviceId) {
+            return $this->json(['error' => 'sourceDeviceId and targetDeviceId are required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $sourceDevice = $em->getRepository(TopologyDevice::class)->find($sourceDeviceId);
+        $targetDevice = $em->getRepository(TopologyDevice::class)->find($targetDeviceId);
+
+        if (!$sourceDevice || $sourceDevice->getMap()->getId() !== $map->getId()) {
+            return $this->json(['error' => 'Source device not found on this map'], Response::HTTP_NOT_FOUND);
+        }
+        if (!$targetDevice || $targetDevice->getMap()->getId() !== $map->getId()) {
+            return $this->json(['error' => 'Target device not found on this map'], Response::HTTP_NOT_FOUND);
+        }
+
+        $link = new TopologyLink();
+        $link->setMap($map);
+        $link->setSourceDevice($sourceDevice);
+        $link->setTargetDevice($targetDevice);
+        $link->setProtocol('manual');
+        $link->setSourcePort($sourcePort);
+        $link->setTargetPort($targetPort);
+        $link->setStatus('up');
+        $link->setIsManual(true);
+        $em->persist($link);
+        $em->flush();
+
+        return $this->json([
+            'id' => $link->getId(),
+            'sourceDeviceId' => $sourceDevice->getId(),
+            'targetDeviceId' => $targetDevice->getId(),
+            'protocol' => $link->getProtocol(),
+            'sourcePort' => $link->getSourcePort(),
+            'targetPort' => $link->getTargetPort(),
+            'isManual' => true,
+        ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * Delete a link.
+     */
+    #[Route('/{mapId}/links/{linkId}', methods: ['DELETE'])]
+    public function deleteLink(int $mapId, int $linkId, EntityManagerInterface $em): JsonResponse
+    {
+        $link = $em->getRepository(TopologyLink::class)->find($linkId);
+        if (!$link || $link->getMap()->getId() !== $mapId) {
+            return $this->json(['error' => 'Link not found'], Response::HTTP_NOT_FOUND);
+        }
+        $em->remove($link);
+        $em->flush();
+        return $this->json(['ok' => true]);
+    }
+
+    /**
+     * Get available ports and identifiers for a device (from inventory data).
+     */
+    #[Route('/{mapId}/devices/{deviceId}/ports', methods: ['GET'])]
+    public function getDevicePorts(int $mapId, int $deviceId, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $device = $em->getRepository(TopologyDevice::class)->find($deviceId);
+        if (!$device || $device->getMap()->getId() !== $mapId) {
+            return $this->json(['error' => 'Device not found'], Response::HTTP_NOT_FOUND);
+        }
+
+        $node = $device->getNode();
+        $identifiers = [
+            'name' => $device->getName(),
+            'chassisId' => $device->getChassisId(),
+            'mgmtAddress' => $device->getMgmtAddress(),
+        ];
+        if ($node) {
+            $identifiers['hostname'] = $node->getHostname();
+            $identifiers['ipAddress'] = $node->getIpAddress();
+        }
+
+        $ports = [];
+        if ($node) {
+            $categoryId = $request->query->get('categoryId');
+            $qb = $em->createQueryBuilder()
+                ->select('DISTINCT e.entryKey')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->where('e.node = :node')
+                ->setParameter('node', $node)
+                ->orderBy('e.entryKey', 'ASC');
+
+            if ($categoryId) {
+                $qb->andWhere('e.category = :cat')->setParameter('cat', $categoryId);
+            }
+
+            $ports = array_column($qb->getQuery()->getScalarResult(), 'entryKey');
+        }
+
+        return $this->json([
+            'deviceId' => $device->getId(),
+            'identifiers' => array_filter($identifiers),
+            'ports' => $ports,
+        ]);
     }
 }

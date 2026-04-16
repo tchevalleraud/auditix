@@ -57,6 +57,7 @@ const PROTOCOL_COLORS: Record<string, string> = {
   ospf: "#10b981",
   bgp: "#f59e0b",
   isis: "#ec4899",
+  manual: "#94a3b8",
 };
 
 const MIN_FRAME_SIZE = 50;

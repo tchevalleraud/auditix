@@ -35,7 +35,10 @@ import {
   Play,
   XCircle,
   ShieldCheck,
+  Filter,
+  Eye,
 } from "lucide-react";
+import MatchRuleEditor, { type MatchBlock, type MatchRulesData, type InventoryStructure } from "@/components/MatchRuleEditor";
 
 interface PolicyDetail {
   id: number;
@@ -101,7 +104,7 @@ interface PolicyNodeResult {
   evaluatedAt: string | null;
 }
 
-const tabKeys = ["general", "rules", "nodes", "results"] as const;
+const tabKeys = ["general", "rules", "nodes", "automatch", "results"] as const;
 type TabKey = (typeof tabKeys)[number];
 
 export default function CompliancePolicyEditPage() {
@@ -154,6 +157,14 @@ export default function CompliancePolicyEditPage() {
   // Per-node evaluation status: "pending" (queued, grey), "running" (in progress, blue), "done" (finished)
   const [nodeEvalStatus, setNodeEvalStatus] = useState<Record<number, "pending" | "running" | "done">>({});
 
+  // Auto-match
+  const [matchBlocks, setMatchBlocks] = useState<MatchBlock[]>([]);
+  const [savingMatchRules, setSavingMatchRules] = useState(false);
+  const [matchRulesSaved, setMatchRulesSaved] = useState(false);
+  const [previewNodes, setPreviewNodes] = useState<PolicyNode[] | null>(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [inventoryStructure, setInventoryStructure] = useState<InventoryStructure[]>([]);
+
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
@@ -165,6 +176,7 @@ export default function CompliancePolicyEditPage() {
       setName(data.name);
       setDescription(data.description || "");
       setEnabled(data.enabled);
+      setMatchBlocks(data.matchRules?.blocks || []);
     }
     setLoading(false);
   }, [policyId]);
@@ -194,6 +206,12 @@ export default function CompliancePolicyEditPage() {
     if (!current) return;
     const res = await fetch(`/api/node-tags?context=${current.id}`);
     if (res.ok) setAvailableTags(await res.json());
+  }, [current]);
+
+  const loadInventoryStructure = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/inventory-categories/structure?context=${current.id}`);
+    if (res.ok) setInventoryStructure(await res.json());
   }, [current]);
 
   const loadResults = useCallback(async (silent = false) => {
@@ -227,12 +245,14 @@ export default function CompliancePolicyEditPage() {
   const resultsLoadedRef = useRef(false);
   const rulesLoadedRef = useRef(false);
   const nodesLoadedRef = useRef(false);
+  const automatchLoadedRef = useRef(false);
 
   useEffect(() => {
     if (activeTab === "rules" && !rulesLoadedRef.current) { rulesLoadedRef.current = true; loadRules(); }
     if (activeTab === "nodes" && !nodesLoadedRef.current) { nodesLoadedRef.current = true; loadNodes(); loadAvailableTags(); }
+    if (activeTab === "automatch" && !automatchLoadedRef.current) { automatchLoadedRef.current = true; loadInventoryStructure(); }
     if (activeTab === "results" && !resultsLoadedRef.current) { resultsLoadedRef.current = true; loadResults(); }
-  }, [activeTab, loadRules, loadNodes, loadAvailableTags, loadResults]);
+  }, [activeTab, loadRules, loadNodes, loadAvailableTags, loadResults, loadInventoryStructure]);
 
   // Mercure SSE for compliance results
   useEffect(() => {
@@ -294,6 +314,7 @@ export default function CompliancePolicyEditPage() {
     { key: "general" as TabKey, label: t("compliance_policies.tabGeneral"), icon: <BookOpen className="h-4 w-4" /> },
     { key: "rules" as TabKey, label: t("compliance_policies.tabRules"), icon: <ClipboardCheck className="h-4 w-4" /> },
     { key: "nodes" as TabKey, label: t("compliance_policies.tabNodes"), icon: <Server className="h-4 w-4" /> },
+    { key: "automatch" as TabKey, label: t("compliance_policies.tabAutoMatch"), icon: <Filter className="h-4 w-4" /> },
     { key: "results" as TabKey, label: t("compliance_policies.tabResults"), icon: <BarChart3 className="h-4 w-4" /> },
   ];
 
@@ -1024,6 +1045,155 @@ export default function CompliancePolicyEditPage() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Auto-match tab */}
+      {activeTab === "automatch" && (
+        <div className="space-y-6">
+          {/* Description */}
+          <p className="text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.autoMatchDesc")}</p>
+
+          {/* Action bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {matchRulesSaved && (
+                <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {t("compliance_policies.autoMatchSaved")}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={loadingPreview}
+                onClick={async () => {
+                  setLoadingPreview(true);
+                  try {
+                    const res = await fetch(`/api/compliance-policies/${policyId}/match-rules/preview`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ matchRules: { blocks: matchBlocks } }),
+                    });
+                    if (res.ok) setPreviewNodes(await res.json());
+                  } finally { setLoadingPreview(false); }
+                }}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors"
+              >
+                {loadingPreview ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
+                {t("compliance_policies.autoMatchPreview")}
+              </button>
+              <button
+                disabled={savingMatchRules}
+                onClick={async () => {
+                  setSavingMatchRules(true);
+                  setMatchRulesSaved(false);
+                  try {
+                    const res = await fetch(`/api/compliance-policies/${policyId}/match-rules`, {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ matchRules: { blocks: matchBlocks } }),
+                    });
+                    if (res.ok) {
+                      setMatchRulesSaved(true);
+                      setTimeout(() => setMatchRulesSaved(false), 2000);
+                    }
+                  } finally { setSavingMatchRules(false); }
+                }}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {savingMatchRules ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                {t("compliance_policies.autoMatchSave")}
+              </button>
+            </div>
+          </div>
+
+          {/* Match rules editor */}
+          {matchBlocks.length === 0 ? (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center shadow-sm">
+              <Filter className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.autoMatchNoRules")}</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("compliance_policies.autoMatchNoRulesDesc")}</p>
+              <button
+                onClick={() => setMatchBlocks([{ type: "if", logic: "and", conditions: [{ field: "name", operator: "equals", value: "" }], result: "include" }])}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                {t("compliance_policies.autoMatchAddIf")}
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+              <MatchRuleEditor
+                blocks={matchBlocks}
+                onChange={setMatchBlocks}
+                inventoryStructure={inventoryStructure}
+                t={t}
+              />
+            </div>
+          )}
+
+          {/* Preview results */}
+          {previewNodes !== null && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {t("compliance_policies.autoMatchPreview")}
+                  <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
+                    {t("compliance_policies.autoMatchPreviewCount", { count: String(previewNodes.length) })}
+                  </span>
+                </h3>
+                <button
+                  onClick={() => setPreviewNodes(null)}
+                  className="p-1 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {previewNodes.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-slate-400">{t("common.noResult")}</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 dark:border-slate-800 text-left">
+                      <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colName")}</th>
+                      <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colIpAddress")}</th>
+                      <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colManufacturer")}</th>
+                      <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colModel")}</th>
+                      <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("tags.title")}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {previewNodes.map((node) => (
+                      <tr key={node.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                        <td className="px-4 py-3">
+                          <span className="font-medium text-slate-900 dark:text-slate-100">
+                            {node.name || node.hostname || node.ipAddress}
+                          </span>
+                          {node.hostname && node.name && (
+                            <p className="text-xs text-slate-400 dark:text-slate-500">{node.hostname}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400 font-mono text-xs">{node.ipAddress}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{node.manufacturer?.name || "—"}</td>
+                        <td className="px-4 py-3 text-slate-600 dark:text-slate-400">{node.model?.name || "—"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {node.tags.slice(0, 3).map((tag) => (
+                              <span key={tag.id} className="inline-flex rounded-full px-1.5 py-0 text-[10px] font-medium text-white" style={{ backgroundColor: tag.color }}>{tag.name}</span>
+                            ))}
+                            {node.tags.length > 3 && (
+                              <span className="text-[10px] text-slate-400">+{node.tags.length - 3}</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -51,6 +51,7 @@ class CompliancePolicyExportController extends AbstractController
                 'name' => $policy->getName(),
                 'description' => $policy->getDescription(),
                 'enabled' => $policy->isEnabled(),
+                'matchRules' => $policy->getMatchRules(),
             ],
             'folder' => $folderData,
             'extraRuleRefs' => $extraRuleRefs,
@@ -157,6 +158,7 @@ class CompliancePolicyExportController extends AbstractController
             $policy->setName($data['policy']['name']);
             $policy->setDescription($data['policy']['description'] ?? null);
             $policy->setEnabled($data['policy']['enabled'] ?? true);
+            $policy->setMatchRules($data['policy']['matchRules'] ?? null);
             $policy->setContext($context);
             $em->persist($policy);
 

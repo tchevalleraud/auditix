@@ -11,6 +11,7 @@ use App\Entity\Node;
 use App\Entity\NodeTag;
 use App\Message\EvaluateComplianceMessage;
 use App\Service\ComplianceEvaluator;
+use App\Service\NodeMatchEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -29,6 +30,7 @@ class CompliancePolicyController extends AbstractController
             'name' => $p->getName(),
             'description' => $p->getDescription(),
             'enabled' => $p->isEnabled(),
+            'matchRules' => $p->getMatchRules(),
             'createdAt' => $p->getCreatedAt()->format('c'),
         ];
     }
@@ -330,9 +332,62 @@ class CompliancePolicyController extends AbstractController
         ];
     }
 
-    #[Route('/{id}/evaluate', methods: ['POST'])]
-    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em): JsonResponse
+    #[Route('/{id}/match-rules', methods: ['PUT'])]
+    public function updateMatchRules(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $data = json_decode($request->getContent(), true);
+        $policy->setMatchRules($data['matchRules'] ?? null);
+        $em->flush();
+
+        return $this->json(['ok' => true, 'matchRules' => $policy->getMatchRules()]);
+    }
+
+    #[Route('/{id}/match-rules/preview', methods: ['POST'])]
+    public function previewMatchRules(CompliancePolicy $policy, Request $request, NodeMatchEvaluator $evaluator): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $matchRules = $data['matchRules'] ?? null;
+        if (!$matchRules || empty($matchRules['blocks'])) {
+            return $this->json([]);
+        }
+
+        $matchingNodes = $evaluator->getMatchingNodes($policy->getContext(), $matchRules);
+        return $this->json(array_map($this->serializeNodeCompact(...), $matchingNodes));
+    }
+
+    #[Route('/{id}/match-rules/apply', methods: ['POST'])]
+    public function applyMatchRules(CompliancePolicy $policy, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
+    {
+        $matchRules = $policy->getMatchRules();
+        if (!$matchRules || empty($matchRules['blocks'])) {
+            return $this->json(['added' => 0, 'matched' => 0, 'total' => $policy->getNodes()->count()]);
+        }
+
+        $matchingNodes = $evaluator->getMatchingNodes($policy->getContext(), $matchRules);
+        $added = 0;
+        foreach ($matchingNodes as $node) {
+            if (!$policy->getNodes()->contains($node)) {
+                $policy->addNode($node);
+                $added++;
+            }
+        }
+        $em->flush();
+
+        return $this->json(['added' => $added, 'matched' => count($matchingNodes), 'total' => $policy->getNodes()->count()]);
+    }
+
+    #[Route('/{id}/evaluate', methods: ['POST'])]
+    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
+    {
+        // Auto-apply match rules before evaluating
+        $matchRules = $policy->getMatchRules();
+        if ($matchRules && !empty($matchRules['blocks'])) {
+            $matchingNodes = $evaluator->getMatchingNodes($policy->getContext(), $matchRules);
+            foreach ($matchingNodes as $node) {
+                $policy->addNode($node);
+            }
+        }
+
         $nodes = $policy->getNodes();
         $nodeIds = [];
         foreach ($nodes as $node) {

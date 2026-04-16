@@ -529,7 +529,7 @@ class NodeController extends AbstractController
         unset($entry);
 
         return $this->json([
-            'score' => $node->getScore(),
+            'score' => $node->getComplianceScore(),
             'policies' => array_values($policyMap),
         ]);
     }

@@ -2390,6 +2390,11 @@ class GenerateReportMessageHandler
             return $rx + $rw > 0 && $rx < $vw && $ry + $rh > 0 && $ry < $vh;
         };
 
+        // ISIS areas rendering (if protocol is isis)
+        if ($protocol === 'isis') {
+            $svg .= $this->renderIsisAreas($map, $devices, $devicePositions, $layout, $nodeConf, $dc);
+        }
+
         // Zones (background)
         usort($zones, fn($a, $b) => ($a['layer'] ?? 0) - ($b['layer'] ?? 0));
         foreach ($zones as $z) {
@@ -2602,6 +2607,214 @@ class GenerateReportMessageHandler
 
         $svg .= '</g></svg>';
         return $svg;
+    }
+
+    /**
+     * Render ISIS areas as convex hull polygons with gradient fill and dashed borders,
+     * with a mask to cut out node shapes so they remain opaque.
+     * $devicePositions: [id => ['x', 'y', 'device']] already offset.
+     */
+    private function renderIsisAreas(\App\Entity\TopologyMap $map, array $devices, array $devicePositions, array $layout, array $nodeConf, array $dc): string
+    {
+        // Find ISIS link rule with area config
+        $linkRules = $map->getLinkRules() ?? [];
+        $areaCategoryId = null; $areaColumn = null;
+        foreach ($linkRules as $rule) {
+            if (($rule['protocol'] ?? '') === 'isis' && !empty($rule['areaCategoryId']) && !empty($rule['areaColumn'])) {
+                $areaCategoryId = $rule['areaCategoryId'];
+                $areaColumn = $rule['areaColumn'];
+                break;
+            }
+        }
+        if (!$areaCategoryId || !$areaColumn) return '';
+
+        // Query inventory entries for all nodes
+        $nodeIds = [];
+        $nodeIdToDeviceId = [];
+        foreach ($devices as $d) {
+            $n = $d->getNode();
+            if ($n) { $nodeIds[] = $n->getId(); $nodeIdToDeviceId[$n->getId()] = (string) $d->getId(); }
+        }
+        if (empty($nodeIds)) return '';
+
+        $deviceAreas = []; // deviceId => [area1, area2, ...]
+        $allAreas = [];
+        $entries = $this->em->createQueryBuilder()
+            ->select('IDENTITY(e.node) as nid, e.value')
+            ->from(\App\Entity\NodeInventoryEntry::class, 'e')
+            ->where('e.node IN (:nodes) AND e.category = :cat AND e.colLabel = :col')
+            ->setParameter('nodes', $nodeIds)
+            ->setParameter('cat', $areaCategoryId)
+            ->setParameter('col', $areaColumn)
+            ->getQuery()->getArrayResult();
+        foreach ($entries as $entry) {
+            $nid = $entry['nid']; $val = $entry['value'];
+            if ($val === null || $val === '') continue;
+            $devId = $nodeIdToDeviceId[$nid] ?? null;
+            if (!$devId) continue;
+            if (!isset($deviceAreas[$devId])) $deviceAreas[$devId] = [];
+            if (!in_array($val, $deviceAreas[$devId], true)) $deviceAreas[$devId][] = $val;
+            $allAreas[$val] = true;
+        }
+        if (empty($deviceAreas)) return '';
+
+        $areaList = array_keys($allAreas);
+        sort($areaList);
+        $ISIS_AREA_COLORS = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#6366f1', '#a855f7', '#ec4899', '#14b8a6', '#f43f5e'];
+
+        // Darken helper
+        $darken = function (string $hex, float $ratio): string {
+            $n = hexdec(ltrim($hex, '#'));
+            $r = max(0, (int) round((($n >> 16) & 0xff) * (1 - $ratio)));
+            $g = max(0, (int) round((($n >> 8) & 0xff) * (1 - $ratio)));
+            $b = max(0, (int) round(($n & 0xff) * (1 - $ratio)));
+            return sprintf('#%06x', ($r << 16) | ($g << 8) | $b);
+        };
+
+        // Convex hull (Andrew's monotone chain)
+        $convexHull = function (array $pts): array {
+            if (count($pts) <= 1) return $pts;
+            usort($pts, fn($a, $b) => $a['x'] <=> $b['x'] ?: $a['y'] <=> $b['y']);
+            $cross = fn($o, $a, $b) => ($a['x'] - $o['x']) * ($b['y'] - $o['y']) - ($a['y'] - $o['y']) * ($b['x'] - $o['x']);
+            $lower = [];
+            foreach ($pts as $p) {
+                while (count($lower) >= 2 && $cross($lower[count($lower) - 2], $lower[count($lower) - 1], $p) <= 0) array_pop($lower);
+                $lower[] = $p;
+            }
+            $upper = [];
+            for ($i = count($pts) - 1; $i >= 0; $i--) {
+                $p = $pts[$i];
+                while (count($upper) >= 2 && $cross($upper[count($upper) - 2], $upper[count($upper) - 1], $p) <= 0) array_pop($upper);
+                $upper[] = $p;
+            }
+            array_pop($lower); array_pop($upper);
+            return array_merge($lower, $upper);
+        };
+
+        // Expand hull outward from centroid
+        $expandHull = function (array $hull, float $padding): array {
+            if (empty($hull)) return $hull;
+            $cx = array_sum(array_column($hull, 'x')) / count($hull);
+            $cy = array_sum(array_column($hull, 'y')) / count($hull);
+            return array_map(function ($p) use ($cx, $cy, $padding) {
+                $dx = $p['x'] - $cx; $dy = $p['y'] - $cy;
+                $d = sqrt($dx * $dx + $dy * $dy) ?: 1;
+                return ['x' => $p['x'] + $dx / $d * $padding, 'y' => $p['y'] + $dy / $d * $padding];
+            }, $hull);
+        };
+
+        // Rounded hull path
+        $roundedHullPath = function (array $pts, float $radius): string {
+            if (count($pts) < 2) return '';
+            $n = count($pts);
+            $unit = function ($a, $b) {
+                $dx = $b['x'] - $a['x']; $dy = $b['y'] - $a['y'];
+                $d = sqrt($dx * $dx + $dy * $dy) ?: 1;
+                return ['x' => $dx / $d, 'y' => $dy / $d, 'len' => $d];
+            };
+            $d = '';
+            for ($i = 0; $i < $n; $i++) {
+                $prev = $pts[($i - 1 + $n) % $n]; $cur = $pts[$i]; $next = $pts[($i + 1) % $n];
+                $u1 = $unit($cur, $prev); $u2 = $unit($cur, $next);
+                $r = min($radius, $u1['len'] / 2, $u2['len'] / 2);
+                $p1 = ['x' => $cur['x'] + $u1['x'] * $r, 'y' => $cur['y'] + $u1['y'] * $r];
+                $p2 = ['x' => $cur['x'] + $u2['x'] * $r, 'y' => $cur['y'] + $u2['y'] * $r];
+                $d .= ($i === 0 ? 'M ' : ' L ') . round($p1['x'], 1) . ' ' . round($p1['y'], 1);
+                $d .= ' Q ' . round($cur['x'], 1) . ' ' . round($cur['y'], 1) . ' ' . round($p2['x'], 1) . ' ' . round($p2['y'], 1);
+            }
+            return '<path d="' . $d . ' Z" />';
+        };
+
+        // Build per-area node positions (from already-offset device positions)
+        $areaNodes = []; // area => [{x,y,did}]
+        foreach ($devicePositions as $did => $dp) {
+            $areas = $deviceAreas[$did] ?? [];
+            foreach ($areas as $a) {
+                $areaNodes[$a][] = ['x' => $dp['x'], 'y' => $dp['y'], 'did' => $did];
+            }
+        }
+        if (empty($areaNodes)) return '';
+
+        $PADDING = 40.0;
+        $CORNER = 30.0;
+
+        $shapes = '';
+        $labels = '';
+
+        foreach ($areaList as $i => $area) {
+            $pts = $areaNodes[$area] ?? [];
+            if (empty($pts)) continue;
+            $color = $ISIS_AREA_COLORS[$i % count($ISIS_AREA_COLORS)];
+            $darkColor = $darken($color, 0.15);
+
+            // TCPDF doesn't support radialGradient / mask / mix-blend-mode.
+            // Use solid fill with fill-opacity for a soft background.
+            $fillAttrs = 'fill="' . $color . '" fill-opacity="0.14" stroke="' . $darkColor . '" stroke-opacity="0.75" stroke-width="1.5" stroke-dasharray="5 4"';
+
+            $shape = '';
+            $labelX = 0; $labelY = 0;
+
+            if (count($pts) === 1) {
+                // Single node: offset circle if node is in other areas
+                $did = $pts[0]['did'];
+                $otherAreas = array_filter($deviceAreas[$did] ?? [], fn($a) => $a !== $area);
+                $offX = 0; $offY = 0;
+                if (!empty($otherAreas)) {
+                    $otherIds = [];
+                    foreach ($otherAreas as $oa) {
+                        foreach (($areaNodes[$oa] ?? []) as $p) $otherIds[$p['did']] = true;
+                    }
+                    unset($otherIds[$did]);
+                    if (!empty($otherIds)) {
+                        $cx = 0; $cy = 0;
+                        foreach (array_keys($otherIds) as $id) { $cx += $devicePositions[$id]['x']; $cy += $devicePositions[$id]['y']; }
+                        $cx /= count($otherIds); $cy /= count($otherIds);
+                        $dx = $pts[0]['x'] - $cx; $dy = $pts[0]['y'] - $cy;
+                        $dist = sqrt($dx * $dx + $dy * $dy) ?: 1;
+                        $push = $PADDING * 1.3;
+                        $offX = $dx / $dist * $push; $offY = $dy / $dist * $push;
+                    }
+                }
+                $ccx = $pts[0]['x'] + $offX; $ccy = $pts[0]['y'] + $offY;
+                if ($offX !== 0.0 || $offY !== 0.0) {
+                    $shape .= '<line x1="' . round($pts[0]['x'], 1) . '" y1="' . round($pts[0]['y'], 1) . '" x2="' . round($ccx, 1) . '" y2="' . round($ccy, 1) . '" stroke="' . $darkColor . '" stroke-opacity="0.5" stroke-width="1" stroke-dasharray="3 3"/>';
+                }
+                $shape .= '<circle cx="' . round($ccx, 1) . '" cy="' . round($ccy, 1) . '" r="' . $PADDING . '" ' . $fillAttrs . '/>';
+                $labelX = $ccx; $labelY = $ccy;
+            } elseif (count($pts) === 2) {
+                $mx = ($pts[0]['x'] + $pts[1]['x']) / 2; $my = ($pts[0]['y'] + $pts[1]['y']) / 2;
+                $dx = $pts[1]['x'] - $pts[0]['x']; $dy = $pts[1]['y'] - $pts[0]['y'];
+                $dist = sqrt($dx * $dx + $dy * $dy) / 2;
+                $rx = $dist + $PADDING; $ry = $PADDING;
+                $angle = atan2($dy, $dx) * 180 / M_PI;
+                $shape = '<ellipse cx="' . round($mx, 1) . '" cy="' . round($my, 1) . '" rx="' . round($rx, 1) . '" ry="' . round($ry, 1) . '" transform="rotate(' . round($angle, 1) . ' ' . round($mx, 1) . ' ' . round($my, 1) . ')" ' . $fillAttrs . '/>';
+                $labelX = $mx; $labelY = $my;
+            } else {
+                $hull = $convexHull($pts);
+                $expanded = $expandHull($hull, $PADDING);
+                $pathEl = $roundedHullPath($expanded, $CORNER);
+                $shape = str_replace('<path ', '<path ' . $fillAttrs . ' ', $pathEl);
+                $sx2 = 0; $sy2 = 0;
+                foreach ($expanded as $p) { $sx2 += $p['x']; $sy2 += $p['y']; }
+                $labelX = $sx2 / count($expanded); $labelY = $sy2 / count($expanded);
+            }
+
+            $shapes .= $shape;
+
+            // Pill-style label
+            $fs = 12.0;
+            $padX = 8.0; $padY = 3.0;
+            $approxW = strlen($area) * $fs * 0.55 + $padX * 2;
+            $h = $fs + $padY * 2;
+            $rectX = $labelX - $approxW / 2;
+            $rectY = $labelY - $h / 2;
+            $textY = $labelY + $fs * 0.35;
+            $labels .= '<rect x="' . round($rectX, 1) . '" y="' . round($rectY, 1) . '" width="' . round($approxW, 1) . '" height="' . round($h, 1) . '" rx="' . round($h / 2, 1) . '" fill="' . $color . '" stroke="' . $darkColor . '" stroke-width="1"/>'
+                . '<text x="' . round($labelX, 1) . '" y="' . round($textY, 1) . '" text-anchor="middle" fill="white" font-size="' . $fs . '" font-weight="700">' . htmlspecialchars($area) . '</text>';
+        }
+
+        // Shapes first (behind), labels on top (after zones/nodes might be drawn as the caller chooses)
+        return $shapes . $labels;
     }
 
     private function renderAuthorsPage(TCPDF $pdf, array $authors, array $recipients, array $t, array $styles, float $mLeft, float $mRight, float $mBottom, array $headingsByLevel): void
