@@ -17,6 +17,15 @@ export interface AppContext {
   publicToken: string | null;
   userCount: number;
   createdAt: string;
+  vulnerabilityEnabled: boolean;
+  nvdApiKey: string | null;
+  vulnerabilitySyncIntervalHours: number;
+  vulnerabilityScoreWeight: number;
+  complianceScoreWeight: number;
+  systemUpdateEnabled: boolean;
+  systemUpdateScoreWeight: number;
+  lastVulnerabilitySyncAt: string | null;
+  lastVulnerabilitySyncStatus: string | null;
 }
 
 export interface UserInfo {
