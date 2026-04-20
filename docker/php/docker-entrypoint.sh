@@ -28,10 +28,12 @@ MERCURE_JWT_SECRET="!ChangeThisMercureHubJWTSecretKey!"
 ENVEOF
 fi
 
-# Always install dependencies if vendor is missing
-if [ -f /var/www/composer.json ] && [ ! -d /var/www/vendor ]; then
-    echo ">> Installing dependencies..."
-    composer install --no-interaction --optimize-autoloader
+# Install dependencies if vendor is missing or composer.lock is newer than installed state
+if [ -f /var/www/composer.json ]; then
+    if [ ! -d /var/www/vendor ] || [ /var/www/composer.lock -nt /var/www/vendor/composer/installed.json ]; then
+        echo ">> Installing/updating dependencies..."
+        composer install --no-interaction --optimize-autoloader
+    fi
 fi
 
 if [ -f /var/www/bin/console ]; then
