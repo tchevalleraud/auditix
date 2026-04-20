@@ -57,6 +57,7 @@
     "catAutomation": "Automazione",
     "schedules": "Pianificazioni",
     "labs": "Labs",
+    "api": "API",
     "settings": "Impostazioni"
   },
   "topbar": {
@@ -726,7 +727,30 @@
     "seconds": "secondi",
     "snmpRetentionLabel": "Periodo di conservazione",
     "minutes": "minuti",
-    "hours": "h"
+    "hours": "h",
+    "tabApiTokens": "Token API",
+    "apiTokensTitle": "Token API",
+    "apiTokensDesc": "Gestisci i token per l'accesso programmatico all'API Auditix.",
+    "apiTokenName": "Nome del token",
+    "apiTokenNamePlaceholder": "es. Pipeline CI/CD",
+    "apiTokenExpires": "Scadenza",
+    "apiTokenNoExpiry": "Nessuna scadenza",
+    "apiToken30Days": "30 giorni",
+    "apiToken90Days": "90 giorni",
+    "apiToken1Year": "1 anno",
+    "apiTokenCreate": "Genera token",
+    "apiTokenCreated": "Token creato con successo. Copialo ora, non verra piu mostrato.",
+    "apiTokenRevoke": "Revoca",
+    "apiTokenConfirmRevoke": "Revocare questo token? Le applicazioni che lo utilizzano perderanno l'accesso.",
+    "apiTokenLastUsed": "Ultimo utilizzo: {date}",
+    "apiTokenNeverUsed": "Mai utilizzato",
+    "apiTokenExpiredAt": "Scaduto",
+    "apiTokenExpiresAt": "Scade: {date}",
+    "apiTokenNoTokens": "Nessun token API"
+  },
+  "apiDocs": {
+    "title": "Documentazione API",
+    "subtitle": "Esplora e testa l'API pubblica REST di Auditix"
   },
   "tags": {
     "title": "Tag",

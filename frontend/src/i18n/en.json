@@ -62,6 +62,7 @@
     "systemUpdates": "Overview",
     "productRanges": "Product Ranges",
     "labs": "Labs",
+    "api": "API",
     "settings": "Settings"
   },
   "topbar": {
@@ -889,7 +890,30 @@
     "pluginSyncing": "Syncing...",
     "pluginLastSync": "Last sync: {date}",
     "pluginNeverSynced": "Never synced",
-    "pluginNoPlugins": "No vendor plugins available"
+    "pluginNoPlugins": "No vendor plugins available",
+    "tabApiTokens": "API Tokens",
+    "apiTokensTitle": "API Tokens",
+    "apiTokensDesc": "Manage tokens for programmatic access to the Auditix API.",
+    "apiTokenName": "Token name",
+    "apiTokenNamePlaceholder": "e.g., CI/CD Pipeline",
+    "apiTokenExpires": "Expiration",
+    "apiTokenNoExpiry": "No expiration",
+    "apiToken30Days": "30 days",
+    "apiToken90Days": "90 days",
+    "apiToken1Year": "1 year",
+    "apiTokenCreate": "Generate token",
+    "apiTokenCreated": "Token created successfully. Copy it now — it won't be shown again.",
+    "apiTokenRevoke": "Revoke",
+    "apiTokenConfirmRevoke": "Revoke this token? Any applications using it will lose access.",
+    "apiTokenLastUsed": "Last used: {date}",
+    "apiTokenNeverUsed": "Never used",
+    "apiTokenExpiredAt": "Expired",
+    "apiTokenExpiresAt": "Expires: {date}",
+    "apiTokenNoTokens": "No API tokens yet"
+  },
+  "apiDocs": {
+    "title": "API Documentation",
+    "subtitle": "Explore and test the Auditix public REST API"
   },
   "tags": {
     "title": "Tags",

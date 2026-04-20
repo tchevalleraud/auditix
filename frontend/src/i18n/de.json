@@ -57,6 +57,7 @@
     "catAutomation": "Automatisierung",
     "schedules": "Zeitplaene",
     "labs": "Labs",
+    "api": "API",
     "settings": "Einstellungen"
   },
   "topbar": {
@@ -726,7 +727,30 @@
     "seconds": "Sekunden",
     "snmpRetentionLabel": "Aufbewahrungsdauer",
     "minutes": "Minuten",
-    "hours": "h"
+    "hours": "h",
+    "tabApiTokens": "API-Token",
+    "apiTokensTitle": "API-Token",
+    "apiTokensDesc": "Verwalten Sie Token fuer den programmatischen Zugriff auf die Auditix-API.",
+    "apiTokenName": "Token-Name",
+    "apiTokenNamePlaceholder": "z.B. CI/CD-Pipeline",
+    "apiTokenExpires": "Ablauf",
+    "apiTokenNoExpiry": "Kein Ablauf",
+    "apiToken30Days": "30 Tage",
+    "apiToken90Days": "90 Tage",
+    "apiToken1Year": "1 Jahr",
+    "apiTokenCreate": "Token generieren",
+    "apiTokenCreated": "Token erfolgreich erstellt. Kopieren Sie ihn jetzt, er wird nicht erneut angezeigt.",
+    "apiTokenRevoke": "Widerrufen",
+    "apiTokenConfirmRevoke": "Dieses Token widerrufen? Anwendungen, die es verwenden, verlieren den Zugriff.",
+    "apiTokenLastUsed": "Zuletzt verwendet: {date}",
+    "apiTokenNeverUsed": "Nie verwendet",
+    "apiTokenExpiredAt": "Abgelaufen",
+    "apiTokenExpiresAt": "Laeuft ab: {date}",
+    "apiTokenNoTokens": "Noch keine API-Token"
+  },
+  "apiDocs": {
+    "title": "API-Dokumentation",
+    "subtitle": "Erkunden und testen Sie die oeffentliche REST-API von Auditix"
   },
   "tags": {
     "title": "Tags",

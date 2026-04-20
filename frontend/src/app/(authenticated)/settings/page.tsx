@@ -10,6 +10,9 @@ import {
   CircleUser,
   UserPlus,
   UserMinus,
+  Copy,
+  Trash2,
+  Key,
 } from "lucide-react";
 
 interface ContextUser {
@@ -21,7 +24,17 @@ interface ContextUser {
   avatar: string | null;
 }
 
-type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "members" | "lab";
+interface ApiTokenItem {
+  id: number;
+  name: string;
+  tokenPrefix: string;
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  expired: boolean;
+}
+
+type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "members" | "lab" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -79,6 +92,14 @@ export default function SettingsPage() {
   const [membersSuccess, setMembersSuccess] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
 
+  // API Tokens
+  const [apiTokens, setApiTokens] = useState<ApiTokenItem[]>([]);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [newTokenExpiry, setNewTokenExpiry] = useState("none");
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [tokenCreating, setTokenCreating] = useState(false);
+
   useEffect(() => {
     if (current) {
       setName(current.name);
@@ -115,6 +136,53 @@ export default function SettingsPage() {
   useEffect(() => {
     if (tab === "members") loadMembers();
   }, [tab, loadMembers]);
+
+  const loadApiTokens = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/api-tokens?context=${current.id}`);
+    if (res.ok) setApiTokens(await res.json());
+  }, [current]);
+
+  useEffect(() => {
+    if (tab === "apiTokens") loadApiTokens();
+  }, [tab, loadApiTokens]);
+
+  const handleCreateToken = async () => {
+    if (!current || !newTokenName.trim()) return;
+    setTokenCreating(true);
+    setCreatedToken(null);
+    try {
+      let expiresAt: string | null = null;
+      if (newTokenExpiry !== "none") {
+        const d = new Date();
+        if (newTokenExpiry === "30d") d.setDate(d.getDate() + 30);
+        else if (newTokenExpiry === "90d") d.setDate(d.getDate() + 90);
+        else if (newTokenExpiry === "1y") d.setFullYear(d.getFullYear() + 1);
+        expiresAt = d.toISOString();
+      }
+      const res = await fetch(`/api/api-tokens?context=${current.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newTokenName.trim(), expiresAt }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCreatedToken(data.plaintext);
+        setNewTokenName("");
+        setNewTokenExpiry("none");
+        await loadApiTokens();
+      }
+    } finally {
+      setTokenCreating(false);
+    }
+  };
+
+  const handleRevokeToken = async (tokenId: number) => {
+    const res = await fetch(`/api/api-tokens/${tokenId}`, { method: "DELETE" });
+    if (res.ok || res.status === 204) {
+      setApiTokens((prev) => prev.filter((t) => t.id !== tokenId));
+    }
+  };
 
   const handleSaveGeneral = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -256,6 +324,7 @@ export default function SettingsPage() {
     { key: "systemUpdates", label: t("settings.tabSystemUpdates") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
     { key: "lab" as TabKey, label: t("settings.tabLab") },
+    { key: "apiTokens" as TabKey, label: t("settings.tabApiTokens") },
   ];
 
   if (!current) {
@@ -791,6 +860,140 @@ export default function SettingsPage() {
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.pluginsTitle")}</h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.pluginsHelp")}</p>
             <PluginManager contextId={current?.id} t={t} plugins={plugins} setPlugins={setPlugins} pluginSyncing={pluginSyncing} setPluginSyncing={setPluginSyncing} />
+          </div>
+        </div>
+      )}
+
+      {tab === "apiTokens" && (
+        <div className="space-y-6">
+          {/* Create token form */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.apiTokensTitle")}</h2>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.apiTokensDesc")}</p>
+            </div>
+            <div className="flex items-end gap-3">
+              <div className="flex-1 space-y-1.5">
+                <label className={labelClass}>{t("settings.apiTokenName")}</label>
+                <input
+                  type="text"
+                  value={newTokenName}
+                  onChange={(e) => setNewTokenName(e.target.value)}
+                  placeholder={t("settings.apiTokenNamePlaceholder")}
+                  className={inputClass}
+                />
+              </div>
+              <div className="w-48 space-y-1.5">
+                <label className={labelClass}>{t("settings.apiTokenExpires")}</label>
+                <select
+                  value={newTokenExpiry}
+                  onChange={(e) => setNewTokenExpiry(e.target.value)}
+                  className={inputClass}
+                >
+                  <option value="none">{t("settings.apiTokenNoExpiry")}</option>
+                  <option value="30d">{t("settings.apiToken30Days")}</option>
+                  <option value="90d">{t("settings.apiToken90Days")}</option>
+                  <option value="1y">{t("settings.apiToken1Year")}</option>
+                </select>
+              </div>
+              <button
+                onClick={handleCreateToken}
+                disabled={tokenCreating || !newTokenName.trim()}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {tokenCreating && <Loader2 className="h-4 w-4 animate-spin" />}
+                <Key className="h-4 w-4" />
+                {t("settings.apiTokenCreate")}
+              </button>
+            </div>
+
+            {/* One-time token display */}
+            {createdToken && (
+              <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4 space-y-2">
+                <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">{t("settings.apiTokenCreated")}</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 rounded bg-white dark:bg-slate-800 px-3 py-2 text-sm font-mono text-slate-900 dark:text-slate-100 border border-slate-200 dark:border-slate-700 select-all">
+                    {createdToken}
+                  </code>
+                  <button
+                    onClick={() => {
+                      if (navigator.clipboard && window.isSecureContext) {
+                        navigator.clipboard.writeText(createdToken).then(() => {
+                          setTokenCopied(true);
+                          setTimeout(() => setTokenCopied(false), 2000);
+                        });
+                      } else {
+                        const textArea = document.createElement("textarea");
+                        textArea.value = createdToken;
+                        textArea.style.position = "fixed";
+                        textArea.style.left = "-9999px";
+                        document.body.appendChild(textArea);
+                        textArea.select();
+                        document.execCommand("copy");
+                        document.body.removeChild(textArea);
+                        setTokenCopied(true);
+                        setTimeout(() => setTokenCopied(false), 2000);
+                      }
+                    }}
+                    className="shrink-0 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                  >
+                    {tokenCopied ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Token list */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+            {apiTokens.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <Key className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="text-sm text-slate-400 dark:text-slate-500">{t("settings.apiTokenNoTokens")}</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {apiTokens.map((token) => (
+                  <div key={token.id} className="flex items-center justify-between px-6 py-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{token.name}</span>
+                        <code className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-xs font-mono text-slate-500 dark:text-slate-400">
+                          {token.tokenPrefix}...
+                        </code>
+                        {token.expired && (
+                          <span className="rounded-full bg-red-100 dark:bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600 dark:text-red-400">
+                            {t("settings.apiTokenExpiredAt")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500">
+                        <span>{new Date(token.createdAt).toLocaleDateString()}</span>
+                        <span>
+                          {token.lastUsedAt
+                            ? t("settings.apiTokenLastUsed", { date: new Date(token.lastUsedAt).toLocaleDateString() })
+                            : t("settings.apiTokenNeverUsed")}
+                        </span>
+                        {token.expiresAt && !token.expired && (
+                          <span>{t("settings.apiTokenExpiresAt", { date: new Date(token.expiresAt).toLocaleDateString() })}</span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (confirm(t("settings.apiTokenConfirmRevoke"))) {
+                          handleRevokeToken(token.id);
+                        }
+                      }}
+                      className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {t("settings.apiTokenRevoke")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

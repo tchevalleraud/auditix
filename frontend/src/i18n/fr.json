@@ -62,6 +62,7 @@
     "systemUpdates": "Vue d'ensemble",
     "productRanges": "Gammes de produit",
     "labs": "Labs",
+    "api": "API",
     "settings": "Parametres"
   },
   "topbar": {
@@ -863,7 +864,30 @@
     "vulnSyncNow": "Synchroniser maintenant",
     "vulnSyncing": "Synchronisation en cours...",
     "vulnLastSync": "Derniere sync : {date}",
-    "vulnNeverSynced": "Jamais synchronise"
+    "vulnNeverSynced": "Jamais synchronise",
+    "tabApiTokens": "Tokens API",
+    "apiTokensTitle": "Tokens API",
+    "apiTokensDesc": "Gerez les tokens pour l'acces programmatique a l'API Auditix.",
+    "apiTokenName": "Nom du token",
+    "apiTokenNamePlaceholder": "ex. Pipeline CI/CD",
+    "apiTokenExpires": "Expiration",
+    "apiTokenNoExpiry": "Pas d'expiration",
+    "apiToken30Days": "30 jours",
+    "apiToken90Days": "90 jours",
+    "apiToken1Year": "1 an",
+    "apiTokenCreate": "Generer un token",
+    "apiTokenCreated": "Token cree avec succes. Copiez-le maintenant, il ne sera plus affiche.",
+    "apiTokenRevoke": "Revoquer",
+    "apiTokenConfirmRevoke": "Revoquer ce token ? Les applications qui l'utilisent perdront l'acces.",
+    "apiTokenLastUsed": "Derniere utilisation : {date}",
+    "apiTokenNeverUsed": "Jamais utilise",
+    "apiTokenExpiredAt": "Expire",
+    "apiTokenExpiresAt": "Expire le : {date}",
+    "apiTokenNoTokens": "Aucun token API"
+  },
+  "apiDocs": {
+    "title": "Documentation API",
+    "subtitle": "Explorez et testez l'API publique REST d'Auditix"
   },
   "tags": {
     "title": "Tags",

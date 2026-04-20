@@ -57,6 +57,7 @@
     "catAutomation": "Automatizacion",
     "schedules": "Programaciones",
     "labs": "Labs",
+    "api": "API",
     "settings": "Configuracion"
   },
   "topbar": {
@@ -726,7 +727,30 @@
     "seconds": "segundos",
     "snmpRetentionLabel": "Periodo de retencion",
     "minutes": "minutos",
-    "hours": "h"
+    "hours": "h",
+    "tabApiTokens": "Tokens API",
+    "apiTokensTitle": "Tokens API",
+    "apiTokensDesc": "Gestione los tokens para el acceso programatico a la API de Auditix.",
+    "apiTokenName": "Nombre del token",
+    "apiTokenNamePlaceholder": "ej. Pipeline CI/CD",
+    "apiTokenExpires": "Expiracion",
+    "apiTokenNoExpiry": "Sin expiracion",
+    "apiToken30Days": "30 dias",
+    "apiToken90Days": "90 dias",
+    "apiToken1Year": "1 ano",
+    "apiTokenCreate": "Generar token",
+    "apiTokenCreated": "Token creado con exito. Copielo ahora, no se mostrara de nuevo.",
+    "apiTokenRevoke": "Revocar",
+    "apiTokenConfirmRevoke": "Revocar este token? Las aplicaciones que lo usen perderan el acceso.",
+    "apiTokenLastUsed": "Ultimo uso: {date}",
+    "apiTokenNeverUsed": "Nunca usado",
+    "apiTokenExpiredAt": "Expirado",
+    "apiTokenExpiresAt": "Expira: {date}",
+    "apiTokenNoTokens": "Sin tokens API"
+  },
+  "apiDocs": {
+    "title": "Documentacion API",
+    "subtitle": "Explore y pruebe la API publica REST de Auditix"
   },
   "tags": {
     "title": "Tags",

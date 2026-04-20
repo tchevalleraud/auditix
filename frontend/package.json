@@ -1,6 +1,6 @@
 {
   "name": "auditix-frontend",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
@@ -29,7 +29,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-grid-layout": "^1.4.4",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "swagger-ui-react": "^5.32.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.0",

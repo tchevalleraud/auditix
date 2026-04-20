@@ -15,6 +15,10 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return [
       {
+        source: "/api/v1/:path*",
+        destination: "http://nginx:80/api/v1/:path*",
+      },
+      {
         source: "/api/:path*",
         destination: "http://nginx:80/api/:path*",
       },

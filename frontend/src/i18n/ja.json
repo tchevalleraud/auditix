@@ -57,6 +57,7 @@
     "catAutomation": "自動化",
     "schedules": "スケジュール",
     "labs": "ラボ",
+    "api": "API",
     "settings": "設定"
   },
   "topbar": {
@@ -726,7 +727,30 @@
     "seconds": "秒",
     "snmpRetentionLabel": "保持期間",
     "minutes": "分",
-    "hours": "時間"
+    "hours": "時間",
+    "tabApiTokens": "APIトークン",
+    "apiTokensTitle": "APIトークン",
+    "apiTokensDesc": "Auditix APIへのプログラムアクセス用トークンを管理します。",
+    "apiTokenName": "トークン名",
+    "apiTokenNamePlaceholder": "例: CI/CDパイプライン",
+    "apiTokenExpires": "有効期限",
+    "apiTokenNoExpiry": "無期限",
+    "apiToken30Days": "30日",
+    "apiToken90Days": "90日",
+    "apiToken1Year": "1年",
+    "apiTokenCreate": "トークンを生成",
+    "apiTokenCreated": "トークンが作成されました。今すぐコピーしてください。再度表示されません。",
+    "apiTokenRevoke": "取り消し",
+    "apiTokenConfirmRevoke": "このトークンを取り消しますか？使用中のアプリケーションはアクセスを失います。",
+    "apiTokenLastUsed": "最終使用: {date}",
+    "apiTokenNeverUsed": "未使用",
+    "apiTokenExpiredAt": "期限切れ",
+    "apiTokenExpiresAt": "期限: {date}",
+    "apiTokenNoTokens": "APIトークンはまだありません"
+  },
+  "apiDocs": {
+    "title": "APIドキュメント",
+    "subtitle": "AuditixのパブリックREST APIを閲覧・テスト"
   },
   "tags": {
     "title": "タグ",

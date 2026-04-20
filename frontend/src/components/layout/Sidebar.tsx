@@ -32,6 +32,7 @@ import {
   ShieldAlert,
   RefreshCw,
   Layers,
+  Code2,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -311,6 +312,19 @@ export default function Sidebar() {
           >
             <FlaskConical className="h-5 w-5 shrink-0" />
             {t("sidebar.labs")}
+          </Link>
+        )}
+        {!adminMode && (
+          <Link
+            href="/documentation"
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              pathname.startsWith("/documentation")
+                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+            }`}
+          >
+            <Code2 className="h-5 w-5 shrink-0" />
+            {t("sidebar.api")}
           </Link>
         )}
         {!adminMode && (
