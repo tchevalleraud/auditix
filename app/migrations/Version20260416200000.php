@@ -32,9 +32,9 @@ final class Version20260416200000 extends AbstractMigration
             )
         SQL);
 
-        $this->addSql('CREATE UNIQUE INDEX uniq_api_token_hash ON api_token (token_hash)');
-        $this->addSql('CREATE INDEX idx_api_token_hash ON api_token (token_hash)');
-        $this->addSql('CREATE INDEX idx_api_token_user ON api_token (user_id)');
+        $this->addSql('CREATE UNIQUE INDEX IF NOT EXISTS uniq_api_token_hash ON api_token (token_hash)');
+        $this->addSql('CREATE INDEX IF NOT EXISTS idx_api_token_hash ON api_token (token_hash)');
+        $this->addSql('CREATE INDEX IF NOT EXISTS idx_api_token_user ON api_token (user_id)');
 
         $this->addSql(<<<'SQL'
             COMMENT ON COLUMN api_token.expires_at IS '(DC2Type:datetime_immutable)'
