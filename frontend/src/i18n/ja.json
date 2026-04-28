@@ -23,7 +23,17 @@
     "passwordPlaceholder": "パスワードを入力",
     "login": "ログイン",
     "invalidCredentials": "認証情報が無効です",
-    "serverError": "サーバー接続エラー"
+    "serverError": "サーバー接続エラー",
+    "totpTitle": "二段階認証",
+    "totpSubtitle": "認証アプリで生成された6桁のコードを入力してください",
+    "totpBackupSubtitle": "バックアップコードを1つ入力してください",
+    "totpCode": "認証コード",
+    "backupCode": "バックアップコード",
+    "totpVerify": "認証",
+    "totpCancel": "戻る",
+    "totpUseBackup": "バックアップコードを使用",
+    "totpUseApp": "アプリを使用",
+    "invalidTotpCode": "無効または期限切れのコード"
   },
   "sidebar": {
     "administration": "管理",
@@ -208,7 +218,20 @@
     "theme": "テーマ",
     "themeLight": "ライト",
     "themeDark": "ダーク",
-    "themeAuto": "自動"
+    "themeAuto": "自動",
+    "totpTitle": "二要素認証",
+    "totpDescription": "ログイン時に一時的なコードを要求することで、追加のセキュリティを提供します。",
+    "totpEnabledBadge": "有効",
+    "totpEnable": "有効化",
+    "totpDisable": "無効化",
+    "totpScanQr": "認証アプリでこのQRコードをスキャンするか、下のキーを入力してください。",
+    "totpEnterCode": "アプリのコード",
+    "totpConfirm": "確認",
+    "totpInvalidCode": "TOTPコードが無効です",
+    "totpSetupError": "TOTPを初期化できませんでした",
+    "totpBackupCodesTitle": "バックアップコード",
+    "totpBackupCodesHelp": "安全な場所に保管してください。各コードは1回のみ使用でき、TOTPコードの代わりになります。",
+    "totpCopyCodes": "コードをコピー"
   },
   "admin_users": {
     "title": "ユーザー",

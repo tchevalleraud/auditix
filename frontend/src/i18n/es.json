@@ -23,7 +23,17 @@
     "passwordPlaceholder": "Su contrasena",
     "login": "Iniciar sesion",
     "invalidCredentials": "Credenciales invalidas",
-    "serverError": "Error de conexion al servidor"
+    "serverError": "Error de conexion al servidor",
+    "totpTitle": "Verificacion en dos pasos",
+    "totpSubtitle": "Introduzca el codigo de 6 digitos de su aplicacion de autenticacion",
+    "totpBackupSubtitle": "Introduzca uno de sus codigos de respaldo",
+    "totpCode": "Codigo de verificacion",
+    "backupCode": "Codigo de respaldo",
+    "totpVerify": "Validar",
+    "totpCancel": "Volver",
+    "totpUseBackup": "Usar un codigo de respaldo",
+    "totpUseApp": "Usar la aplicacion",
+    "invalidTotpCode": "Codigo invalido o expirado"
   },
   "sidebar": {
     "administration": "Administracion",
@@ -208,7 +218,20 @@
     "theme": "Tema",
     "themeLight": "Claro",
     "themeDark": "Oscuro",
-    "themeAuto": "Automatico"
+    "themeAuto": "Automatico",
+    "totpTitle": "Autenticacion en dos pasos",
+    "totpDescription": "Anada una capa adicional de seguridad exigiendo un codigo temporal al iniciar sesion.",
+    "totpEnabledBadge": "Activado",
+    "totpEnable": "Activar",
+    "totpDisable": "Desactivar",
+    "totpScanQr": "Escanee este codigo QR con su aplicacion de autenticacion, o introduzca la clave a continuacion.",
+    "totpEnterCode": "Codigo de la aplicacion",
+    "totpConfirm": "Confirmar",
+    "totpInvalidCode": "Codigo TOTP invalido",
+    "totpSetupError": "No se pudo inicializar TOTP",
+    "totpBackupCodesTitle": "Sus codigos de respaldo",
+    "totpBackupCodesHelp": "Guardelos en un lugar seguro. Cada codigo solo se puede usar una vez y reemplaza al codigo TOTP.",
+    "totpCopyCodes": "Copiar codigos"
   },
   "admin_users": {
     "title": "Usuarios",

@@ -23,7 +23,17 @@
     "passwordPlaceholder": "Votre mot de passe",
     "login": "Se connecter",
     "invalidCredentials": "Identifiants invalides",
-    "serverError": "Erreur de connexion au serveur"
+    "serverError": "Erreur de connexion au serveur",
+    "totpTitle": "Verification en deux etapes",
+    "totpSubtitle": "Saisissez le code a 6 chiffres genere par votre application",
+    "totpBackupSubtitle": "Saisissez l'un de vos codes de secours",
+    "totpCode": "Code de verification",
+    "backupCode": "Code de secours",
+    "totpVerify": "Valider",
+    "totpCancel": "Retour",
+    "totpUseBackup": "Utiliser un code de secours",
+    "totpUseApp": "Utiliser l'application",
+    "invalidTotpCode": "Code invalide ou expire"
   },
   "sidebar": {
     "administration": "Administration",
@@ -256,7 +266,20 @@
     "theme": "Theme",
     "themeLight": "Clair",
     "themeDark": "Sombre",
-    "themeAuto": "Automatique"
+    "themeAuto": "Automatique",
+    "totpTitle": "Authentification a deux facteurs",
+    "totpDescription": "Ajoutez une couche de securite supplementaire en exigeant un code temporaire lors de la connexion.",
+    "totpEnabledBadge": "Active",
+    "totpEnable": "Activer",
+    "totpDisable": "Desactiver",
+    "totpScanQr": "Scannez ce QR code avec votre application d'authentification, ou saisissez la cle ci-dessous.",
+    "totpEnterCode": "Code genere par l'application",
+    "totpConfirm": "Confirmer",
+    "totpInvalidCode": "Code TOTP invalide",
+    "totpSetupError": "Impossible d'initialiser TOTP",
+    "totpBackupCodesTitle": "Vos codes de secours",
+    "totpBackupCodesHelp": "Conservez-les en lieu sur. Chaque code n'est utilisable qu'une seule fois et remplace le code TOTP.",
+    "totpCopyCodes": "Copier les codes"
   },
   "admin_users": {
     "title": "Utilisateurs",

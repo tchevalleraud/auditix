@@ -23,7 +23,17 @@
     "passwordPlaceholder": "Your password",
     "login": "Sign in",
     "invalidCredentials": "Invalid credentials",
-    "serverError": "Server connection error"
+    "serverError": "Server connection error",
+    "totpTitle": "Two-factor verification",
+    "totpSubtitle": "Enter the 6-digit code from your authenticator app",
+    "totpBackupSubtitle": "Enter one of your backup codes",
+    "totpCode": "Verification code",
+    "backupCode": "Backup code",
+    "totpVerify": "Verify",
+    "totpCancel": "Back",
+    "totpUseBackup": "Use a backup code",
+    "totpUseApp": "Use the app",
+    "invalidTotpCode": "Invalid or expired code"
   },
   "sidebar": {
     "administration": "Administration",
@@ -284,7 +294,20 @@
     "theme": "Theme",
     "themeLight": "Light",
     "themeDark": "Dark",
-    "themeAuto": "Automatic"
+    "themeAuto": "Automatic",
+    "totpTitle": "Two-factor authentication",
+    "totpDescription": "Add an extra layer of security by requiring a temporary code at sign-in.",
+    "totpEnabledBadge": "Enabled",
+    "totpEnable": "Enable",
+    "totpDisable": "Disable",
+    "totpScanQr": "Scan this QR code with your authenticator app, or enter the key below.",
+    "totpEnterCode": "Code from your app",
+    "totpConfirm": "Confirm",
+    "totpInvalidCode": "Invalid TOTP code",
+    "totpSetupError": "Could not initialize TOTP",
+    "totpBackupCodesTitle": "Your backup codes",
+    "totpBackupCodesHelp": "Store them safely. Each code can be used only once and replaces the TOTP code.",
+    "totpCopyCodes": "Copy codes"
   },
   "admin_users": {
     "title": "Users",

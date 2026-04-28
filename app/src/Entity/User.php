@@ -47,6 +47,19 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $preferences = null;
 
+    #[ORM\Column(length: 64, nullable: true)]
+    private ?string $totpSecret = null;
+
+    #[ORM\Column(options: ['default' => false])]
+    private bool $totpEnabled = false;
+
+    /** @var list<string>|null */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $totpBackupCodes = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $totpConfirmedAt = null;
+
     #[ORM\Column(options: ['default' => 'CURRENT_TIMESTAMP'])]
     private \DateTimeImmutable $createdAt;
 
@@ -178,6 +191,52 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function getTotpSecret(): ?string
+    {
+        return $this->totpSecret;
+    }
+
+    public function setTotpSecret(?string $totpSecret): static
+    {
+        $this->totpSecret = $totpSecret;
+        return $this;
+    }
+
+    public function isTotpEnabled(): bool
+    {
+        return $this->totpEnabled;
+    }
+
+    public function setTotpEnabled(bool $totpEnabled): static
+    {
+        $this->totpEnabled = $totpEnabled;
+        return $this;
+    }
+
+    /** @return list<string>|null */
+    public function getTotpBackupCodes(): ?array
+    {
+        return $this->totpBackupCodes;
+    }
+
+    /** @param list<string>|null $codes */
+    public function setTotpBackupCodes(?array $codes): static
+    {
+        $this->totpBackupCodes = $codes;
+        return $this;
+    }
+
+    public function getTotpConfirmedAt(): ?\DateTimeImmutable
+    {
+        return $this->totpConfirmedAt;
+    }
+
+    public function setTotpConfirmedAt(?\DateTimeImmutable $at): static
+    {
+        $this->totpConfirmedAt = $at;
+        return $this;
     }
 
     /** @return Collection<int, Context> */

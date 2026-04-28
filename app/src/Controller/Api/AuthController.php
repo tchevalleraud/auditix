@@ -24,6 +24,15 @@ class AuthController extends AbstractController
         return $this->json($this->serializeUser($user));
     }
 
+    #[Route('/login/totp', name: 'api_login_totp', methods: ['POST'])]
+    public function loginTotp(): JsonResponse
+    {
+        /** @var User $user */
+        $user = $this->getUser();
+
+        return $this->json($this->serializeUser($user));
+    }
+
     #[Route('/logout', name: 'api_logout', methods: ['POST'])]
     public function logout(): void
     {
@@ -168,6 +177,7 @@ class AuthController extends AbstractController
             'locale' => $user->getLocale(),
             'theme' => $user->getTheme(),
             'preferences' => $user->getPreferences(),
+            'totpEnabled' => $user->isTotpEnabled(),
         ];
     }
 }
