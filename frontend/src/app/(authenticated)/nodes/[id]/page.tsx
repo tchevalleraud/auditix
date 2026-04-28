@@ -150,10 +150,12 @@ export default function NodeDetailPage() {
   const [newTag, setNewTag] = useState("");
   const [selectedCollections, setSelectedCollections] = useState<Set<number>>(new Set());
   // Manual import
+  const DEFAULT_PROMPT_REGEX = "^[\\w\\-.]+:\\d+#(.+)$";
   const [importModal, setImportModal] = useState(false);
   const [importCommands, setImportCommands] = useState<{ name: string; commands: string }[]>([]);
   const [importConnectionScript, setImportConnectionScript] = useState("");
   const [importRawOutput, setImportRawOutput] = useState("");
+  const [importPromptRegex, setImportPromptRegex] = useState(DEFAULT_PROMPT_REGEX);
   const [importing, setImporting] = useState(false);
   const [commandsCopied, setCommandsCopied] = useState(false);
   const [deletingSelected, setDeletingSelected] = useState(false);
@@ -243,6 +245,7 @@ export default function NodeDetailPage() {
       setImportConnectionScript(m.connectionScript || "");
     }
     setImportRawOutput("");
+    setImportPromptRegex(DEFAULT_PROMPT_REGEX);
     setImporting(false);
     setCommandsCopied(false);
     setImportModal(true);
@@ -255,7 +258,12 @@ export default function NodeDetailPage() {
       const res = await fetch("/api/collections/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeId: Number(nodeId), rawOutput: importRawOutput, tags: ["latest", "manual"] }),
+        body: JSON.stringify({
+          nodeId: Number(nodeId),
+          rawOutput: importRawOutput,
+          tags: ["latest", "manual"],
+          promptPattern: importPromptRegex.trim() || null,
+        }),
       });
       if (res.ok) {
         setImportModal(false);
@@ -2062,11 +2070,22 @@ export default function NodeDetailPage() {
                   <textarea
                     value={importRawOutput}
                     onChange={(e) => setImportRawOutput(e.target.value)}
-                    rows={20}
+                    rows={18}
                     placeholder={t("nodes.importRawOutputPlaceholder")}
                     className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none resize-none"
                   />
                   <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("nodes.importRawOutputHelp")}</p>
+                  <div className="space-y-1.5 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("nodes.importPromptRegex")}</label>
+                    <input
+                      type="text"
+                      value={importPromptRegex}
+                      onChange={(e) => setImportPromptRegex(e.target.value)}
+                      placeholder={DEFAULT_PROMPT_REGEX}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none"
+                    />
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("nodes.importPromptRegexHelp")}</p>
+                  </div>
                 </div>
               </div>
             </div>

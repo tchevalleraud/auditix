@@ -323,6 +323,7 @@ class CollectionController extends AbstractController
         $nodeId = $data['nodeId'] ?? null;
         $rawOutput = $data['rawOutput'] ?? '';
         $tags = $data['tags'] ?? ['latest'];
+        $promptPattern = isset($data['promptPattern']) ? trim((string) $data['promptPattern']) : '';
 
         if (!$nodeId || !$rawOutput) {
             return $this->json(['error' => 'nodeId and rawOutput are required'], Response::HTTP_BAD_REQUEST);
@@ -331,12 +332,164 @@ class CollectionController extends AbstractController
         $node = $em->getRepository(Node::class)->find($nodeId);
         if (!$node) return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
 
-        $model = $node->getModel();
-        if (!$model) return $this->json(['error' => 'Node has no model configured'], Response::HTTP_BAD_REQUEST);
+        if (!$node->getModel()) {
+            return $this->json(['error' => 'Node has no model configured'], Response::HTTP_BAD_REQUEST);
+        }
 
-        // Resolve commands for this model (same logic as CollectNodeMessageHandler)
+        try {
+            $collection = $this->importRawOutputForNode($node, $rawOutput, $tags, 'manual-import', $em, $promptPattern ?: null);
+        } catch (\RuntimeException $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+        }
+
+        $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
+
+        return $this->json($this->serialize($collection), Response::HTTP_CREATED);
+    }
+
+    #[Route('/import-zip', methods: ['POST'], priority: 10)]
+    public function importZip(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
+        if (!$context) {
+            return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $dryRun = $request->query->getBoolean('dryRun');
+
+        /** @var \Symfony\Component\HttpFoundation\File\UploadedFile|null $file */
+        $file = $request->files->get('file');
+        if (!$file || !$file->isValid()) {
+            return $this->json(['error' => 'A .zip file is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        if (!class_exists(\ZipArchive::class)) {
+            return $this->json(['error' => 'ZIP support is not available on the server'], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($file->getPathname()) !== true) {
+            return $this->json(['error' => 'Unable to open the ZIP archive'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $extraTags = array_values(array_filter(array_map('trim', (array) $request->request->all('tags'))));
+        $tags = array_values(array_unique(array_merge(['latest', 'imported'], $extraTags)));
+        $promptPattern = trim((string) $request->request->get('promptPattern', '')) ?: null;
+
+        if ($promptPattern !== null && @preg_match($this->wrapPromptPattern($promptPattern), '') === false) {
+            return $this->json(['error' => 'Invalid prompt regex pattern'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $nodeRepo = $em->getRepository(Node::class);
+        $entries = [];
+        $imported = 0;
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            if ($stat === false) continue;
+            $entryName = $stat['name'];
+            if (str_ends_with($entryName, '/')) continue; // skip directories
+            $basename = basename($entryName);
+
+            $entry = [
+                'filename' => $entryName,
+                'ipAddress' => null,
+                'nodeId' => null,
+                'nodeName' => null,
+                'status' => 'invalid-name',
+                'message' => null,
+                'collectionId' => null,
+            ];
+
+            if (!preg_match('/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})_output\.log$/i', $basename, $m)) {
+                $entry['message'] = 'Filename must match <ip>_output.log';
+                $entries[] = $entry;
+                continue;
+            }
+            $ip = $m[1];
+            $entry['ipAddress'] = $ip;
+
+            $node = $nodeRepo->findOneBy(['ipAddress' => $ip, 'context' => $context]);
+            if (!$node) {
+                $entry['status'] = 'no-node';
+                $entry['message'] = 'No node matches this IP in the current context';
+                $entries[] = $entry;
+                continue;
+            }
+            $entry['nodeId'] = $node->getId();
+            $entry['nodeName'] = $node->getHostname() ?: $node->getName() ?: $node->getIpAddress();
+
+            if (!$node->getModel()) {
+                $entry['status'] = 'no-model';
+                $entry['message'] = 'Node has no model configured';
+                $entries[] = $entry;
+                continue;
+            }
+
+            if ($dryRun) {
+                $entry['status'] = 'matched';
+                $entries[] = $entry;
+                continue;
+            }
+
+            $rawOutput = $zip->getFromIndex($i);
+            if ($rawOutput === false || $rawOutput === '') {
+                $entry['status'] = 'empty';
+                $entry['message'] = 'File is empty or unreadable';
+                $entries[] = $entry;
+                continue;
+            }
+
+            try {
+                $collection = $this->importRawOutputForNode($node, $rawOutput, $tags, 'zip-import', $em, $promptPattern);
+            } catch (\RuntimeException $e) {
+                $entry['status'] = 'failed';
+                $entry['message'] = $e->getMessage();
+                $entries[] = $entry;
+                continue;
+            }
+
+            $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
+
+            $entry['status'] = 'imported';
+            $entry['collectionId'] = $collection->getId();
+            $entries[] = $entry;
+            $imported++;
+        }
+
+        $zip->close();
+
+        return $this->json([
+            'dryRun' => $dryRun,
+            'totalFiles' => count($entries),
+            'imported' => $imported,
+            'files' => $entries,
+        ]);
+    }
+
+    /**
+     * Parse raw command output for a node and persist a completed Collection on disk.
+     * Caller is responsible for dispatching ProcessInventoryMessage.
+     *
+     * @param string|null $promptPattern Optional regex (without delimiters) whose first capture group
+     *                                   isolates the command typed at the prompt. When provided, only
+     *                                   lines matching this pattern can introduce a new command segment,
+     *                                   protecting against command names that also appear in device logs.
+     *
+     * @throws \RuntimeException if the node has no commands configured
+     */
+    private function importRawOutputForNode(Node $node, string $rawOutput, array $tags, string $worker, EntityManagerInterface $em, ?string $promptPattern = null): Collection
+    {
+        $model = $node->getModel();
+        if (!$model) {
+            throw new \RuntimeException('Node has no model configured');
+        }
+
         $commands = $this->resolveModelCommands($model, $em);
-        if (empty($commands)) return $this->json(['error' => 'No commands configured for this model'], Response::HTTP_BAD_REQUEST);
+        if (empty($commands)) {
+            throw new \RuntimeException('No commands configured for this model');
+        }
 
         // Build a flat list of all CLI lines with their parent command
         $cmdLines = [];
@@ -346,22 +499,38 @@ class CollectionController extends AbstractController
             }
         }
 
+        $wrappedPattern = $promptPattern !== null && $promptPattern !== '' ? $this->wrapPromptPattern($promptPattern) : null;
+        if ($wrappedPattern !== null && @preg_match($wrappedPattern, '') === false) {
+            throw new \RuntimeException('Invalid prompt regex pattern');
+        }
+
         // Parse raw output: split by detected command lines
         $lines = explode("\n", $rawOutput);
-        $segments = []; // [{command: CollectionCommand, line: string, output: string}]
+        $segments = [];
         $currentSegment = null;
 
         foreach ($lines as $rawLine) {
             $line = rtrim($rawLine, "\r");
             $trimmed = trim($line);
 
-            // Check if this line matches a known command
             $matched = null;
-            foreach ($cmdLines as $cl) {
-                // Match if line ends with the command (prompt prefix is variable)
-                if (str_ends_with($trimmed, $cl['line']) || $trimmed === $cl['line']) {
-                    $matched = $cl;
-                    break;
+
+            if ($wrappedPattern !== null) {
+                if ($trimmed !== '' && preg_match($wrappedPattern, $trimmed, $m) && isset($m[1])) {
+                    $extracted = trim($m[1]);
+                    foreach ($cmdLines as $cl) {
+                        if ($extracted === $cl['line']) {
+                            $matched = $cl;
+                            break;
+                        }
+                    }
+                }
+            } else {
+                foreach ($cmdLines as $cl) {
+                    if (str_ends_with($trimmed, $cl['line']) || $trimmed === $cl['line']) {
+                        $matched = $cl;
+                        break;
+                    }
                 }
             }
 
@@ -378,18 +547,17 @@ class CollectionController extends AbstractController
             $segments[] = $currentSegment;
         }
 
-        // Release 'latest' tag from previous collections
-        foreach ($tags as $tag) {
+        $normalizedTags = array_values(array_unique(array_merge(['latest'], $tags)));
+        foreach ($normalizedTags as $tag) {
             $this->releaseTag($em, $tag, $node);
         }
 
-        // Create collection
         $collection = new Collection();
         $collection->setNode($node);
         $collection->setContext($node->getContext());
-        $collection->setTags(array_values(array_unique(array_merge(['latest'], $tags))));
+        $collection->setTags($normalizedTags);
         $collection->setStatus(Collection::STATUS_COMPLETED);
-        $collection->setWorker('manual-import');
+        $collection->setWorker($worker);
         $collection->setStartedAt(new \DateTimeImmutable());
         $collection->setCompletedAt(new \DateTimeImmutable());
         $collection->setCommandCount(count($commands));
@@ -398,7 +566,6 @@ class CollectionController extends AbstractController
         $em->persist($collection);
         $em->flush();
 
-        // Write files
         $projectDir = $this->getParameter('kernel.project_dir');
         $baseDir = $projectDir . '/var/' . $collection->getStoragePath();
 
@@ -413,13 +580,11 @@ class CollectionController extends AbstractController
             $lineSlug = $this->slugify($seg['line']);
             $filepath = $ruleDir . '/' . $lineSlug . '.txt';
 
-            // Remove echoed command from start and trailing prompt
             $output = $seg['output'];
             $outputLines = explode("\n", $output);
             if (!empty($outputLines) && preg_match('/[#>\$\]]\s*$/', end($outputLines))) {
                 array_pop($outputLines);
             }
-            // Remove trailing empty lines
             while (!empty($outputLines) && trim(end($outputLines)) === '') {
                 array_pop($outputLines);
             }
@@ -427,10 +592,7 @@ class CollectionController extends AbstractController
             file_put_contents($filepath, implode("\n", $outputLines));
         }
 
-        // Dispatch async inventory extraction
-        $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
-
-        return $this->json($this->serialize($collection), Response::HTTP_CREATED);
+        return $collection;
     }
 
     /** Resolve all commands for a model (manufacturer + model folders + manual, recursive) */
@@ -467,6 +629,11 @@ class CollectionController extends AbstractController
     private function slugify(string $text): string
     {
         return strtolower(trim(preg_replace('/[^a-z0-9]+/i', '-', $text), '-'));
+    }
+
+    private function wrapPromptPattern(string $pattern): string
+    {
+        return '~' . str_replace('~', '\~', $pattern) . '~';
     }
 
     private function releaseTag(EntityManagerInterface $em, string $tag, Node $node, ?Collection $except = null): void

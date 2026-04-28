@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import CollectionsZipImportModal from "@/components/CollectionsZipImportModal";
 import {
   Loader2,
   Search,
@@ -16,6 +17,7 @@ import {
   XCircle,
   Clock,
   AlertCircle,
+  Upload,
 } from "lucide-react";
 
 interface CollectionItem {
@@ -53,6 +55,9 @@ export default function CollectionsPage() {
   // Tag management
   const [tagModalId, setTagModalId] = useState<number | null>(null);
   const [newTag, setNewTag] = useState("");
+
+  // ZIP import
+  const [zipImportOpen, setZipImportOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!current) return;
@@ -186,6 +191,13 @@ export default function CollectionsPage() {
               {t("collections.deleteSelected", { count: String(selected.size) })}
             </button>
           )}
+          <button
+            onClick={() => setZipImportOpen(true)}
+            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            {t("collections.importCollections")}
+          </button>
         </div>
       </div>
 
@@ -364,6 +376,16 @@ export default function CollectionsPage() {
           </table>
         </div>
       </div>
+
+      {/* ZIP import modal */}
+      {current && (
+        <CollectionsZipImportModal
+          open={zipImportOpen}
+          onClose={() => setZipImportOpen(false)}
+          onImported={() => { void load(); }}
+          contextId={current.id}
+        />
+      )}
 
       {/* Confirm delete modal */}
       {confirmDelete && (
