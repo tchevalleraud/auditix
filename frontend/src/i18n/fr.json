@@ -452,6 +452,7 @@
     "title": "Noeuds",
     "subtitle": "Gerez les noeuds d'equipements reseau",
     "newNode": "Nouveau noeud",
+    "refresh": "Actualiser",
     "actions": "Actions",
     "deleteSelected": "Supprimer ({count})",
     "confirmBulkDelete": "Supprimer {count} noeud(s) selectionne(s) ? Cette action est irreversible.",

@@ -480,6 +480,7 @@
     "title": "Nodes",
     "subtitle": "Manage network equipment nodes",
     "newNode": "New node",
+    "refresh": "Refresh",
     "actions": "Actions",
     "deleteSelected": "Delete ({count})",
     "confirmBulkDelete": "Delete {count} selected node(s)? This action cannot be undone.",

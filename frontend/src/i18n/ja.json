@@ -400,6 +400,7 @@
     "title": "ノード",
     "subtitle": "ネットワーク機器ノードを管理",
     "newNode": "新しいノード",
+    "refresh": "更新",
     "actions": "アクション",
     "searchPlaceholder": "ノードを検索...",
     "colScore": "スコア",

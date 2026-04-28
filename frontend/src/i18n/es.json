@@ -400,6 +400,7 @@
     "title": "Nodos",
     "subtitle": "Gestione los nodos de equipos de red",
     "newNode": "Nuevo nodo",
+    "refresh": "Actualizar",
     "actions": "Acciones",
     "searchPlaceholder": "Buscar un nodo...",
     "colScore": "Puntuacion",

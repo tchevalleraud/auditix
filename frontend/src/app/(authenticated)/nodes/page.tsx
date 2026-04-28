@@ -33,6 +33,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  RefreshCw,
 } from "lucide-react";
 import CsvImportModal from "@/components/CsvImportModal";
 
@@ -138,10 +139,21 @@ export default function NodesPage() {
   const [collectStatus, setCollectStatus] = useState<Record<number, string>>({});
   const dismissTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
 
+  // Extraction status indicators per node: pending | running | completed | failed
+  const [extractStatus, setExtractStatus] = useState<Record<number, string>>({});
+  const extractDismissTimers = useRef<Record<number, ReturnType<typeof setTimeout>>>({});
+
+  // Manual refresh
+  const [refreshing, setRefreshing] = useState(false);
+
   // Cleanup timers on unmount
   useEffect(() => {
     const timers = dismissTimers.current;
-    return () => { Object.values(timers).forEach(clearTimeout); };
+    const extractTimers = extractDismissTimers.current;
+    return () => {
+      Object.values(timers).forEach(clearTimeout);
+      Object.values(extractTimers).forEach(clearTimeout);
+    };
   }, []);
 
   const loadNodes = useCallback(async () => {
@@ -201,6 +213,7 @@ export default function NodesPage() {
     nodes.forEach((n) => {
       url.searchParams.append("topic", `collections/node/${n.id}`);
       url.searchParams.append("topic", `compliance/node/${n.id}`);
+      url.searchParams.append("topic", `extractions/node/${n.id}`);
     });
     const es = new EventSource(url);
     es.onmessage = (event) => {
@@ -234,6 +247,24 @@ export default function NodesPage() {
           }, 15000);
         }
       }
+      if (data.event === "extraction.updated") {
+        const nodeId = Number(data.nodeId ?? 0);
+        if (!nodeId) return;
+        const status = String(data.status ?? "");
+        setExtractStatus((prev) => ({ ...prev, [nodeId]: status }));
+
+        if (status === "completed" || status === "failed") {
+          if (extractDismissTimers.current[nodeId]) clearTimeout(extractDismissTimers.current[nodeId]);
+          extractDismissTimers.current[nodeId] = setTimeout(() => {
+            setExtractStatus((prev) => {
+              const next = { ...prev };
+              delete next[nodeId];
+              return next;
+            });
+            delete extractDismissTimers.current[nodeId];
+          }, 15000);
+        }
+      }
       if (data.event === "compliance.progress") {
         const nodeId = Number(data.nodeId ?? 0);
         if (!nodeId) return;
@@ -253,6 +284,23 @@ export default function NodesPage() {
           return next;
         });
         loadComplianceStats();
+      }
+      // Nodes without a compliance policy go through RecalculateNodeScoreMessage,
+      // which only emits vulnerability.score. Treat it like an evaluation end
+      // so the optimistic spinner clears and the score updates.
+      if (data.event === "vulnerability.score") {
+        const nodeId = Number(data.nodeId ?? 0);
+        if (!nodeId) return;
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === nodeId ? { ...n, score: data.score, complianceEvaluating: null } : n
+          )
+        );
+        setComplianceStatus((prev) => {
+          const next = { ...prev };
+          delete next[nodeId];
+          return next;
+        });
       }
     };
     return () => es.close();
@@ -434,6 +482,12 @@ export default function NodesPage() {
   const handleEvaluateCompliance = async () => {
     if (selected.size === 0) return;
     const nodeIds = Array.from(selected);
+    // Mark selected nodes as pending immediately so the spinner + bar animate without delay.
+    setComplianceStatus((prev) => {
+      const next = { ...prev };
+      nodeIds.forEach((id) => { next[id] = "pending"; });
+      return next;
+    });
     try {
       const res = await fetch("/api/nodes/evaluate-compliance", {
         method: "POST",
@@ -446,10 +500,34 @@ export default function NodesPage() {
         if (nodesRes.ok) {
           const data: NodeItem[] = await nodesRes.json();
           setNodes(data);
-          const evaluating: Record<number, string> = {};
-          data.forEach((n) => { if (n.complianceEvaluating) evaluating[n.id] = n.complianceEvaluating; });
-          setComplianceStatus(evaluating);
+          // For each node we just dispatched: keep our spinner only if the
+          // backend confirms an evaluation is actually queued/running. Nodes
+          // with no compliance policy fall through RecalculateNodeScoreMessage,
+          // so their complianceEvaluating stays null and we must clear the
+          // optimistic indicator — otherwise the spinner sticks forever.
+          const dispatched = new Set(nodeIds);
+          setComplianceStatus((prev) => {
+            const next = { ...prev };
+            data.forEach((n) => {
+              if (n.complianceEvaluating) {
+                next[n.id] = n.complianceEvaluating;
+              } else if (dispatched.has(n.id)) {
+                delete next[n.id];
+              }
+            });
+            return next;
+          });
+          // Refresh the per-node compliance bar with up-to-date stats for the
+          // nodes that don't trigger a compliance.evaluated Mercure event.
+          loadComplianceStats();
         }
+      } else {
+        // Roll back the optimistic indicator on failure
+        setComplianceStatus((prev) => {
+          const next = { ...prev };
+          nodeIds.forEach((id) => { delete next[id]; });
+          return next;
+        });
       }
     } finally {
       setSelected(new Set());
@@ -459,15 +537,37 @@ export default function NodesPage() {
   const handleExtraction = async () => {
     if (!current || selected.size === 0) return;
     const nodeIds = Array.from(selected);
+    // Optimistically mark selected nodes as pending so the user gets feedback immediately.
+    setExtractStatus((prev) => {
+      const next = { ...prev };
+      nodeIds.forEach((id) => { next[id] = "pending"; });
+      return next;
+    });
     try {
-      await fetch("/api/collections/extract", {
+      const res = await fetch("/api/collections/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ nodeIds }),
       });
+      if (!res.ok) {
+        setExtractStatus((prev) => {
+          const next = { ...prev };
+          nodeIds.forEach((id) => { delete next[id]; });
+          return next;
+        });
+      }
     } finally {
       setSelected(new Set());
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadNodes(), loadComplianceStats(), loadActiveCollections()]);
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -680,6 +780,15 @@ export default function NodesPage() {
               </button>
             </>
           )}
+          <button
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors"
+            title={t("nodes.refresh")}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            {t("nodes.refresh")}
+          </button>
           <div className="relative flex">
             <Link
               href="/nodes/new"
@@ -808,6 +917,17 @@ export default function NodesPage() {
                             <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
                           ) : (
                             <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                          )
+                        )}
+                        {extractStatus[node.id] && (
+                          extractStatus[node.id] === "completed" ? (
+                            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                          ) : extractStatus[node.id] === "failed" ? (
+                            <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                          ) : extractStatus[node.id] === "running" ? (
+                            <ScanSearch className="h-4 w-4 animate-pulse text-amber-500 shrink-0" />
+                          ) : (
+                            <ScanSearch className="h-4 w-4 animate-pulse text-slate-400 shrink-0" />
                           )
                         )}
                         <div>

@@ -400,6 +400,7 @@
     "title": "Nodi",
     "subtitle": "Gestisci i nodi degli apparati di rete",
     "newNode": "Nuovo nodo",
+    "refresh": "Aggiorna",
     "actions": "Azioni",
     "searchPlaceholder": "Cerca un nodo...",
     "colScore": "Punteggio",
