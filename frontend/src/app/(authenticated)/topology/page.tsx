@@ -80,6 +80,8 @@ interface GraphEdge {
   weight: number | null;
   isManual: boolean;
   styleOverride: Record<string, string | number> | null;
+  isisArea?: string | null;
+  isisAreas?: string[] | null;
 }
 
 interface TopologyZone {
@@ -124,6 +126,18 @@ const PROTOCOL_COLORS: Record<string, string> = {
   bgp: "#f59e0b",
   isis: "#ec4899",
   manual: "#94a3b8",
+};
+
+const DEFAULT_ISIS_AREA_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#6366f1", "#a855f7", "#ec4899", "#14b8a6", "#f43f5e"];
+
+const resolveAreaColor = (
+  area: string,
+  allAreas: string[],
+  custom: Record<string, string> | undefined,
+): string => {
+  if (custom && custom[area]) return custom[area];
+  const idx = allAreas.indexOf(area);
+  return DEFAULT_ISIS_AREA_COLORS[(idx >= 0 ? idx : 0) % DEFAULT_ISIS_AREA_COLORS.length];
 };
 
 export default function TopologyPage() {
@@ -180,6 +194,7 @@ export default function TopologyPage() {
     localPortColumn: string; remotePortColumn: string;
     sourceInterfaceColumn: string; metricColumn: string;
     areaCategoryId: number | null; areaColumn: string;
+    linkAreaColumn: string;
     includeExternalNeighbors: boolean;
     // Legacy backward compat
     remoteNameColumn: string; chassisIdColumn: string; mgmtAddressColumn: string; weightColumn: string;
@@ -393,6 +408,15 @@ export default function TopologyPage() {
           for (const [k, v] of Object.entries(e as unknown as Record<string, unknown>)) {
             if (k.startsWith("inv_") && v != null) invData[k] = String(v);
           }
+          // ISIS edges with a resolved area get colored with their area color
+          const baseColor = PROTOCOL_COLORS[e.protocol] ?? "#94a3b8";
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const areaColors = ((data.designConfig ?? {}) as any).isisAreaColors as Record<string, string> | undefined;
+          const allAreas = data.isisAreas ?? [];
+          const edgeAreas = e.protocol === "isis" ? (e.isisAreas ?? (e.isisArea ? [e.isisArea] : [])) : [];
+          const edgeColorValue = edgeAreas.length > 0
+            ? resolveAreaColor(edgeAreas[0], allAreas, areaColors)
+            : baseColor;
           return {
             data: {
               id: `e${e.id}`,
@@ -401,8 +425,10 @@ export default function TopologyPage() {
               protocol: e.protocol,
               status: e.status ?? "unknown",
               isManual: e.isManual,
+              isisArea: e.isisArea ?? "",
+              isisAreaCount: edgeAreas.length,
               label: portsLabel + weightLabel,
-              color: PROTOCOL_COLORS[e.protocol] ?? "#94a3b8",
+              color: edgeColorValue,
               ...invData,
             },
           };
@@ -501,6 +527,15 @@ export default function TopologyPage() {
               })
             ),
           })),
+          // ISIS edges spanning multiple areas: hide the cytoscape line so the
+          // SVG overlay can render an interleaved-dash zebra pattern instead.
+          ...(data.edges
+            .filter((e) => e.protocol === "isis" && (e.isisAreas?.length ?? 0) >= 2)
+            .map((e) => ({
+              selector: `edge[id = "e${e.id}"]`,
+              style: { "line-opacity": 0 },
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            })) as any[]),
           // Per-link style overrides from API
           ...data.edges.filter((e) => e.styleOverride).map((e) => ({
             selector: `edge[id = "e${e.id}"]`,
@@ -654,12 +689,16 @@ export default function TopologyPage() {
       });
 
       // --- ISIS area data ---
-      const ISIS_AREA_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#6366f1", "#a855f7", "#ec4899", "#14b8a6", "#f43f5e"];
       const isisAreaList = data.isisAreas ?? [];
       const nodeAreasMap: Record<string, string[]> = {};
       if (protocolFilter === "isis") {
         data.nodes.forEach((n) => { if (n.isisAreas?.length) nodeAreasMap[n.id] = n.isisAreas; });
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isisAreaColors: Record<string, string> = ((dcRaw as any).isisAreaColors ?? {}) as Record<string, string>;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const isisAreaLabelOffsets: Record<string, { x: number; y: number }> = ((dcRaw as any).isisAreaLabelOffsets ?? {}) as Record<string, { x: number; y: number }>;
+      const colorForArea = (area: string) => resolveAreaColor(area, isisAreaList, isisAreaColors);
 
       // --- ISIS area polygon overlay ---
       // isolation:isolate creates a new stacking context so mix-blend-mode
@@ -668,6 +707,11 @@ export default function TopologyPage() {
       areaSvg.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:1;isolation:isolate;";
       containerRef.current.style.position = "relative";
       containerRef.current.appendChild(areaSvg);
+
+      // --- ISIS multi-area link overlay (zebra-dashed lines) ---
+      const linkSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      linkSvg.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible;z-index:1;";
+      containerRef.current.appendChild(linkSvg);
 
       // Convex hull (Andrew's monotone chain)
       const convexHull = (pts: { x: number; y: number }[]): { x: number; y: number }[] => {
@@ -802,7 +846,7 @@ export default function TopologyPage() {
         isisAreaList.forEach((area) => {
           const pts = areaNodes[area];
           if (!pts || pts.length === 0) return;
-          const color = ISIS_AREA_COLORS[isisAreaList.indexOf(area) % ISIS_AREA_COLORS.length];
+          const color = colorForArea(area);
           const darkColor = darken(color, 0.15);
           const gradId = `isisGrad_${isisAreaList.indexOf(area)}`;
           const fs = Math.max(12 * Math.sqrt(zoom), 10);
@@ -876,6 +920,11 @@ export default function TopologyPage() {
 
           areaShapes.push(shapeSvg);
 
+          // Apply persisted label offset (stored in graph coords, so multiply by zoom for screen)
+          const labelOffset = isisAreaLabelOffsets[area] ?? { x: 0, y: 0 };
+          labelX += labelOffset.x * zoom;
+          labelY += labelOffset.y * zoom;
+
           // Pill-style label, centered on (labelX, labelY)
           const labelText = area;
           const padX = 8 * Math.sqrt(zoom);
@@ -885,10 +934,11 @@ export default function TopologyPage() {
           const rectX = labelX - approxW / 2;
           const rectY = labelY - h / 2;
           const textY = labelY + fs * 0.35;
+          const safeArea = area.replace(/"/g, "&quot;");
           areaLabels.push(
-            `<g>` +
+            `<g data-isis-area-label="${safeArea}" style="pointer-events:auto;cursor:move">` +
               `<rect x="${rectX.toFixed(1)}" y="${rectY.toFixed(1)}" width="${approxW.toFixed(1)}" height="${h.toFixed(1)}" rx="${(h / 2).toFixed(1)}" fill="${color}" stroke="${darkColor}" stroke-width="1" />` +
-              `<text x="${labelX.toFixed(1)}" y="${textY.toFixed(1)}" text-anchor="middle" fill="white" font-size="${fs.toFixed(1)}" font-weight="700" font-family="system-ui,sans-serif" style="letter-spacing:0.3px">${labelText}</text>` +
+              `<text x="${labelX.toFixed(1)}" y="${textY.toFixed(1)}" text-anchor="middle" fill="white" font-size="${fs.toFixed(1)}" font-weight="700" font-family="system-ui,sans-serif" style="letter-spacing:0.3px;user-select:none">${labelText}</text>` +
             `</g>`
           );
         });
@@ -898,6 +948,72 @@ export default function TopologyPage() {
           `<defs>${defs}</defs>` +
           `<g mask="url(#isisNodeMask)" style="mix-blend-mode:multiply">${areaShapes.join("")}</g>` +
           `<g>${areaLabels.join("")}</g>`;
+      };
+
+      // --- ISIS edge label offset ---
+      // text-margin-* are applied in screen coords (before rotation), so a
+      // static value can't keep the label off the line for both horizontal and
+      // vertical edges. Compute a per-edge perpendicular offset that depends on
+      // the edge direction, using the rotation (dx,dy) → (dy,-dx).
+      const ISIS_LABEL_OFFSET = 14;
+      const updateIsisLabelOffsets = () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        cy.edges('[protocol = "isis"]').forEach((edge: any) => {
+          const s = edge.source().position();
+          const t = edge.target().position();
+          const dx = t.x - s.x;
+          const dy = t.y - s.y;
+          const len = Math.sqrt(dx * dx + dy * dy) || 1;
+          edge.style({
+            "text-margin-x": (dy / len) * ISIS_LABEL_OFFSET,
+            "text-margin-y": -(dx / len) * ISIS_LABEL_OFFSET,
+          });
+        });
+      };
+
+      // --- Multi-area link rendering ---
+      // Each ISIS edge with 2+ areas is drawn as N stacked dashed lines. Every
+      // line shares the same dash period (n × dashLen) but uses a dashoffset
+      // that shifts its visible segment to the next slot, producing a zebra
+      // pattern where each colour appears in 1/n of the line.
+      const multiAreaEdges = data.edges.filter(
+        (e) => e.protocol === "isis" && (e.isisAreas?.length ?? 0) >= 2,
+      );
+      const renderMultiAreaLinks = () => {
+        if (multiAreaEdges.length === 0) {
+          linkSvg.innerHTML = "";
+          return;
+        }
+        const zoom = cy.zoom();
+        const dashLen = Math.max(8 * zoom, 4);
+        const strokeW = (edgeW + 0.5) * zoom;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const customColors = ((data.designConfig ?? {}) as any).isisAreaColors as Record<string, string> | undefined;
+        const allAreas = data.isisAreas ?? [];
+        let html = "";
+        multiAreaEdges.forEach((e) => {
+          const cyEdge = cy.getElementById(`e${e.id}`);
+          if (!cyEdge || cyEdge.length === 0) return;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const src = (cyEdge as any).sourceEndpoint();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const tgt = (cyEdge as any).targetEndpoint();
+          const pan = cy.pan();
+          const sx = src.x * zoom + pan.x;
+          const sy = src.y * zoom + pan.y;
+          const tx = tgt.x * zoom + pan.x;
+          const ty = tgt.y * zoom + pan.y;
+          const colors = (e.isisAreas ?? []).map((a) => resolveAreaColor(a, allAreas, customColors));
+          const n = colors.length;
+          const visible = dashLen;
+          const hidden = dashLen * (n - 1);
+          const dashArray = `${visible.toFixed(2)} ${hidden.toFixed(2)}`;
+          colors.forEach((color, i) => {
+            const offset = -i * visible;
+            html += `<line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${tx.toFixed(1)}" y2="${ty.toFixed(1)}" stroke="${color}" stroke-width="${strokeW.toFixed(2)}" stroke-dasharray="${dashArray}" stroke-dashoffset="${offset.toFixed(2)}" stroke-linecap="butt" />`;
+          });
+        });
+        linkSvg.innerHTML = html;
       };
 
       // --- Label overlay ---
@@ -966,6 +1082,8 @@ export default function TopologyPage() {
 
         overlayDiv.innerHTML = html;
         renderAreaPolygons();
+        renderMultiAreaLinks();
+        updateIsisLabelOffsets();
       };
 
       const scheduleOverlay = () => {
@@ -977,6 +1095,45 @@ export default function TopologyPage() {
       cy.on("position", "node", scheduleOverlay);
       // Initial render
       renderOverlay();
+
+      // ISIS area label drag handler
+      const onAreaLabelMouseDown = (e: MouseEvent) => {
+        const target = e.target as Element | null;
+        const groupEl = target?.closest("[data-isis-area-label]") as SVGElement | null;
+        if (!groupEl) return;
+        const area = groupEl.getAttribute("data-isis-area-label");
+        if (!area) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startOffset = { ...(isisAreaLabelOffsets[area] ?? { x: 0, y: 0 }) };
+        const onMove = (ev: MouseEvent) => {
+          const zoom = cy.zoom();
+          const dx = (ev.clientX - startX) / zoom;
+          const dy = (ev.clientY - startY) / zoom;
+          isisAreaLabelOffsets[area] = {
+            x: Math.round(startOffset.x + dx),
+            y: Math.round(startOffset.y + dy),
+          };
+          renderAreaPolygons();
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          if (selectedMapId) {
+            const baseDesign = (data.designConfig ?? {}) as Record<string, unknown>;
+            fetch(`/api/topology-maps/${selectedMapId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ designConfig: { ...baseDesign, isisAreaLabelOffsets: { ...isisAreaLabelOffsets } } }),
+            });
+          }
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      };
+      areaSvg.addEventListener("mousedown", onAreaLabelMouseDown);
 
       cyRef.current = cy;
     })();
@@ -1237,6 +1394,21 @@ export default function TopologyPage() {
   const fitView = () => { if (cyRef.current) cyRef.current.fit(undefined, 40); };
   const refresh = () => { if (selectedMapId) loadGraph(selectedMapId, protocolFilter); };
 
+  // Update the persistent color for an ISIS area; setData triggers a graph rebuild
+  const updateIsisAreaColor = (area: string, color: string) => {
+    if (!selectedMapId || !data) return;
+    const baseDesign = (data.designConfig ?? {}) as Record<string, unknown>;
+    const currentColors = (baseDesign.isisAreaColors as Record<string, string> | undefined) ?? {};
+    const nextColors = { ...currentColors, [area]: color };
+    const nextDesign = { ...baseDesign, isisAreaColors: nextColors };
+    setData({ ...data, designConfig: nextDesign });
+    fetch(`/api/topology-maps/${selectedMapId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ designConfig: nextDesign }),
+    });
+  };
+
   // Alignment & distribution helpers
   const getSelectedCyNodes = () => {
     const cy = cyRef.current;
@@ -1483,6 +1655,7 @@ export default function TopologyPage() {
     metricColumn: rule.metricColumn || rule.weightColumn || "",
     areaCategoryId: rule.areaCategoryId ?? null,
     areaColumn: rule.areaColumn ?? "",
+    linkAreaColumn: rule.linkAreaColumn ?? "",
     includeExternalNeighbors: rule.includeExternalNeighbors !== false,
     remoteNameColumn: rule.remoteNameColumn ?? "",
     chassisIdColumn: rule.chassisIdColumn ?? "",
@@ -1515,6 +1688,7 @@ export default function TopologyPage() {
     ...r,
     remoteNameColumn: r.destNodeColumn,
     weightColumn: r.protocol === "isis" ? r.metricColumn : r.weightColumn,
+    linkAreaColumn: r.linkAreaColumn ?? "",
   }));
 
   const saveLinkRules = async () => {
@@ -1865,19 +2039,34 @@ export default function TopologyPage() {
               </div>
             ))}
           </div>
-          {protocolFilter === "isis" && data.isisAreas && data.isisAreas.length > 0 && (
-            <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{t("topology.isisAreas")}</p>
-              <div className="flex flex-col gap-1">
-                {data.isisAreas.map((area, i) => (
-                  <div key={area} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#6366f1", "#a855f7", "#ec4899", "#14b8a6", "#f43f5e"][i % 10] }} />
-                    {area}
-                  </div>
-                ))}
+          {protocolFilter === "isis" && data.isisAreas && data.isisAreas.length > 0 && (() => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const areaColors = ((data.designConfig ?? {}) as any).isisAreaColors as Record<string, string> | undefined;
+            const allAreas = data.isisAreas ?? [];
+            return (
+              <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{t("topology.isisAreas")}</p>
+                <div className="flex flex-col gap-1">
+                  {allAreas.map((area) => {
+                    const color = resolveAreaColor(area, allAreas, areaColors);
+                    return (
+                      <label key={area} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer" title={t("topology.isisAreaColorHint")}>
+                        <span className="relative inline-block h-3 w-3 rounded-full ring-1 ring-slate-300 dark:ring-slate-600" style={{ backgroundColor: color }}>
+                          <input
+                            type="color"
+                            value={color}
+                            onChange={(e) => updateIsisAreaColor(area, e.target.value)}
+                            className="absolute inset-0 h-full w-full opacity-0 cursor-pointer"
+                          />
+                        </span>
+                        {area}
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
@@ -1934,13 +2123,14 @@ export default function TopologyPage() {
               const nodeAreas = data?.nodes.find((n) => n.id === selectedNode.id)?.isisAreas;
               if (!nodeAreas?.length) return null;
               const allAreas = data?.isisAreas ?? [];
-              const areaColors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#6366f1", "#a855f7", "#ec4899", "#14b8a6", "#f43f5e"];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const customColors = ((data?.designConfig ?? {}) as any).isisAreaColors as Record<string, string> | undefined;
               return (
                 <div className="pt-2">
                   <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{t("topology.isisAreas")}</span>
                   <div className="flex flex-wrap gap-1.5 mt-1">
                     {nodeAreas.map((a) => (
-                      <span key={a} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: areaColors[allAreas.indexOf(a) % areaColors.length] }}>
+                      <span key={a} className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white" style={{ backgroundColor: resolveAreaColor(a, allAreas, customColors) }}>
                         {a}
                       </span>
                     ))}
@@ -2741,11 +2931,12 @@ export default function TopologyPage() {
                                     {/* ISIS: source interface + metric */}
                                     {rule.protocol === "isis" && (
                                       <>
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="grid grid-cols-3 gap-3">
                                           <ColSelect label={t("topology.colSourceInterface")} value={rule.sourceInterfaceColumn} cols={cols} onChange={(v) => updateLinkRule(idx, { sourceInterfaceColumn: v })} placeholder={t("topology.useEntryKey")} />
                                           <ColSelect label={t("topology.colMetric")} value={rule.metricColumn} cols={cols} onChange={(v) => updateLinkRule(idx, { metricColumn: v })} />
+                                          <ColSelect label={t("topology.colLinkArea")} value={rule.linkAreaColumn} cols={cols} onChange={(v) => updateLinkRule(idx, { linkAreaColumn: v })} />
                                         </div>
-                                        {/* ISIS area config */}
+                                        {/* ISIS area config (per-device) */}
                                         <div className="border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
                                           <h4 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-3">{t("topology.isisAreaConfig")}</h4>
                                           <div className="grid grid-cols-2 gap-3">

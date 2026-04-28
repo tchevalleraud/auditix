@@ -523,7 +523,33 @@ class TopologyMapController extends AbstractController
         $nodeMatchField = $rule['nodeMatchField'];
         $ifaceCol = $rule['sourceInterfaceColumn'] ?? '';
         $metricCol = $rule['metricColumn'] ?? '';
+        $linkAreaCol = $rule['linkAreaColumn'] ?? '';
+        $areaCatId = $rule['areaCategoryId'] ?? null;
+        $areaCol = $rule['areaColumn'] ?? '';
         $allowExternal = $rule['includeExternalNeighbors'] ?? true;
+
+        // Pre-fetch per-node mapping: qualifier (HOME/REMOTE) → real area string.
+        // The link inventory's "linkAreaColumn" returns a key (HOME/REMOTE) that
+        // points into the area inventory category, where "areaColumn" holds the
+        // actual area address (e.g. 21.DC01).
+        $nodeQualifierToArea = [];
+        if ($areaCatId && $areaCol) {
+            foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
+                $node = $sourceDevice->getNode();
+                if (!$node) continue;
+                $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                    'node' => $node,
+                    'category' => $areaCatId,
+                    'colLabel' => $areaCol,
+                ]);
+                foreach ($entries as $e) {
+                    $val = $e->getValue();
+                    if ($val !== null && $val !== '') {
+                        $nodeQualifierToArea[$nodeId][$e->getEntryKey()] = (string) $val;
+                    }
+                }
+            }
+        }
 
         // Phase 1: Collect all directed adjacencies
         $directedEdges = [];
@@ -545,6 +571,17 @@ class TopologyMapController extends AbstractController
 
                 $localIface = ($ifaceCol && isset($cols[$ifaceCol])) ? $cols[$ifaceCol] : $entryKey;
                 $metric = ($metricCol && isset($cols[$metricCol]) && is_numeric($cols[$metricCol])) ? (int) $cols[$metricCol] : null;
+                $rawQualifier = ($linkAreaCol && isset($cols[$linkAreaCol]) && $cols[$linkAreaCol] !== '') ? (string) $cols[$linkAreaCol] : null;
+                // Resolve qualifier (HOME/REMOTE/...) to the real area via the per-node mapping.
+                // If no mapping is configured or the qualifier isn't a known key, we keep the raw value.
+                $resolvedArea = null;
+                if ($rawQualifier !== null) {
+                    if (isset($nodeQualifierToArea[$nodeId][$rawQualifier])) {
+                        $resolvedArea = $nodeQualifierToArea[$nodeId][$rawQualifier];
+                    } elseif (!$areaCatId || !$areaCol) {
+                        $resolvedArea = $rawQualifier;
+                    }
+                }
 
                 $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map, $allowExternal);
                 if (!$targetDevice) continue;
@@ -554,9 +591,61 @@ class TopologyMapController extends AbstractController
                     'target' => $targetDevice,
                     'localPort' => $localIface,
                     'metric' => $metric,
+                    'qualifier' => $rawQualifier,
+                    'area' => $resolvedArea,
                 ];
             }
         }
+
+        // Merge adjacencies that share the same (source, target, localPort).
+        // ISIS L1/L2 routers expose one entry per qualifier (HOME/REMOTE) for the
+        // same physical/logical port — we collapse them into a single edge that
+        // carries every distinct area, with HOME-tagged areas listed first.
+        $mergedEdges = [];
+        foreach ($directedEdges as $edge) {
+            $key = $edge['source']->getId() . ':' . $edge['target']->getId() . ':' . (string) ($edge['localPort'] ?? '');
+            if (!isset($mergedEdges[$key])) {
+                $mergedEdges[$key] = [
+                    'source' => $edge['source'],
+                    'target' => $edge['target'],
+                    'localPort' => $edge['localPort'],
+                    'metric' => $edge['metric'],
+                    'homeAreas' => [],
+                    'otherAreas' => [],
+                ];
+            } elseif ($mergedEdges[$key]['metric'] === null && $edge['metric'] !== null) {
+                $mergedEdges[$key]['metric'] = $edge['metric'];
+            }
+            if ($edge['area'] !== null && $edge['area'] !== '') {
+                $isHome = $edge['qualifier'] !== null && strcasecmp((string) $edge['qualifier'], 'HOME') === 0;
+                $bucket = $isHome ? 'homeAreas' : 'otherAreas';
+                if (!in_array($edge['area'], $mergedEdges[$key][$bucket], true)) {
+                    $mergedEdges[$key][$bucket][] = $edge['area'];
+                }
+            }
+        }
+        $directedEdges = array_values($mergedEdges);
+
+        // Collect the distinct areas seen on either side of a link, HOME first.
+        $pickAreas = static function (?array $eAB, ?array $eBA): array {
+            $ordered = [];
+            $push = static function (?string $area) use (&$ordered) {
+                if ($area === null || $area === '') return;
+                if (!in_array($area, $ordered, true)) $ordered[] = $area;
+            };
+            foreach (($eAB['homeAreas'] ?? []) as $a) $push($a);
+            foreach (($eBA['homeAreas'] ?? []) as $a) $push($a);
+            foreach (($eAB['otherAreas'] ?? []) as $a) $push($a);
+            foreach (($eBA['otherAreas'] ?? []) as $a) $push($a);
+            return $ordered;
+        };
+        $persistAreas = static function (TopologyLink $link, array $areas): void {
+            if (empty($areas)) return;
+            $link->setMetadata([
+                'isisArea' => $areas[0],
+                'isisAreas' => $areas,
+            ]);
+        };
 
         // Phase 2: Group by device pair and match bidirectionally
         $pairMap = [];
@@ -589,6 +678,7 @@ class TopologyMapController extends AbstractController
                     $link->setTargetPort($eBA['localPort']);
                     $link->setWeight($eAB['metric'] ?? $eBA['metric']);
                     $link->setStatus('up');
+                    $persistAreas($link, $pickAreas($eAB, $eBA));
                     $em->persist($link);
                     $stats['linksCreated']++;
                     $matchedBa[] = $i;
@@ -606,6 +696,7 @@ class TopologyMapController extends AbstractController
                     $link->setTargetPort(null);
                     $link->setWeight($eAB['metric']);
                     $link->setStatus('up');
+                    $persistAreas($link, $pickAreas($eAB, null));
                     $em->persist($link);
                     $stats['linksCreated']++;
                 }
@@ -623,6 +714,7 @@ class TopologyMapController extends AbstractController
                 $link->setTargetPort(null);
                 $link->setWeight($eBA['metric']);
                 $link->setStatus('up');
+                $persistAreas($link, $pickAreas(null, $eBA));
                 $em->persist($link);
                 $stats['linksCreated']++;
             }
@@ -745,10 +837,14 @@ class TopologyMapController extends AbstractController
 
         $protocols = array_values(array_unique(array_filter(array_map(fn($l) => $l->getProtocol(), $links))));
 
-        // Compute ISIS areas per device if protocol filter is isis
+        // Compute ISIS areas per device when ISIS data is relevant
         $isisAreas = []; // deviceId => [area1, area2, ...]
         $allIsisAreas = [];
-        if ($protocolFilter === 'isis') {
+        $hasIsisLink = false;
+        foreach ($links as $l) {
+            if ($l->getProtocol() === 'isis') { $hasIsisLink = true; break; }
+        }
+        if ($protocolFilter === 'isis' || $hasIsisLink) {
             $linkRules = $map->getLinkRules();
             foreach ($linkRules as $rule) {
                 if (($rule['protocol'] ?? '') === 'isis' && !empty($rule['areaCategoryId']) && !empty($rule['areaColumn'])) {
@@ -787,6 +883,43 @@ class TopologyMapController extends AbstractController
             }
             unset($np);
         }
+
+        // Enrich ISIS edges with their resolved area(s):
+        // 1) prefer metadata.isisAreas (or legacy metadata.isisArea) set at link
+        //    generation time. Each value must be a real area name, not a HOME/REMOTE
+        //    qualifier left over from older link records.
+        // 2) fall back to the intersection of source/target device areas.
+        $isQualifier = static fn (string $v): bool => strcasecmp($v, 'HOME') === 0 || strcasecmp($v, 'REMOTE') === 0;
+        foreach ($edgesPayload as &$edge) {
+            if (($edge['protocol'] ?? null) !== 'isis') continue;
+            $meta = $edge['metadata'] ?? null;
+            $stored = is_array($meta) ? ($meta['isisAreas'] ?? null) : null;
+            if (!is_array($stored)) {
+                $single = is_array($meta) ? ($meta['isisArea'] ?? null) : null;
+                $stored = ($single !== null && $single !== '') ? [$single] : [];
+            }
+            $clean = [];
+            foreach ($stored as $a) {
+                if ($a === null || $a === '') continue;
+                $s = (string) $a;
+                if ($isQualifier($s)) continue;
+                if (!in_array($s, $clean, true)) $clean[] = $s;
+            }
+            if (!empty($clean)) {
+                $edge['isisArea'] = $clean[0];
+                $edge['isisAreas'] = $clean;
+                foreach ($clean as $a) { $allIsisAreas[$a] = true; }
+                continue;
+            }
+            if (!empty($isisAreas)) {
+                $srcAreas = $isisAreas[(int)$edge['source']] ?? [];
+                $tgtAreas = $isisAreas[(int)$edge['target']] ?? [];
+                $common = array_values(array_intersect($srcAreas, $tgtAreas));
+                $edge['isisArea'] = $common[0] ?? null;
+                $edge['isisAreas'] = $common;
+            }
+        }
+        unset($edge);
 
         // Build zones payload: merge definitions from designConfig with positions from layout
         $zoneDefs = $designConfig['zones'] ?? [];
