@@ -826,6 +826,8 @@
     "reloadGraph": "グラフを再読み込み",
     "savingLayout": "レイアウトを保存中...",
     "externalNeighbor": "外部ネイバー",
+    "includeExternalNeighbors": "外部ネイバーを含める",
+    "includeExternalNeighborsHelp": "無効にすると、管理対象ノードに一致しないネイバーは無視され、マップに表示されません。",
     "nodeIp": "管理IP",
     "manufacturer": "メーカー",
     "model": "モデル",

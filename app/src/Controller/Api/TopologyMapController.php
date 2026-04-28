@@ -304,6 +304,21 @@ class TopologyMapController extends AbstractController
             }
         }
 
+        $em->flush();
+
+        // Sweep external devices that no longer have any link attached on this map
+        $orphanedExternals = $em->createQueryBuilder()
+            ->select('d')
+            ->from(TopologyDevice::class, 'd')
+            ->leftJoin(TopologyLink::class, 'l', 'WITH', 'l.map = d.map AND (l.sourceDevice = d OR l.targetDevice = d)')
+            ->where('d.map = :map AND d.node IS NULL AND l.id IS NULL')
+            ->setParameter('map', $map)
+            ->getQuery()
+            ->getResult();
+        foreach ($orphanedExternals as $orphan) {
+            $em->remove($orphan);
+        }
+
         $map->setLastRefreshedAt(new \DateTimeImmutable());
         $em->flush();
 
@@ -324,11 +339,18 @@ class TopologyMapController extends AbstractController
         if (empty($rule['metricColumn']) && !empty($rule['weightColumn'])) {
             $rule['metricColumn'] = $rule['weightColumn'];
         }
+        // Default true for backward compat with existing maps
+        $rule['includeExternalNeighbors'] = !array_key_exists('includeExternalNeighbors', $rule)
+            || (bool) $rule['includeExternalNeighbors'];
         return $rule;
     }
 
     /**
      * Resolve a target device from an identifier value using nodeMatchField.
+     *
+     * @param bool $allowExternal When false, the function returns null instead of creating
+     *                            an external TopologyDevice for an unknown neighbor — the
+     *                            caller is then expected to drop the edge entirely.
      */
     private function resolveTargetDevice(
         string $destValue,
@@ -338,13 +360,17 @@ class TopologyMapController extends AbstractController
         Context $context,
         EntityManagerInterface $em,
         TopologyMap $map,
+        bool $allowExternal = true,
     ): ?TopologyDevice {
         $lowerDest = strtolower($destValue);
 
         if ($nodeMatchField === 'auto') {
             // Legacy behavior: try all identifiers
             $target = $deviceByKey[$lowerDest] ?? null;
-            if ($target) return $target;
+            if ($target) {
+                if (!$allowExternal && $target->isExternal()) return null;
+                return $target;
+            }
 
             // Try Node lookup in context
             $targetNode = null;
@@ -354,7 +380,6 @@ class TopologyMapController extends AbstractController
             }
         } else {
             // Specific field: match against that field only
-            $target = null;
             foreach ($deviceByNodeId as $device) {
                 $node = $device->getNode();
                 if (!$node) continue;
@@ -372,7 +397,10 @@ class TopologyMapController extends AbstractController
             }
             // Also try in deviceByKey as fallback
             $target = $deviceByKey[$lowerDest] ?? null;
-            if ($target) return $target;
+            if ($target) {
+                if (!$allowExternal && $target->isExternal()) return null;
+                return $target;
+            }
 
             // Try Node lookup using specific field
             $nodeField = match ($nodeMatchField) {
@@ -392,6 +420,11 @@ class TopologyMapController extends AbstractController
         // If we found a known node that already has a device, use it
         if (isset($targetNode) && $targetNode && isset($deviceByNodeId[$targetNode->getId()])) {
             return $deviceByNodeId[$targetNode->getId()];
+        }
+
+        // No managed device matches: skip when external neighbors are disabled
+        if (!$allowExternal) {
+            return null;
         }
 
         // Create external device
@@ -425,6 +458,7 @@ class TopologyMapController extends AbstractController
         $localPortCol = $rule['localPortColumn'] ?? '';
         $remotePortCol = $rule['remotePortColumn'] ?? '';
         $weightCol = $rule['metricColumn'] ?? ($rule['weightColumn'] ?? '');
+        $allowExternal = $rule['includeExternalNeighbors'] ?? true;
 
         $createdLinks = [];
 
@@ -447,7 +481,7 @@ class TopologyMapController extends AbstractController
                 $remotePort = $remotePortCol ? ($cols[$remotePortCol] ?? null) : null;
                 $weight = ($weightCol && isset($cols[$weightCol]) && is_numeric($cols[$weightCol])) ? (int) $cols[$weightCol] : null;
 
-                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map);
+                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map, $allowExternal);
                 if (!$targetDevice) continue;
 
                 // Deduplicate bidirectional
@@ -489,6 +523,7 @@ class TopologyMapController extends AbstractController
         $nodeMatchField = $rule['nodeMatchField'];
         $ifaceCol = $rule['sourceInterfaceColumn'] ?? '';
         $metricCol = $rule['metricColumn'] ?? '';
+        $allowExternal = $rule['includeExternalNeighbors'] ?? true;
 
         // Phase 1: Collect all directed adjacencies
         $directedEdges = [];
@@ -511,7 +546,7 @@ class TopologyMapController extends AbstractController
                 $localIface = ($ifaceCol && isset($cols[$ifaceCol])) ? $cols[$ifaceCol] : $entryKey;
                 $metric = ($metricCol && isset($cols[$metricCol]) && is_numeric($cols[$metricCol])) ? (int) $cols[$metricCol] : null;
 
-                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map);
+                $targetDevice = $this->resolveTargetDevice($remoteName, $nodeMatchField, $deviceByKey, $deviceByNodeId, $context, $em, $map, $allowExternal);
                 if (!$targetDevice) continue;
 
                 $directedEdges[] = [

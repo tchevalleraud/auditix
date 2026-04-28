@@ -1114,6 +1114,8 @@
     "nodesNoResult": "Aucun noeud ne correspond a votre recherche",
     "nodesEmpty": "Aucun noeud dans ce contexte",
     "externalNeighbor": "Voisin externe",
+    "includeExternalNeighbors": "Inclure les voisins externes",
+    "includeExternalNeighborsHelp": "Lorsque cette option est désactivée, les voisins qui ne correspondent à aucun nœud géré sont ignorés et ne sont pas créés sur la carte.",
     "nodeIp": "IP de gestion",
     "manufacturer": "Fabricant",
     "model": "Modele",

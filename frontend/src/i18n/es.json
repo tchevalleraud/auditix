@@ -826,6 +826,8 @@
     "reloadGraph": "Recargar el grafo",
     "savingLayout": "Guardando disposicion...",
     "externalNeighbor": "Vecino externo",
+    "includeExternalNeighbors": "Incluir vecinos externos",
+    "includeExternalNeighborsHelp": "Cuando está desactivado, los vecinos que no coinciden con ningún nodo gestionado se ignoran y no aparecen en el mapa.",
     "nodeIp": "IP de gestion",
     "manufacturer": "Fabricante",
     "model": "Modelo",

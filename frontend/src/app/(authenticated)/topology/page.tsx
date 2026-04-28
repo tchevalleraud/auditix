@@ -180,6 +180,7 @@ export default function TopologyPage() {
     localPortColumn: string; remotePortColumn: string;
     sourceInterfaceColumn: string; metricColumn: string;
     areaCategoryId: number | null; areaColumn: string;
+    includeExternalNeighbors: boolean;
     // Legacy backward compat
     remoteNameColumn: string; chassisIdColumn: string; mgmtAddressColumn: string; weightColumn: string;
   }
@@ -1482,6 +1483,7 @@ export default function TopologyPage() {
     metricColumn: rule.metricColumn || rule.weightColumn || "",
     areaCategoryId: rule.areaCategoryId ?? null,
     areaColumn: rule.areaColumn ?? "",
+    includeExternalNeighbors: rule.includeExternalNeighbors !== false,
     remoteNameColumn: rule.remoteNameColumn ?? "",
     chassisIdColumn: rule.chassisIdColumn ?? "",
     mgmtAddressColumn: rule.mgmtAddressColumn ?? "",
@@ -2713,6 +2715,20 @@ export default function TopologyPage() {
                                         </select>
                                       </div>
                                     </div>
+
+                                    {/* External neighbors toggle */}
+                                    <label className="flex items-start gap-2 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={rule.includeExternalNeighbors}
+                                        onChange={(e) => updateLinkRule(idx, { includeExternalNeighbors: e.target.checked })}
+                                        className="mt-0.5 h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
+                                      />
+                                      <span className="text-xs text-slate-700 dark:text-slate-300">
+                                        <span className="font-medium">{t("topology.includeExternalNeighbors")}</span>
+                                        <span className="block text-[11px] text-slate-400 dark:text-slate-500">{t("topology.includeExternalNeighborsHelp")}</span>
+                                      </span>
+                                    </label>
 
                                     {/* Standard protocols: local port + remote port */}
                                     {rule.protocol !== "isis" && (

@@ -1140,6 +1140,8 @@
     "nodesNoResult": "No nodes match your search",
     "nodesEmpty": "No nodes in this context",
     "externalNeighbor": "External neighbor",
+    "includeExternalNeighbors": "Include external neighbors",
+    "includeExternalNeighborsHelp": "When disabled, neighbors that don't match any managed node are ignored and won't appear on the map.",
     "nodeIp": "Management IP",
     "manufacturer": "Manufacturer",
     "model": "Model",

@@ -826,6 +826,8 @@
     "reloadGraph": "Graph neu laden",
     "savingLayout": "Layout wird gespeichert...",
     "externalNeighbor": "Externer Nachbar",
+    "includeExternalNeighbors": "Externe Nachbarn einbeziehen",
+    "includeExternalNeighborsHelp": "Wenn deaktiviert, werden Nachbarn, die keinem verwalteten Knoten entsprechen, ignoriert und erscheinen nicht auf der Karte.",
     "nodeIp": "Management-IP",
     "manufacturer": "Hersteller",
     "model": "Modell",
