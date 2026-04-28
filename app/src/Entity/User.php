@@ -43,6 +43,10 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 10, nullable: true)]
     private ?string $theme = null;
 
+    /** @var array<string, mixed>|null */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $preferences = null;
+
     #[ORM\Column(options: ['default' => 'CURRENT_TIMESTAMP'])]
     private \DateTimeImmutable $createdAt;
 
@@ -155,6 +159,19 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setTheme(?string $theme): static
     {
         $this->theme = $theme;
+        return $this;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function getPreferences(): ?array
+    {
+        return $this->preferences;
+    }
+
+    /** @param array<string, mixed>|null $preferences */
+    public function setPreferences(?array $preferences): static
+    {
+        $this->preferences = $preferences;
         return $this;
     }
 

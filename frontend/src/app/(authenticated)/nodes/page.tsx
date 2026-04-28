@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
@@ -26,7 +26,15 @@ import {
   Trash2,
   Upload,
   Pencil,
+  FileSpreadsheet,
+  ArrowUp,
+  ArrowDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
 } from "lucide-react";
+import CsvImportModal from "@/components/CsvImportModal";
 
 interface NodeTag {
   id: number;
@@ -58,7 +66,7 @@ interface NodeItem {
 
 export default function NodesPage() {
   const { t, locale } = useI18n();
-  const { current } = useAppContext();
+  const { current, userInfo } = useAppContext();
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [search, setSearch] = useState("");
   const [fetchLoading, setFetchLoading] = useState(true);
@@ -111,6 +119,7 @@ export default function NodesPage() {
   const [bulkModelId, setBulkModelId] = useState<number | null>(null);
   const [bulkProfileId, setBulkProfileId] = useState<number | null>(null);
   const [bulkPolicy, setBulkPolicy] = useState<string>("audit");
+  const [csvImportModal, setCsvImportModal] = useState(false);
   const [manufacturers, setManufacturers] = useState<{ id: number; name: string }[]>([]);
   const [models, setModels] = useState<{ id: number; name: string; manufacturer: { id: number } }[]>([]);
   const [profiles, setProfiles] = useState<{ id: number; name: string }[]>([]);
@@ -249,12 +258,104 @@ export default function NodesPage() {
     return () => es.close();
   }, [current, nodes.length, loadComplianceStats]);
 
-  const filtered = nodes.filter(
-    (n) =>
-      n.ipAddress.toLowerCase().includes(search.toLowerCase()) ||
-      (n.name && n.name.toLowerCase().includes(search.toLowerCase())) ||
-      (n.hostname && n.hostname.toLowerCase().includes(search.toLowerCase()))
-  );
+  // Sort + pagination, persisted in user.preferences
+  type SortKey = "hostname" | "ipAddress" | "manufacturer" | "discoveredModel" | "discoveredVersion" | "policy" | "score";
+  type SortRule = { column: SortKey; direction: "asc" | "desc" };
+  const PAGE_SIZES = [5, 10, 15, 25, 50, 100, 200];
+  const [sorts, setSorts] = useState<SortRule[]>([]);
+  const [pageSize, setPageSize] = useState<number>(15);
+  const [page, setPage] = useState(1);
+  const prefsLoaded = useRef(false);
+
+  // Load sort + pageSize from user preferences once
+  useEffect(() => {
+    if (!userInfo || prefsLoaded.current) return;
+    const prefs = userInfo.preferences as { nodes?: { sorts?: SortRule[]; pageSize?: number } } | null;
+    const nodesPref = prefs?.nodes;
+    if (nodesPref?.sorts && Array.isArray(nodesPref.sorts)) setSorts(nodesPref.sorts);
+    if (nodesPref?.pageSize && PAGE_SIZES.includes(nodesPref.pageSize)) setPageSize(nodesPref.pageSize);
+    prefsLoaded.current = true;
+  }, [userInfo]);
+
+  // Persist sort + pageSize on every change. keepalive ensures the request
+  // completes even if the user refreshes/navigates immediately after the click.
+  useEffect(() => {
+    if (!prefsLoaded.current) return;
+    fetch("/api/profile/preferences", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodes: { sorts, pageSize } }),
+      keepalive: true,
+    }).catch(() => {});
+  }, [sorts, pageSize]);
+
+  const toggleSort = (column: SortKey, additive: boolean) => {
+    setSorts((prev) => {
+      const existing = prev.find((s) => s.column === column);
+      if (!additive) {
+        if (!existing) return [{ column, direction: "asc" }];
+        if (existing.direction === "asc") return [{ column, direction: "desc" }];
+        return [];
+      }
+      if (!existing) return [...prev, { column, direction: "asc" }];
+      if (existing.direction === "asc") return prev.map((s) => s.column === column ? { ...s, direction: "desc" } : s);
+      return prev.filter((s) => s.column !== column);
+    });
+  };
+
+  const getSortValue = (n: NodeItem, key: SortKey): string | number => {
+    switch (key) {
+      case "hostname": return (n.hostname || n.name || "").toLowerCase();
+      case "ipAddress": {
+        const parts = n.ipAddress.split(".").map((p) => parseInt(p, 10));
+        if (parts.length !== 4 || parts.some(isNaN)) return 0;
+        return ((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3];
+      }
+      case "manufacturer": return (n.manufacturer?.name || "").toLowerCase();
+      case "discoveredModel": return (n.discoveredModel || "").toLowerCase();
+      case "discoveredVersion": return (n.discoveredVersion || "").toLowerCase();
+      case "policy": return n.policy || "";
+      case "score": return n.score || "Z";
+    }
+  };
+
+  const searched = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return nodes;
+    return nodes.filter((n) => {
+      return (
+        n.ipAddress.toLowerCase().includes(q) ||
+        (n.name && n.name.toLowerCase().includes(q)) ||
+        (n.hostname && n.hostname.toLowerCase().includes(q)) ||
+        (n.discoveredModel && n.discoveredModel.toLowerCase().includes(q)) ||
+        (n.discoveredVersion && n.discoveredVersion.toLowerCase().includes(q))
+      );
+    });
+  }, [nodes, search]);
+
+  const filtered = useMemo(() => {
+    if (sorts.length === 0) return searched;
+    const sorted = [...searched];
+    sorted.sort((a, b) => {
+      for (const s of sorts) {
+        const va = getSortValue(a, s.column);
+        const vb = getSortValue(b, s.column);
+        if (va < vb) return s.direction === "asc" ? -1 : 1;
+        if (va > vb) return s.direction === "asc" ? 1 : -1;
+      }
+      return 0;
+    });
+    return sorted;
+  }, [searched, sorts]);
+
+  // Reset to page 1 whenever the filter changes meaningfully
+  useEffect(() => { setPage(1); }, [search, pageSize, sorts]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, filtered.length);
+  const paged = filtered.slice(pageStart, pageEnd);
 
   const filteredIds = new Set(filtered.map((n) => n.id));
   const allFilteredSelected = filtered.length > 0 && filtered.every((n) => selected.has(n.id));
@@ -491,6 +592,32 @@ export default function NodesPage() {
     );
   }
 
+  const renderSortableTh = (column: SortKey, label: string, align: "left" | "center" = "left", extra = "") => {
+    const idx = sorts.findIndex((s) => s.column === column);
+    const active = idx !== -1;
+    const dir = active ? sorts[idx].direction : null;
+    const alignClass = align === "center" ? "text-center justify-center" : "text-left";
+    return (
+      <th className={`px-4 py-3 text-${align} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider ${extra}`}>
+        <button
+          onClick={(e) => toggleSort(column, e.shiftKey)}
+          className={`group inline-flex items-center gap-1 ${alignClass} ${active ? "text-slate-700 dark:text-slate-200" : ""} hover:text-slate-700 dark:hover:text-slate-200 transition-colors`}
+          title={t("nodes.sortHint")}
+        >
+          <span>{label}</span>
+          {active ? (
+            <span className="inline-flex items-center gap-0.5">
+              {dir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+              {sorts.length > 1 && <span className="text-[10px] font-bold tabular-nums">{idx + 1}</span>}
+            </span>
+          ) : (
+            <ArrowUp className="h-3 w-3 opacity-0 group-hover:opacity-30" />
+          )}
+        </button>
+      </th>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -575,6 +702,10 @@ export default function NodesPage() {
                     <Upload className="h-4 w-4 text-blue-500" />
                     {t("nodes.bulkAdd")}
                   </button>
+                  <button onClick={() => { setActionMenuOpen(false); setCsvImportModal(true); if (current) { fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers); fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels); fetch(`/api/profiles?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setProfiles); } }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-500" />
+                    {t("nodes.csvImport")}
+                  </button>
                 </div>
               </>
             )}
@@ -606,27 +737,13 @@ export default function NodesPage() {
                     className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
                   />
                 </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-12">
-                  {t("nodes.colScore")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colHostname")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colIpAddress")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colManufacturer")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colDiscoveredModel")}
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colDiscoveredVersion")}
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  {t("nodes.colPolicy")}
-                </th>
+                {renderSortableTh("score", t("nodes.colScore"), "center", "w-12")}
+                {renderSortableTh("hostname", t("nodes.colHostname"), "left")}
+                {renderSortableTh("ipAddress", t("nodes.colIpAddress"), "left")}
+                {renderSortableTh("manufacturer", t("nodes.colManufacturer"), "left")}
+                {renderSortableTh("discoveredModel", t("nodes.colDiscoveredModel"), "left")}
+                {renderSortableTh("discoveredVersion", t("nodes.colDiscoveredVersion"), "left")}
+                {renderSortableTh("policy", t("nodes.colPolicy"), "center")}
                 <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider min-w-[160px]">
                   <span className="flex items-center gap-1">
                     {t("nodes.colCompliance")}
@@ -651,7 +768,7 @@ export default function NodesPage() {
                   </td>
                 </tr>
               ) : (
-                filtered.map((node) => (
+                paged.map((node) => (
                   <tr key={node.id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${selected.has(node.id) ? "bg-slate-50 dark:bg-slate-800/30" : ""}`}>
                     <td className="px-4 py-2 text-center">
                       <input
@@ -882,6 +999,62 @@ export default function NodesPage() {
             </tbody>
           </table>
         </div>
+        {filtered.length > 0 && (
+          <div className="flex items-center justify-between gap-4 px-4 py-3 border-t border-slate-100 dark:border-slate-800 text-sm text-slate-600 dark:text-slate-400">
+            <div className="flex items-center gap-2">
+              <span>{t("nodes.pageSize")}</span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+              >
+                {PAGE_SIZES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="tabular-nums">
+                {t("nodes.pageRange", { from: String(pageStart + 1), to: String(pageEnd), total: String(filtered.length) })}
+              </span>
+              <div className="inline-flex items-center gap-1">
+                <button
+                  onClick={() => setPage(1)}
+                  disabled={currentPage <= 1}
+                  className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={t("nodes.pageFirst")}
+                >
+                  <ChevronsLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={t("nodes.pagePrev")}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="px-2 text-xs tabular-nums">
+                  {t("nodes.pageOf", { page: String(currentPage), total: String(totalPages) })}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={t("nodes.pageNext")}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setPage(totalPages)}
+                  disabled={currentPage >= totalPages}
+                  className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  title={t("nodes.pageLast")}
+                >
+                  <ChevronsRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       {/* Compliance help modal */}
       {complianceHelpOpen && (
@@ -1196,6 +1369,18 @@ export default function NodesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {current && (
+        <CsvImportModal
+          open={csvImportModal}
+          onClose={() => setCsvImportModal(false)}
+          onImported={loadNodes}
+          contextId={current.id}
+          manufacturers={manufacturers}
+          models={models}
+          profiles={profiles}
+        />
       )}
     </div>
   );

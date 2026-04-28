@@ -36,6 +36,7 @@ export interface UserInfo {
   avatar: string | null;
   locale: string | null;
   theme: string | null;
+  preferences: Record<string, unknown> | null;
 }
 
 interface ContextValue {
@@ -93,6 +94,7 @@ export default function ContextProvider({ children }: { children: React.ReactNod
             avatar: data.avatar ?? null,
             locale: data.locale ?? null,
             theme: data.theme ?? null,
+            preferences: data.preferences ?? null,
           });
 
           // Apply user preferences on first load

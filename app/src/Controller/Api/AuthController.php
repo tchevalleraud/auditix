@@ -140,6 +140,23 @@ class AuthController extends AbstractController
         return $this->json($this->serializeUser($user));
     }
 
+    #[Route('/profile/preferences', name: 'api_profile_preferences', methods: ['PATCH'])]
+    public function patchPreferences(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        /** @var User $user */
+        $user = $this->getUser();
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['error' => 'Invalid JSON body'], Response::HTTP_BAD_REQUEST);
+        }
+        $current = $user->getPreferences() ?? [];
+        $merged = array_merge($current, $data);
+        $user->setPreferences($merged);
+        $em->flush();
+
+        return $this->json(['preferences' => $merged]);
+    }
+
     private function serializeUser(User $user): array
     {
         return [
@@ -150,6 +167,7 @@ class AuthController extends AbstractController
             'avatar' => $user->getAvatar() ? '/api/avatars/' . $user->getAvatar() : null,
             'locale' => $user->getLocale(),
             'theme' => $user->getTheme(),
+            'preferences' => $user->getPreferences(),
         ];
     }
 }
