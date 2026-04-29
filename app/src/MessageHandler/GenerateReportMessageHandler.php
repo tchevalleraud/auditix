@@ -9,6 +9,8 @@ use App\Entity\NodeTag;
 use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
+use App\Service\ComplianceEvaluator;
+use App\Service\InventoryNodeRuleEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
@@ -21,6 +23,8 @@ class GenerateReportMessageHandler
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly HubInterface $hub,
+        private readonly InventoryNodeRuleEvaluator $inventoryRuleEvaluator,
+        private readonly ComplianceEvaluator $complianceEvaluator,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -193,6 +197,84 @@ class GenerateReportMessageHandler
             'col_date' => '日付',
             'col_description' => '説明',
         ],
+    ];
+
+    private const COMPLIANCE_LABELS = [
+        'fr' => [
+            'rule' => 'Regle', 'rule_id' => 'ID', 'description' => 'Description',
+            'compliant' => 'Conforme', 'non_compliant' => 'Non conforme',
+            'error' => 'Erreur', 'not_applicable' => 'N/A', 'total' => 'Total',
+            'node' => 'Equipement', 'status' => 'Statut', 'severity' => 'Severite',
+            'message' => 'Message', 'no_data' => 'Aucun resultat disponible.',
+            'no_recommendation' => 'Aucune recommandation generee pour cet equipement.',
+            'sev_info' => 'Info', 'sev_low' => 'Faible', 'sev_medium' => 'Moyenne',
+            'sev_high' => 'Haute', 'sev_critical' => 'Critique',
+        ],
+        'en' => [
+            'rule' => 'Rule', 'rule_id' => 'ID', 'description' => 'Description',
+            'compliant' => 'Compliant', 'non_compliant' => 'Non-compliant',
+            'error' => 'Error', 'not_applicable' => 'N/A', 'total' => 'Total',
+            'node' => 'Device', 'status' => 'Status', 'severity' => 'Severity',
+            'message' => 'Message', 'no_data' => 'No results available.',
+            'no_recommendation' => 'No recommendation produced for this device.',
+            'sev_info' => 'Info', 'sev_low' => 'Low', 'sev_medium' => 'Medium',
+            'sev_high' => 'High', 'sev_critical' => 'Critical',
+        ],
+        'de' => [
+            'rule' => 'Regel', 'rule_id' => 'ID', 'description' => 'Beschreibung',
+            'compliant' => 'Konform', 'non_compliant' => 'Nicht konform',
+            'error' => 'Fehler', 'not_applicable' => 'N/A', 'total' => 'Gesamt',
+            'node' => 'Geraet', 'status' => 'Status', 'severity' => 'Schweregrad',
+            'message' => 'Nachricht', 'no_data' => 'Keine Ergebnisse verfuegbar.',
+            'no_recommendation' => 'Keine Empfehlung fuer dieses Geraet erzeugt.',
+            'sev_info' => 'Info', 'sev_low' => 'Niedrig', 'sev_medium' => 'Mittel',
+            'sev_high' => 'Hoch', 'sev_critical' => 'Kritisch',
+        ],
+        'es' => [
+            'rule' => 'Regla', 'rule_id' => 'ID', 'description' => 'Descripcion',
+            'compliant' => 'Conforme', 'non_compliant' => 'No conforme',
+            'error' => 'Error', 'not_applicable' => 'N/A', 'total' => 'Total',
+            'node' => 'Equipo', 'status' => 'Estado', 'severity' => 'Severidad',
+            'message' => 'Mensaje', 'no_data' => 'Sin resultados disponibles.',
+            'no_recommendation' => 'No se genero recomendacion para este equipo.',
+            'sev_info' => 'Info', 'sev_low' => 'Baja', 'sev_medium' => 'Media',
+            'sev_high' => 'Alta', 'sev_critical' => 'Critica',
+        ],
+        'it' => [
+            'rule' => 'Regola', 'rule_id' => 'ID', 'description' => 'Descrizione',
+            'compliant' => 'Conforme', 'non_compliant' => 'Non conforme',
+            'error' => 'Errore', 'not_applicable' => 'N/D', 'total' => 'Totale',
+            'node' => 'Dispositivo', 'status' => 'Stato', 'severity' => 'Severita',
+            'message' => 'Messaggio', 'no_data' => 'Nessun risultato disponibile.',
+            'no_recommendation' => 'Nessuna raccomandazione prodotta per questo dispositivo.',
+            'sev_info' => 'Info', 'sev_low' => 'Bassa', 'sev_medium' => 'Media',
+            'sev_high' => 'Alta', 'sev_critical' => 'Critica',
+        ],
+        'ja' => [
+            'rule' => 'ルール', 'rule_id' => 'ID', 'description' => '説明',
+            'compliant' => '準拠', 'non_compliant' => '非準拠',
+            'error' => 'エラー', 'not_applicable' => '対象外', 'total' => '合計',
+            'node' => '機器', 'status' => 'ステータス', 'severity' => '深刻度',
+            'message' => 'メッセージ', 'no_data' => '結果がありません。',
+            'no_recommendation' => 'この機器に対する推奨事項は生成されませんでした。',
+            'sev_info' => '情報', 'sev_low' => '低', 'sev_medium' => '中',
+            'sev_high' => '高', 'sev_critical' => '重大',
+        ],
+    ];
+
+    private const COMPLIANCE_STATUS_RGB = [
+        'compliant' => [22, 163, 74],
+        'non_compliant' => [220, 38, 38],
+        'error' => [234, 88, 12],
+        'not_applicable' => [100, 116, 139],
+    ];
+
+    private const COMPLIANCE_SEVERITY_RGB = [
+        'info' => [37, 99, 235],
+        'low' => [22, 163, 74],
+        'medium' => [234, 179, 8],
+        'high' => [234, 88, 12],
+        'critical' => [220, 38, 38],
     ];
 
     private function generatePdf(Report $report, string $filePath, ?Node $forNode = null): void
@@ -1054,14 +1136,161 @@ class GenerateReportMessageHandler
                 $prevType = 'table';
 
             } elseif ($type === 'inventory_table') {
-                $columns = $block['columns'] ?? [];
-                $nodeIds = $forNode ? [$forNode->getId()] : ($block['nodeIds'] ?? []);
+                $invMode = $block['mode'] ?? 'multi_node_columns';
                 $showHeader = !empty($block['showHeader']);
                 $invTableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
                 $invThemeFontSize = !empty($invTableStyle['fontSize']) ? (int) $invTableStyle['fontSize'] : $bodySize;
                 $invFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : $invThemeFontSize;
                 $hostnameHeaderLabel = !empty($block['hostnameHeaderLabel']) ? $block['hostnameHeaderLabel'] : 'Hostname';
                 $styleRules = $block['styleRules'] ?? [];
+
+                // --- single_node_full mode: render category entries as rows for one node ---
+                if ($invMode === 'single_node_full') {
+                    $singleNodeId = $forNode ? $forNode->getId() : ($block['singleNodeId'] ?? null);
+                    $singleCategory = (string) ($block['singleCategory'] ?? '');
+                    if (!$singleNodeId || $singleCategory === '') {
+                        continue;
+                    }
+                    $node = $forNode ?? $this->em->getRepository(Node::class)->find($singleNodeId);
+                    if (!$node) continue;
+
+                    if ($firstBlock) {
+                        $pdf->SetMargins($mLeft, $mTop, $mRight);
+                        $pdf->SetAutoPageBreak(true, $mBottom);
+                        $pdf->AddPage();
+                        $firstBlock = false;
+                    } else {
+                        $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                    }
+
+                    $tableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                    $headerBg = $this->hexToRgb($tableStyle['headerBg'] ?? '#1e293b');
+                    $headerColor = $this->hexToRgb($tableStyle['headerColor'] ?? '#ffffff');
+                    $borderColor = $this->hexToRgb($tableStyle['borderColor'] ?? '#e2e8f0');
+                    $alternateRows = $tableStyle['alternateRows'] ?? true;
+                    $alternateBg = $this->hexToRgb($tableStyle['alternateBg'] ?? '#f8fafc');
+
+                    $entries = $this->em->getRepository(NodeInventoryEntry::class)->createQueryBuilder('e')
+                        ->where('e.node = :n')
+                        ->andWhere('e.categoryName = :cat')
+                        ->setParameter('n', $node)
+                        ->setParameter('cat', $singleCategory)
+                        ->orderBy('e.entryKey', 'ASC')
+                        ->addOrderBy('e.colLabel', 'ASC')
+                        ->getQuery()
+                        ->getResult();
+
+                    // Pivot: rows = entryKey, columns = colLabel (sorted by first occurrence)
+                    $colLabels = [];
+                    $rowMap = [];
+                    foreach ($entries as $entry) {
+                        $k = $entry->getEntryKey() ?? '';
+                        $cl = $entry->getColLabel() ?? '';
+                        if (!in_array($cl, $colLabels, true)) $colLabels[] = $cl;
+                        if (!isset($rowMap[$k])) $rowMap[$k] = [];
+                        $rowMap[$k][$cl] = $entry->getValue() ?? '';
+                    }
+                    $rowKeys = array_keys($rowMap);
+
+                    $pageW = $pdf->getPageWidth();
+                    $contentW = $pageW - $mLeft - $mRight;
+                    $minLineH = $invFontSize * 0.3528 + 3;
+                    $cellPadding = 4;
+
+                    $headers = [$hostnameHeaderLabel ?: 'Cle'];
+                    foreach ($colLabels as $cl) $headers[] = $cl;
+                    $colCountInv = count($headers);
+                    $maxWidths = array_fill(0, $colCountInv, 0);
+
+                    $pdf->SetFont($bodyFont, 'B', $invFontSize);
+                    foreach ($headers as $hi => $h) {
+                        $maxWidths[$hi] = max($maxWidths[$hi], $pdf->GetStringWidth($h) + $cellPadding);
+                    }
+                    $pdf->SetFont($bodyFont, '', $invFontSize);
+                    foreach ($rowKeys as $k) {
+                        $maxWidths[0] = max($maxWidths[0], $pdf->GetStringWidth($k) + $cellPadding);
+                        foreach ($colLabels as $ci => $cl) {
+                            $v = $rowMap[$k][$cl] ?? '';
+                            $maxWidths[$ci + 1] = max($maxWidths[$ci + 1], $pdf->GetStringWidth($v) + $cellPadding);
+                        }
+                    }
+                    $totalNatural = array_sum($maxWidths);
+                    $colWidthsInv = [];
+                    $scale = $totalNatural > 0 ? ($contentW / $totalNatural) : 1;
+                    foreach ($maxWidths as $w) {
+                        $colWidthsInv[] = $w * $scale;
+                    }
+
+                    $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                    $pdf->SetLineWidth(0.2);
+
+                    if ($showHeader) {
+                        $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                        $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                        $pdf->SetFont($bodyFont, 'B', $invFontSize);
+                        $maxH = $minLineH;
+                        foreach ($headers as $hi => $h) {
+                            $maxH = max($maxH, $pdf->getStringHeight($colWidthsInv[$hi], $h) + 2);
+                        }
+                        $startY = $pdf->GetY();
+                        $startX = $mLeft;
+                        foreach ($headers as $hi => $h) {
+                            $pdf->MultiCell($colWidthsInv[$hi], $maxH, $h, 1, 'L', true, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                            $startX += $colWidthsInv[$hi];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $maxH);
+                    }
+
+                    $pdf->SetFont($bodyFont, '', $invFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    foreach ($rowKeys as $ri => $k) {
+                        $values = [$k];
+                        foreach ($colLabels as $cl) {
+                            $values[] = $rowMap[$k][$cl] ?? '';
+                        }
+                        $maxH = $minLineH;
+                        foreach ($values as $vi => $v) {
+                            $maxH = max($maxH, $pdf->getStringHeight($colWidthsInv[$vi], $v) + 2);
+                        }
+                        $startY = $pdf->GetY();
+                        if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
+                        }
+                        $fill = $alternateRows && ($ri % 2 === 1);
+                        $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                        $startX = $mLeft;
+                        foreach ($values as $vi => $v) {
+                            $pdf->MultiCell($colWidthsInv[$vi], $maxH, $v, 1, 'L', $fill, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                            $startX += $colWidthsInv[$vi];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $maxH);
+                    }
+
+                    if ($pSpaceAfter > 0) {
+                        $pdf->Ln($pSpaceAfter);
+                    }
+                    $prevType = 'table';
+                    continue;
+                }
+
+                // --- multi_node_columns mode (default): existing behavior ---
+                $columns = $block['columns'] ?? [];
+
+                // Resolve node ids: forNode wins for TYPE_NODE; otherwise manual + auto-rules
+                if ($forNode) {
+                    $nodeIds = [$forNode->getId()];
+                } else {
+                    $nodeIds = array_values(array_unique(array_map('intval', $block['nodeIds'] ?? [])));
+                    $rules = $block['nodeRules'] ?? [];
+                    if (!empty($rules) && $report->getContext()) {
+                        $matchMode = ($block['nodeRulesMatch'] ?? 'any') === 'all' ? 'all' : 'any';
+                        $matched = $this->inventoryRuleEvaluator->matchNodeIds($report->getContext(), $rules, $matchMode);
+                        foreach ($matched as $mid) {
+                            if (!in_array($mid, $nodeIds, true)) $nodeIds[] = $mid;
+                        }
+                    }
+                }
 
                 // Build column ID to index map for rule matching
                 $colIdMap = ['__hostname__' => -1]; // -1 = hostname column
@@ -2284,6 +2513,555 @@ class GenerateReportMessageHandler
                 }
 
                 $prevType = 'topology';
+
+            } elseif ($type === 'compliance_matrix') {
+                $policyId = $block['policyId'] ?? null;
+                if (!$policyId) continue;
+
+                $policy = $this->em->getRepository(\App\Entity\CompliancePolicy::class)->find($policyId);
+                if (!$policy) continue;
+
+                $showRuleId = !empty($block['showRuleId']);
+                $showTotal = !empty($block['showTotal']);
+                $pageBreak = !empty($block['pageBreakBefore']);
+                $cmFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
+
+                $reportLocale = $report ? $report->getLocale() : 'en';
+                $cl = self::COMPLIANCE_LABELS[$reportLocale] ?? self::COMPLIANCE_LABELS['en'];
+
+                if ($pageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                // Aggregate counts per rule per status
+                $rowsAgg = $this->em->createQueryBuilder()
+                    ->select('r.id AS rid', 'r.identifier AS rident', 'r.name AS rname', 'cr.status AS st', 'COUNT(cr.id) AS cnt')
+                    ->from(\App\Entity\ComplianceResult::class, 'cr')
+                    ->join('cr.rule', 'r')
+                    ->where('cr.policy = :policy')
+                    ->setParameter('policy', $policy)
+                    ->groupBy('r.id', 'r.identifier', 'r.name', 'cr.status')
+                    ->getQuery()->getArrayResult();
+
+                $ruleMap = [];
+                foreach ($rowsAgg as $row) {
+                    $rid = (int) $row['rid'];
+                    if (!isset($ruleMap[$rid])) {
+                        $ruleMap[$rid] = [
+                            'identifier' => $row['rident'] ?? '',
+                            'name' => $row['rname'] ?? '',
+                            'compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0,
+                        ];
+                    }
+                    $st = $row['st'];
+                    if ($st !== 'skipped' && isset($ruleMap[$rid][$st])) {
+                        $ruleMap[$rid][$st] = (int) $row['cnt'];
+                    }
+                }
+                uasort($ruleMap, function ($a, $b) {
+                    return strnatcasecmp($a['identifier'] ?? '', $b['identifier'] ?? '') ?: strcmp($a['name'] ?? '', $b['name'] ?? '');
+                });
+
+                // Theme colors
+                $cmTableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $cmHeaderBg = $this->hexToRgb($cmTableStyle['headerBg'] ?? '#1e293b');
+                $cmHeaderColor = $this->hexToRgb($cmTableStyle['headerColor'] ?? '#ffffff');
+                $cmBorderColor = $this->hexToRgb($cmTableStyle['borderColor'] ?? '#e2e8f0');
+                $cmAlternate = $cmTableStyle['alternateRows'] ?? true;
+                $cmAlternateBg = $this->hexToRgb($cmTableStyle['alternateBg'] ?? '#f8fafc');
+
+                // Title
+                $pdf->SetFont($bodyFont, 'B', $cmFontSize + 2);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                $pdf->MultiCell(0, ($cmFontSize + 2) * 0.3528 + 1, $policy->getName(), 0, 'L');
+                $pdf->Ln(1);
+
+                // Build columns
+                $cmCols = [];
+                if ($showRuleId) $cmCols[] = ['key' => 'identifier', 'label' => $cl['rule_id'], 'w' => 14, 'align' => 'L', 'multi' => true];
+                $cmCols[] = ['key' => 'name', 'label' => $cl['rule'], 'w' => 50, 'align' => 'L', 'multi' => true];
+                $cmCols[] = ['key' => 'compliant', 'label' => $cl['compliant'], 'w' => 14, 'align' => 'C', 'multi' => false];
+                $cmCols[] = ['key' => 'non_compliant', 'label' => $cl['non_compliant'], 'w' => 14, 'align' => 'C', 'multi' => false];
+                $cmCols[] = ['key' => 'error', 'label' => $cl['error'], 'w' => 14, 'align' => 'C', 'multi' => false];
+                $cmCols[] = ['key' => 'not_applicable', 'label' => $cl['not_applicable'], 'w' => 14, 'align' => 'C', 'multi' => false];
+                if ($showTotal) $cmCols[] = ['key' => 'total', 'label' => $cl['total'], 'w' => 14, 'align' => 'C', 'multi' => false];
+
+                $cmContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+                $cmTotalW = array_sum(array_column($cmCols, 'w'));
+                foreach ($cmCols as $cmCi => $cmC) {
+                    $cmCols[$cmCi]['mm'] = $cmContentW * ($cmC['w'] / $cmTotalW);
+                }
+
+                $pdf->SetDrawColor($cmBorderColor[0], $cmBorderColor[1], $cmBorderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                // Header
+                $pdf->SetFont($bodyFont, 'B', $cmFontSize);
+                $pdf->SetFillColor($cmHeaderBg[0], $cmHeaderBg[1], $cmHeaderBg[2]);
+                $pdf->SetTextColor($cmHeaderColor[0], $cmHeaderColor[1], $cmHeaderColor[2]);
+                $headerH = $cmFontSize * 0.3528 + 3;
+                $startY = $pdf->GetY();
+                $startX = $mLeft;
+                foreach ($cmCols as $c) {
+                    $pdf->MultiCell($c['mm'], $headerH, $c['label'], 1, $c['align'], true, 0, $startX, $startY, true, 0, false, true, $headerH, 'M');
+                    $startX += $c['mm'];
+                }
+                $pdf->SetXY($mLeft, $startY + $headerH);
+
+                if (empty($ruleMap)) {
+                    $pdf->SetFont($bodyFont, 'I', $cmFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell($cmContentW, 0, $cl['no_data'], 1, 'C', false, 1, $mLeft);
+                } else {
+                    $cmRowI = 0;
+                    foreach ($ruleMap as $r) {
+                        $r['total'] = ($r['compliant'] ?? 0) + ($r['non_compliant'] ?? 0) + ($r['error'] ?? 0) + ($r['not_applicable'] ?? 0);
+
+                        $fill = $cmAlternate && ($cmRowI % 2 === 1);
+                        if ($fill) {
+                            $pdf->SetFillColor($cmAlternateBg[0], $cmAlternateBg[1], $cmAlternateBg[2]);
+                        } else {
+                            $pdf->SetFillColor(255, 255, 255);
+                            $fill = true;
+                        }
+
+                        // Compute row height based on multi-line columns
+                        $rowH = $cmFontSize * 0.3528 + 3;
+                        $pdf->SetFont($bodyFont, '', $cmFontSize);
+                        foreach ($cmCols as $c) {
+                            if (!empty($c['multi'])) {
+                                $h = $pdf->getStringHeight($c['mm'], (string) ($r[$c['key']] ?? ''));
+                                $rowH = max($rowH, $h + 2);
+                            }
+                        }
+
+                        $startY = $pdf->GetY();
+                        if ($startY + $rowH > $pdf->getPageHeight() - $mBottom) {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
+                        }
+
+                        $startX = $mLeft;
+                        foreach ($cmCols as $c) {
+                            $val = (string) ($r[$c['key']] ?? '');
+                            if (isset(self::COMPLIANCE_STATUS_RGB[$c['key']]) && (int) $val > 0) {
+                                $sc = self::COMPLIANCE_STATUS_RGB[$c['key']];
+                                $pdf->SetTextColor($sc[0], $sc[1], $sc[2]);
+                                $pdf->SetFont($bodyFont, 'B', $cmFontSize);
+                            } else {
+                                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                                $pdf->SetFont($bodyFont, '', $cmFontSize);
+                            }
+                            $pdf->MultiCell($c['mm'], $rowH, $val, 1, $c['align'], $fill, 0, $startX, $startY, true, 0, false, true, $rowH, 'M');
+                            $startX += $c['mm'];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $rowH);
+                        $cmRowI++;
+                    }
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'compliance_matrix';
+
+            } elseif ($type === 'rule_non_compliant' || $type === 'rule_nodes_table') {
+                $policyId = $block['policyId'] ?? null;
+                $ruleId = $block['ruleId'] ?? null;
+                if (!$policyId || !$ruleId) continue;
+
+                $policy = $this->em->getRepository(\App\Entity\CompliancePolicy::class)->find($policyId);
+                $rule = $this->em->getRepository(\App\Entity\ComplianceRule::class)->find($ruleId);
+                if (!$policy || !$rule) continue;
+
+                $showDescription = !empty($block['showRuleDescription']);
+                $showSeverity = !empty($block['showSeverity']);
+                $showMessage = !empty($block['showMessage']);
+                $pageBreak = !empty($block['pageBreakBefore']);
+                $rcFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
+
+                $reportLocale = $report ? $report->getLocale() : 'en';
+                $cl = self::COMPLIANCE_LABELS[$reportLocale] ?? self::COMPLIANCE_LABELS['en'];
+
+                if ($pageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                // Title: rule identifier + name
+                $title = trim(($rule->getIdentifier() ? '[' . $rule->getIdentifier() . '] ' : '') . $rule->getName());
+                $pdf->SetFont($bodyFont, 'B', $rcFontSize + 2);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                $pdf->MultiCell(0, ($rcFontSize + 2) * 0.3528 + 1, $title, 0, 'L');
+                $pdf->Ln(0.5);
+
+                // Description
+                if ($showDescription && $rule->getDescription()) {
+                    $pdf->SetFont($bodyFont, 'I', $rcFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell(0, $rcFontSize * 0.3528 + 1, $rule->getDescription(), 0, 'L');
+                    $pdf->Ln(1);
+                }
+
+                // Theme colors
+                $rcTableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $rcHeaderBg = $this->hexToRgb($rcTableStyle['headerBg'] ?? '#1e293b');
+                $rcHeaderColor = $this->hexToRgb($rcTableStyle['headerColor'] ?? '#ffffff');
+                $rcBorderColor = $this->hexToRgb($rcTableStyle['borderColor'] ?? '#e2e8f0');
+                $rcAlternate = $rcTableStyle['alternateRows'] ?? true;
+                $rcAlternateBg = $this->hexToRgb($rcTableStyle['alternateBg'] ?? '#f8fafc');
+
+                // Resolve device filter (manual node IDs + node rules)
+                $rcManualNodeIds = array_map('intval', $block['nodeIds'] ?? []);
+                $rcNodeRules = $block['nodeRules'] ?? [];
+                $rcRulesMatch = ($block['nodeRulesMatch'] ?? 'any') === 'all' ? 'all' : 'any';
+                $rcRuleNodeIds = [];
+                if (!empty($rcNodeRules) && $policy->getContext()) {
+                    $rcRuleNodeIds = $this->inventoryRuleEvaluator->matchNodeIds($policy->getContext(), $rcNodeRules, $rcRulesMatch);
+                }
+                $rcFilterNodeIds = array_values(array_unique(array_merge($rcManualNodeIds, $rcRuleNodeIds)));
+                $rcHasFilter = !empty($rcFilterNodeIds);
+
+                // Fetch results
+                $resQb = $this->em->createQueryBuilder()
+                    ->select('cr', 'n')
+                    ->from(\App\Entity\ComplianceResult::class, 'cr')
+                    ->join('cr.node', 'n')
+                    ->where('cr.policy = :policy')
+                    ->andWhere('cr.rule = :rule')
+                    ->setParameter('policy', $policy)
+                    ->setParameter('rule', $rule);
+                if ($type === 'rule_non_compliant') {
+                    $resQb->andWhere('cr.status = :status')->setParameter('status', 'non_compliant');
+                } else {
+                    $resQb->andWhere('cr.status != :status')->setParameter('status', 'skipped');
+                }
+                if ($rcHasFilter) {
+                    $resQb->andWhere('n.id IN (:filterNodes)')->setParameter('filterNodes', $rcFilterNodeIds);
+                }
+                $resQb->orderBy('n.name', 'ASC')->addOrderBy('n.ipAddress', 'ASC');
+                /** @var \App\Entity\ComplianceResult[] $results */
+                $results = $resQb->getQuery()->getResult();
+
+                // Pre-load inventory data for extra columns
+                $rcInvColumns = $block['columns'] ?? [];
+                $rcInvData = [];
+                if (!empty($rcInvColumns) && !empty($results)) {
+                    $rcResultNodeIds = [];
+                    foreach ($results as $cr) {
+                        $rcResultNodeIds[] = $cr->getNode()->getId();
+                    }
+                    $rcResultNodeIds = array_values(array_unique($rcResultNodeIds));
+                    $rcInvRepo = $this->em->getRepository(NodeInventoryEntry::class);
+                    foreach ($rcInvColumns as $rcInvCol) {
+                        $cat = $rcInvCol['category'] ?? '';
+                        $key = $rcInvCol['entryKey'] ?? '';
+                        $col = $rcInvCol['colLabel'] ?? '';
+                        if ($cat === '' || $key === '' || $col === '') continue;
+                        $rcInvEntries = $rcInvRepo->createQueryBuilder('e')
+                            ->where('e.node IN (:nodes)')
+                            ->andWhere('e.categoryName = :cat')
+                            ->andWhere('e.entryKey = :key')
+                            ->andWhere('e.colLabel = :col')
+                            ->setParameter('nodes', $rcResultNodeIds)
+                            ->setParameter('cat', $cat)
+                            ->setParameter('key', $key)
+                            ->setParameter('col', $col)
+                            ->getQuery()
+                            ->getResult();
+                        foreach ($rcInvEntries as $rcInvEntry) {
+                            $rcEntryNodeId = $rcInvEntry->getNode()->getId();
+                            $lookup = $cat . '|' . $key . '|' . $col;
+                            if (!isset($rcInvData[$rcEntryNodeId])) $rcInvData[$rcEntryNodeId] = [];
+                            $rcInvData[$rcEntryNodeId][$lookup] = $rcInvEntry->getValue() ?? '';
+                        }
+                    }
+                }
+
+                // Build columns: device → inventory cols → status → severity → message
+                $rcCols = [['key' => 'node', 'label' => $cl['node'], 'w' => 30, 'align' => 'L', 'multi' => false]];
+                foreach ($rcInvColumns as $rcInvCol) {
+                    $rcCols[] = [
+                        'key' => 'inv:' . ($rcInvCol['id'] ?? uniqid()),
+                        'label' => $rcInvCol['headerLabel'] ?? $rcInvCol['label'] ?? (($rcInvCol['category'] ?? '') . ' > ' . ($rcInvCol['entryKey'] ?? '') . ' > ' . ($rcInvCol['colLabel'] ?? '')),
+                        'w' => 22,
+                        'align' => strtoupper(substr($rcInvCol['align'] ?? 'left', 0, 1)),
+                        'multi' => true,
+                        'invLookup' => ($rcInvCol['category'] ?? '') . '|' . ($rcInvCol['entryKey'] ?? '') . '|' . ($rcInvCol['colLabel'] ?? ''),
+                    ];
+                }
+                if ($type === 'rule_nodes_table') {
+                    $rcCols[] = ['key' => 'status', 'label' => $cl['status'], 'w' => 18, 'align' => 'C', 'multi' => false];
+                }
+                if ($showSeverity && $type === 'rule_non_compliant') {
+                    $rcCols[] = ['key' => 'severity', 'label' => $cl['severity'], 'w' => 16, 'align' => 'C', 'multi' => false];
+                }
+                if ($showMessage) {
+                    $rcCols[] = ['key' => 'message', 'label' => $cl['message'], 'w' => 50, 'align' => 'L', 'multi' => true];
+                }
+
+                $rcContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+                $rcTotalW = array_sum(array_column($rcCols, 'w'));
+                foreach ($rcCols as $rcCi => $rcC) {
+                    $rcCols[$rcCi]['mm'] = $rcContentW * ($rcC['w'] / $rcTotalW);
+                }
+
+                $pdf->SetDrawColor($rcBorderColor[0], $rcBorderColor[1], $rcBorderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                // Header
+                $pdf->SetFont($bodyFont, 'B', $rcFontSize);
+                $pdf->SetFillColor($rcHeaderBg[0], $rcHeaderBg[1], $rcHeaderBg[2]);
+                $pdf->SetTextColor($rcHeaderColor[0], $rcHeaderColor[1], $rcHeaderColor[2]);
+                $headerH = $rcFontSize * 0.3528 + 3;
+                $startY = $pdf->GetY();
+                $startX = $mLeft;
+                foreach ($rcCols as $c) {
+                    $pdf->MultiCell($c['mm'], $headerH, $c['label'], 1, $c['align'], true, 0, $startX, $startY, true, 0, false, true, $headerH, 'M');
+                    $startX += $c['mm'];
+                }
+                $pdf->SetXY($mLeft, $startY + $headerH);
+
+                if (empty($results)) {
+                    $pdf->SetFont($bodyFont, 'I', $rcFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell($rcContentW, 0, $cl['no_data'], 1, 'C', false, 1, $mLeft);
+                } else {
+                    $rcRowI = 0;
+                    foreach ($results as $cr) {
+                        $node = $cr->getNode();
+                        $nodeName = $node->getName() ?: $node->getHostname() ?: $node->getIpAddress();
+                        $statusKey = $cr->getStatus();
+                        $sevKey = $cr->getSeverity();
+                        $msg = $cr->getMessage() ?: '';
+
+                        $cellValues = [
+                            'node' => $nodeName,
+                            'status' => $cl[$statusKey] ?? $statusKey,
+                            'severity' => $sevKey ? ($cl['sev_' . $sevKey] ?? $sevKey) : '',
+                            'message' => $msg,
+                        ];
+                        $rcCurrentNodeId = $node->getId();
+                        foreach ($rcCols as $rcLookupCol) {
+                            if (isset($rcLookupCol['invLookup'])) {
+                                $cellValues[$rcLookupCol['key']] = $rcInvData[$rcCurrentNodeId][$rcLookupCol['invLookup']] ?? '';
+                            }
+                        }
+
+                        $fill = $rcAlternate && ($rcRowI % 2 === 1);
+                        if ($fill) {
+                            $pdf->SetFillColor($rcAlternateBg[0], $rcAlternateBg[1], $rcAlternateBg[2]);
+                        } else {
+                            $pdf->SetFillColor(255, 255, 255);
+                            $fill = true;
+                        }
+
+                        // Compute row height
+                        $rowH = $rcFontSize * 0.3528 + 3;
+                        $pdf->SetFont($bodyFont, '', $rcFontSize);
+                        foreach ($rcCols as $c) {
+                            if (!empty($c['multi'])) {
+                                $h = $pdf->getStringHeight($c['mm'], (string) ($cellValues[$c['key']] ?? ''));
+                                $rowH = max($rowH, $h + 2);
+                            }
+                        }
+
+                        $startY = $pdf->GetY();
+                        if ($startY + $rowH > $pdf->getPageHeight() - $mBottom) {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
+                        }
+
+                        $startX = $mLeft;
+                        foreach ($rcCols as $c) {
+                            $val = (string) ($cellValues[$c['key']] ?? '');
+                            if ($c['key'] === 'status' && isset(self::COMPLIANCE_STATUS_RGB[$statusKey])) {
+                                $sc = self::COMPLIANCE_STATUS_RGB[$statusKey];
+                                $pdf->SetTextColor($sc[0], $sc[1], $sc[2]);
+                                $pdf->SetFont($bodyFont, 'B', $rcFontSize);
+                            } elseif ($c['key'] === 'severity' && $sevKey && isset(self::COMPLIANCE_SEVERITY_RGB[$sevKey])) {
+                                $sc = self::COMPLIANCE_SEVERITY_RGB[$sevKey];
+                                $pdf->SetTextColor($sc[0], $sc[1], $sc[2]);
+                                $pdf->SetFont($bodyFont, 'B', $rcFontSize);
+                            } else {
+                                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                                $pdf->SetFont($bodyFont, '', $rcFontSize);
+                            }
+                            $pdf->MultiCell($c['mm'], $rowH, $val, 1, $c['align'], $fill, 0, $startX, $startY, true, 0, false, true, $rowH, 'M');
+                            $startX += $c['mm'];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $rowH);
+                        $rcRowI++;
+                    }
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = $type;
+
+            } elseif ($type === 'rule_recommendation') {
+                $rcoPolicyId = $block['policyId'] ?? null;
+                $rcoRuleId = $block['ruleId'] ?? null;
+                $rcoNodeId = $block['nodeId'] ?? null;
+                if (!$rcoRuleId || !$rcoNodeId) continue;
+
+                $rcoPolicy = $rcoPolicyId ? $this->em->getRepository(\App\Entity\CompliancePolicy::class)->find($rcoPolicyId) : null;
+                $rcoRule = $this->em->getRepository(\App\Entity\ComplianceRule::class)->find($rcoRuleId);
+                $rcoNode = $this->em->getRepository(Node::class)->find($rcoNodeId);
+                if (!$rcoRule || !$rcoNode) continue;
+
+                $rcoMode = ($block['displayMode'] ?? 'text') === 'cli' ? 'cli' : 'text';
+                $rcoSource = ($block['source'] ?? 'static') === 'dynamic' ? 'dynamic' : 'static';
+                $rcoShowHeader = !empty($block['showHeader']);
+                $rcoPageBreak = !empty($block['pageBreakBefore']);
+                $rcoFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : ($rcoMode === 'cli' ? 9.0 : (float) $bodySize);
+
+                $rcoHostname = $rcoNode->getHostname() ?? '';
+                $rcoName = $rcoNode->getName() ?? '';
+                $rcoIp = $rcoNode->getIpAddress() ?? '';
+
+                if ($rcoSource === 'dynamic') {
+                    // Re-evaluate the rule live to capture the dynamic recommendation
+                    try {
+                        $rcoEval = $this->complianceEvaluator->evaluateRule($rcoRule, $rcoNode);
+                    } catch (\Throwable $rcoErr) {
+                        $rcoEval = ['recommendation' => null, 'message' => 'Evaluation error: ' . $rcoErr->getMessage()];
+                    }
+                    $rcoText = (string) ($rcoEval['recommendation'] ?? $rcoEval['message'] ?? '');
+                } else {
+                    $rcoText = (string) ($block['recommendation'] ?? '');
+                }
+
+                // Variable substitution
+                $rcoText = strtr($rcoText, [
+                    '{{hostname}}' => $rcoHostname,
+                    '{{name}}' => $rcoName,
+                    '{{ipAddress}}' => $rcoIp,
+                ]);
+                if ($report) {
+                    $rcoText = $this->resolveNodeVariables($rcoText, $rcoNode, $report);
+                }
+                if ($rcoText === '' && $rcoSource === 'dynamic') {
+                    $rcoLocale = $report ? $report->getLocale() : 'en';
+                    $rcoCl = self::COMPLIANCE_LABELS[$rcoLocale] ?? self::COMPLIANCE_LABELS['en'];
+                    $rcoText = $rcoCl['no_recommendation'] ?? '(no recommendation)';
+                }
+
+                if ($rcoPageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $rcoContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+                $rcoRuleTitle = trim(($rcoRule->getIdentifier() ? '[' . $rcoRule->getIdentifier() . '] ' : '') . $rcoRule->getName());
+                $rcoDeviceLabel = $rcoHostname ?: ($rcoName ?: $rcoIp);
+
+                if ($rcoMode === 'text') {
+                    if ($rcoShowHeader) {
+                        $pdf->SetFont($bodyFont, 'B', $rcoFontSize + 1);
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $rcoTextHeaderLabel = $rcoRuleTitle . ' — ' . $rcoDeviceLabel;
+                        $pdf->MultiCell(0, ($rcoFontSize + 1) * 0.3528 + 1, $rcoTextHeaderLabel, 0, 'L');
+                        $pdf->Ln(0.5);
+                    }
+                    $pdf->SetFont($bodyFont, '', $rcoFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $rcoTextEsc = htmlspecialchars($rcoText, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                    $rcoTextEsc = nl2br($rcoTextEsc);
+                    $pdf->writeHTMLCell($rcoContentW, 0, $mLeft, $pdf->GetY(), $rcoTextEsc, 0, 1, false, true, 'L', true);
+                } else {
+                    // CLI mode: reuse the same theme as cli_command block
+                    $rcoCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
+                    $rcoCliFont = $this->mapFont($rcoCliStyle['font'] ?? 'Consolas');
+                    $rcoThemeFontSz = (float) ($rcoCliStyle['size'] ?? 9);
+                    $rcoFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : $rcoThemeFontSz;
+                    $rcoBg = $this->hexToRgb($rcoCliStyle['bgColor'] ?? '#f1f5f9');
+                    $rcoTextColor = $this->hexToRgb($rcoCliStyle['textColor'] ?? '#1e293b');
+                    $rcoBorder = $this->hexToRgb($rcoCliStyle['borderColor'] ?? '#e2e8f0');
+                    $rcoHeaderBg = $this->hexToRgb($rcoCliStyle['headerBgColor'] ?? '#1e293b');
+                    $rcoHeaderText = $this->hexToRgb($rcoCliStyle['headerTextColor'] ?? '#ffffff');
+                    $rcoBorderRadius = (float) ($rcoCliStyle['borderRadius'] ?? 2);
+                    $rcoPadding = (float) ($rcoCliStyle['padding'] ?? 3);
+                    $rcoLineSpacing = (float) ($rcoCliStyle['lineSpacing'] ?? 1.4);
+                    $rcoHeaderFontSz = $rcoThemeFontSz;
+
+                    $rcoLines = explode("\n", $rcoText);
+                    if (empty($rcoLines)) $rcoLines = [''];
+                    $rcoBaseLineH = $rcoFontSize * 0.3528;
+                    $rcoLineH = $rcoBaseLineH * $rcoLineSpacing;
+                    $rcoHeaderH = $rcoShowHeader ? ($rcoHeaderFontSz * 0.3528 + $rcoPadding * 2) : 0;
+                    $rcoBodyH = ($rcoPadding * 2) + (count($rcoLines) * $rcoLineH);
+                    $rcoTotalBoxH = $rcoHeaderH + $rcoBodyH;
+
+                    $startY = $pdf->GetY();
+                    if ($startY + $rcoTotalBoxH > $pdf->getPageHeight() - $mBottom) {
+                        $pdf->AddPage();
+                        $startY = $pdf->GetY();
+                    }
+
+                    // Outer box
+                    $pdf->SetDrawColor($rcoBorder[0], $rcoBorder[1], $rcoBorder[2]);
+                    $pdf->SetLineWidth(0.3);
+                    $pdf->SetFillColor($rcoBg[0], $rcoBg[1], $rcoBg[2]);
+                    if ($rcoBorderRadius > 0) {
+                        $pdf->RoundedRect($mLeft, $startY, $rcoContentW, $rcoTotalBoxH, $rcoBorderRadius, '1111', 'DF');
+                    } else {
+                        $pdf->Rect($mLeft, $startY, $rcoContentW, $rcoTotalBoxH, 'DF');
+                    }
+
+                    // Header bar
+                    if ($rcoShowHeader) {
+                        $pdf->SetFillColor($rcoHeaderBg[0], $rcoHeaderBg[1], $rcoHeaderBg[2]);
+                        if ($rcoBorderRadius > 0) {
+                            $pdf->RoundedRect($mLeft + 0.15, $startY + 0.15, $rcoContentW - 0.3, $rcoHeaderH - 0.15, $rcoBorderRadius, '1001', 'F');
+                        } else {
+                            $pdf->Rect($mLeft + 0.15, $startY + 0.15, $rcoContentW - 0.3, $rcoHeaderH - 0.15, 'F');
+                        }
+                        $pdf->SetFont($rcoCliFont, 'B', $rcoHeaderFontSz);
+                        $pdf->SetTextColor($rcoHeaderText[0], $rcoHeaderText[1], $rcoHeaderText[2]);
+                        $rcoHeaderTextY = $startY + ($rcoHeaderH - $rcoHeaderFontSz * 0.3528) / 2;
+                        $rcoHeaderTextW = $rcoContentW - ($rcoPadding * 2);
+                        $pdf->MultiCell($rcoHeaderTextW * 0.7, $rcoHeaderFontSz * 0.3528, $rcoRuleTitle, 0, 'L', false, 0, $mLeft + $rcoPadding, $rcoHeaderTextY, true, 0, false, true, 0, 'M');
+                        $pdf->SetFont($rcoCliFont, '', $rcoHeaderFontSz - 1);
+                        $pdf->MultiCell($rcoHeaderTextW * 0.3, $rcoHeaderFontSz * 0.3528, $rcoDeviceLabel, 0, 'R', false, 0, $mLeft + $rcoPadding + $rcoHeaderTextW * 0.7, $rcoHeaderTextY, true, 0, false, true, 0, 'M');
+                    }
+
+                    // Body lines
+                    $rcoCurY = $startY + $rcoHeaderH + $rcoPadding;
+                    $rcoTextX = $mLeft + $rcoPadding;
+                    $rcoTextW = $rcoContentW - ($rcoPadding * 2);
+                    $pdf->SetFont($rcoCliFont, '', $rcoFontSize);
+                    $pdf->SetTextColor($rcoTextColor[0], $rcoTextColor[1], $rcoTextColor[2]);
+                    foreach ($rcoLines as $rcoLine) {
+                        $pdf->SetXY($rcoTextX, $rcoCurY);
+                        $pdf->Cell($rcoTextW, $rcoLineH, $rcoLine, 0, 0, 'L');
+                        $rcoCurY += $rcoLineH;
+                    }
+
+                    $pdf->SetY($startY + $rcoTotalBoxH);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'rule_recommendation';
             }
         }
     }

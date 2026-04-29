@@ -14,6 +14,7 @@ use App\Entity\NodeTag;
 use App\Entity\Profile;
 use App\Entity\Cve;
 use App\Entity\CveDeviceModel;
+use App\Service\InventoryNodeRuleEvaluator;
 use App\Service\SystemUpdateScoreCalculator;
 use App\Service\VulnerabilityScoreCalculator;
 use App\Message\EvaluateComplianceMessage;
@@ -560,5 +561,24 @@ class NodeController extends AbstractController
             'productModel' => $node->getProductModel(),
             'discoveredVersion' => $node->getDiscoveredVersion(),
         ]);
+    }
+
+    #[Route('/match', methods: ['POST'])]
+    public function matchNodes(Request $request, EntityManagerInterface $em, InventoryNodeRuleEvaluator $evaluator): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        if (!$contextId) {
+            $body = json_decode($request->getContent(), true) ?? [];
+            $contextId = (int) ($body['context'] ?? 0);
+        }
+        $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
+        if (!$context) return $this->json(['nodeIds' => []]);
+
+        $data = json_decode($request->getContent(), true) ?? [];
+        $rules = is_array($data['rules'] ?? null) ? $data['rules'] : [];
+        $match = ($data['match'] ?? 'any') === 'all' ? 'all' : 'any';
+
+        $ids = $evaluator->matchNodeIds($context, $rules, $match);
+        return $this->json(['nodeIds' => $ids]);
     }
 }

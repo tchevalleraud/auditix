@@ -182,7 +182,6 @@ class CompliancePolicyController extends AbstractController
             'name' => $r->getName(),
             'description' => $r->getDescription(),
             'enabled' => $r->isEnabled(),
-            'sourceType' => $r->getSourceType(),
         ];
     }
 

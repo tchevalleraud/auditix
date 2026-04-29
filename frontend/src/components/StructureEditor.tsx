@@ -42,6 +42,10 @@ import {
   Palette,
   IndentIncrease,
   Network,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
+  Lightbulb,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -122,11 +126,44 @@ export interface InventoryStyleRule {
   italic?: boolean;
 }
 
+export type InventoryNodeRuleType =
+  | "tag"
+  | "discoveredVersion"
+  | "manufacturer"
+  | "model"
+  | "productModel"
+  | "hostname"
+  | "inventory";
+
+export type InventoryNodeRuleOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+export interface InventoryNodeRule {
+  id: string;
+  type: InventoryNodeRuleType;
+  operator: InventoryNodeRuleOperator;
+  value?: string;
+  tagId?: number;
+  category?: string;
+  entryKey?: string;
+  colLabel?: string;
+}
+
 export interface InventoryTableBlock {
   id: string;
   type: "inventory_table";
+  mode?: "multi_node_columns" | "single_node_full";
   columns: InventoryTableColumn[];
   nodeIds: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+  singleNodeId?: number | null;
+  singleCategory?: string | null;
   showHeader: boolean;
   hostnameHeaderLabel?: string;
   hostnameAlign?: "left" | "center" | "right";
@@ -237,12 +274,67 @@ export interface TopologyBlock {
   } | null;
 }
 
+export interface ComplianceMatrixBlock {
+  id: string;
+  type: "compliance_matrix";
+  policyId: number | null;
+  showRuleId: boolean;
+  showTotal: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+}
+
+export interface RuleNonCompliantBlock {
+  id: string;
+  type: "rule_non_compliant";
+  policyId: number | null;
+  ruleId: number | null;
+  showRuleDescription: boolean;
+  showSeverity: boolean;
+  showMessage: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+  columns?: InventoryTableColumn[];
+  nodeIds?: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+}
+
+export interface RuleNodesTableBlock {
+  id: string;
+  type: "rule_nodes_table";
+  policyId: number | null;
+  ruleId: number | null;
+  showRuleDescription: boolean;
+  showMessage: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+  columns?: InventoryTableColumn[];
+  nodeIds?: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+}
+
+export interface RuleRecommendationBlock {
+  id: string;
+  type: "rule_recommendation";
+  policyId: number | null;
+  ruleId: number | null;
+  nodeId: number | null;
+  source?: "static" | "dynamic";
+  displayMode: "text" | "cli";
+  recommendation: string;
+  showHeader: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+}
+
 function normalizeCell(cell: string | TableCell): TableCell {
   if (typeof cell === "string") return { value: cell };
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -319,7 +411,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     } else if (type === "table") {
       block = { id, type: "table", headers: [{ value: "" }, { value: "" }], rows: [[{ value: "" }, { value: "" }]], showHeader: true, columnAligns: ["left", "left"], columnWidths: [50, 50] };
     } else if (type === "inventory_table") {
-      block = { id, type: "inventory_table", columns: [], nodeIds: [], showHeader: true };
+      block = { id, type: "inventory_table", mode: "multi_node_columns", columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any", showHeader: true };
     } else if (type === "cli_command") {
       block = { id, type: "cli_command", commandName: "", command: "", dataSource: "none", nodeIds: [], tagIds: [], showEllipsis: true };
     } else if (type === "equipment_list") {
@@ -330,6 +422,14 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "command_list", manufacturerId: null, modelId: null, style: { fontSize: 9 } };
     } else if (type === "topology") {
       block = { id, type: "topology", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
+    } else if (type === "compliance_matrix") {
+      block = { id, type: "compliance_matrix", policyId: null, showRuleId: true, showTotal: true, pageBreakBefore: false };
+    } else if (type === "rule_non_compliant") {
+      block = { id, type: "rule_non_compliant", policyId: null, ruleId: null, showRuleDescription: true, showSeverity: true, showMessage: true, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
+    } else if (type === "rule_nodes_table") {
+      block = { id, type: "rule_nodes_table", policyId: null, ruleId: null, showRuleDescription: true, showMessage: false, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
+    } else if (type === "rule_recommendation") {
+      block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", displayMode: "text", recommendation: "", showHeader: true, pageBreakBefore: false };
     } else {
       block = { id, type: "paragraph", content: "", align: "left" };
     }
@@ -412,9 +512,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return <span className="text-slate-500">{t("structure.tableSize", { cols: String(cols), rows: String(rows) })}</span>;
     }
     if (block.type === "inventory_table") {
+      if (block.mode === "single_node_full") {
+        return <span className="text-slate-500">{t("structure.invModeSingleTitle")}{block.singleCategory ? ` — ${block.singleCategory}` : ""}</span>;
+      }
       const cols = block.columns.length;
-      const nodes = block.nodeIds.length;
-      return <span className="text-slate-500">{t("structure.inventorySize", { cols: String(cols + 1), nodes: String(nodes) })}</span>;
+      const ruleCount = (block.nodeRules ?? []).length;
+      const nodes = block.nodeIds.length + (ruleCount > 0 ? ruleCount : 0);
+      return <span className="text-slate-500">{t("structure.inventorySize", { cols: String(cols + 1), nodes: String(nodes) })}{ruleCount > 0 ? ` (+${t("structure.invAutoRulesAdd").toLowerCase()})` : ""}</span>;
     }
     if (block.type === "cli_command") {
       const source = block.dataSource || "none";
@@ -451,6 +555,31 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyMapId}{block.protocol ? ` (${block.protocol.toUpperCase()})` : ""}</span>;
       }
       return <span className="italic text-slate-400">{t("structure.emptyTopology")}</span>;
+    }
+    if (block.type === "compliance_matrix") {
+      if (block.policyId) {
+        return <span className="text-slate-500 text-xs">{t("structure.complianceMatrix")} — policy #{block.policyId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyComplianceMatrix")}</span>;
+    }
+    if (block.type === "rule_non_compliant") {
+      if (block.ruleId) {
+        return <span className="text-slate-500 text-xs">{t("structure.ruleNonCompliant")} — rule #{block.ruleId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyRuleNonCompliant")}</span>;
+    }
+    if (block.type === "rule_nodes_table") {
+      if (block.ruleId) {
+        return <span className="text-slate-500 text-xs">{t("structure.ruleNodesTable")} — rule #{block.ruleId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyRuleNodesTable")}</span>;
+    }
+    if (block.type === "rule_recommendation") {
+      if (block.ruleId && block.nodeId) {
+        const src = (block.source ?? "static") === "dynamic" ? "DYN" : "STA";
+        return <span className="text-slate-500 text-xs">{t("structure.ruleRecommendation")} — rule #{block.ruleId} / device #{block.nodeId} ({src} / {block.displayMode === "cli" ? "CLI" : "TXT"})</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyRuleRecommendation")}</span>;
     }
     // paragraph
     return block.content
@@ -522,6 +651,34 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         </span>
       );
     }
+    if (block.type === "compliance_matrix") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-green-100 dark:bg-green-500/15 px-2 py-0.5 text-[11px] font-bold text-green-600 dark:text-green-400">
+          <ShieldCheck className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "rule_non_compliant") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-red-100 dark:bg-red-500/15 px-2 py-0.5 text-[11px] font-bold text-red-600 dark:text-red-400">
+          <ShieldAlert className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "rule_nodes_table") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-500/15 px-2 py-0.5 text-[11px] font-bold text-sky-600 dark:text-sky-400">
+          <ShieldQuestion className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "rule_recommendation") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+          <Lightbulb className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
         P
@@ -587,6 +744,22 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 <button onClick={() => { addBlock("topology"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                   <Network className="h-4 w-4 text-violet-500" />
                   {t("structure.addTopology")}
+                </button>
+                <button onClick={() => { addBlock("compliance_matrix"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ShieldCheck className="h-4 w-4 text-green-500" />
+                  {t("structure.addComplianceMatrix")}
+                </button>
+                <button onClick={() => { addBlock("rule_non_compliant"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ShieldAlert className="h-4 w-4 text-red-500" />
+                  {t("structure.addRuleNonCompliant")}
+                </button>
+                <button onClick={() => { addBlock("rule_nodes_table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <ShieldQuestion className="h-4 w-4 text-sky-500" />
+                  {t("structure.addRuleNodesTable")}
+                </button>
+                <button onClick={() => { addBlock("rule_recommendation"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Lightbulb className="h-4 w-4 text-amber-500" />
+                  {t("structure.addRuleRecommendation")}
                 </button>
               </div>
             )}
@@ -744,7 +917,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 <TableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "inventory_table" && (
-                <InventoryTableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+                <InventoryTableProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
               )}
               {editingBlock.type === "cli_command" && (
                 <CliCommandProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -760,6 +933,18 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "topology" && (
                 <TopologyBlockProperties block={editingBlock as TopologyBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "compliance_matrix" && (
+                <ComplianceMatrixProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "rule_non_compliant" && (
+                <RuleNonCompliantProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "rule_nodes_table" && (
+                <RuleNodesTableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "rule_recommendation" && (
+                <RuleRecommendationProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
             </div>
           </div>
@@ -876,6 +1061,22 @@ function InsertLine({
           <button onClick={() => onInsert("topology", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
             <Network className="h-3.5 w-3.5" />
             {t("structure.addTopology")}
+          </button>
+          <button onClick={() => onInsert("compliance_matrix", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {t("structure.addComplianceMatrix")}
+          </button>
+          <button onClick={() => onInsert("rule_non_compliant", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <ShieldAlert className="h-3.5 w-3.5" />
+            {t("structure.addRuleNonCompliant")}
+          </button>
+          <button onClick={() => onInsert("rule_nodes_table", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <ShieldQuestion className="h-3.5 w-3.5" />
+            {t("structure.addRuleNodesTable")}
+          </button>
+          <button onClick={() => onInsert("rule_recommendation", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <Lightbulb className="h-3.5 w-3.5" />
+            {t("structure.addRuleRecommendation")}
           </button>
         </div>
       )}
@@ -2004,17 +2205,29 @@ interface NodeItem {
   ipAddress: string;
 }
 
+interface InvTagItem { id: number; name: string; color: string; }
+interface InvManufacturerItem { id: number; name: string; }
+interface InvModelItem { id: number; name: string; manufacturer?: { id: number; name: string } | null; }
+
 function InventoryTableProperties({
   block,
   updateBlock,
   t,
+  reportType,
+  reportNodes,
 }: {
   block: InventoryTableBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
 }) {
   const { current } = useAppContext();
-  const [tab, setTab] = useState<"columns" | "equipment" | "style" | "preview">("columns");
+  const isNodeReport = reportType === "node";
+  const mode = block.mode ?? "multi_node_columns";
+  const [tab, setTab] = useState<"columns" | "source" | "equipment" | "style" | "preview">(
+    mode === "single_node_full" ? "source" : "columns"
+  );
 
   // Inventory structure for multi-level dropdown
   const [structure, setStructure] = useState<InvStructureCategory[]>([]);
@@ -2024,6 +2237,15 @@ function InventoryTableProperties({
   const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [nodeSearch, setNodeSearch] = useState("");
+
+  // Tags / manufacturers / models for rules
+  const [tags, setTags] = useState<InvTagItem[]>([]);
+  const [manufacturers, setManufacturers] = useState<InvManufacturerItem[]>([]);
+  const [models, setModels] = useState<InvModelItem[]>([]);
+
+  // Rule preview
+  const [rulePreview, setRulePreview] = useState<number[]>([]);
+  const [rulePreviewLoading, setRulePreviewLoading] = useState(false);
 
   // Column picker state
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -2048,7 +2270,36 @@ function InventoryTableProperties({
       .catch(() => setNodesLoaded(true));
   }, [current, nodesLoaded]);
 
+  // Load tags / manufacturers / models for rule editor (only in general report mode)
+  useEffect(() => {
+    if (!current || isNodeReport) return;
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setTags).catch(() => {});
+    fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers).catch(() => {});
+    fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels).catch(() => {});
+  }, [current, isNodeReport]);
+
+  // Resolve rule preview whenever rules change
+  const nodeRules = block.nodeRules ?? [];
+  const nodeRulesMatch = block.nodeRulesMatch ?? "any";
+  useEffect(() => {
+    if (!current || isNodeReport || nodeRules.length === 0) {
+      setRulePreview([]);
+      return;
+    }
+    setRulePreviewLoading(true);
+    fetch(`/api/nodes/match?context=${current.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: nodeRules, match: nodeRulesMatch }),
+    })
+      .then((r) => r.ok ? r.json() : { nodeIds: [] })
+      .then((data: { nodeIds: number[] }) => setRulePreview(data.nodeIds ?? []))
+      .catch(() => setRulePreview([]))
+      .finally(() => setRulePreviewLoading(false));
+  }, [current, isNodeReport, JSON.stringify(nodeRules), nodeRulesMatch]);
+
   const selectedNodes = allNodes.filter((n) => block.nodeIds.includes(n.id));
+  const ruleMatchedNodes = allNodes.filter((n) => rulePreview.includes(n.id) && !block.nodeIds.includes(n.id));
   const availableNodes = allNodes.filter(
     (n) =>
       !block.nodeIds.includes(n.id) &&
@@ -2177,21 +2428,120 @@ function InventoryTableProperties({
     })),
   ];
 
+  // --- Auto-selection rules (multi mode + general report) ---
+  const addNodeRule = () => {
+    const r: InventoryNodeRule = { id: uid(), type: "tag", operator: "eq" };
+    updateBlock(block.id, { nodeRules: [...nodeRules, r] });
+  };
+  const updateNodeRule = (rid: string, patch: Partial<InventoryNodeRule>) => {
+    updateBlock(block.id, {
+      nodeRules: nodeRules.map((r) => (r.id === rid ? { ...r, ...patch } : r)),
+    });
+  };
+  const removeNodeRule = (rid: string) => {
+    updateBlock(block.id, { nodeRules: nodeRules.filter((r) => r.id !== rid) });
+  };
+
+  const ruleTypeOptions: { value: InventoryNodeRuleType; label: string }[] = [
+    { value: "tag", label: t("structure.invRuleTypeTag") },
+    { value: "discoveredVersion", label: t("structure.invRuleTypeVersion") },
+    { value: "manufacturer", label: t("structure.invRuleTypeManufacturer") },
+    { value: "model", label: t("structure.invRuleTypeModel") },
+    { value: "productModel", label: t("structure.invRuleTypeProductModel") },
+    { value: "hostname", label: t("structure.invRuleTypeHostname") },
+    { value: "inventory", label: t("structure.invRuleTypeInventory") },
+  ];
+
+  const ruleOperatorOptions: { value: InventoryNodeRuleOperator; label: string }[] = [
+    { value: "eq", label: "=" },
+    { value: "neq", label: "!=" },
+    { value: "contains", label: t("structure.ruleContains") },
+    { value: "not_contains", label: t("structure.ruleNotContains") },
+    { value: "starts_with", label: t("structure.invRuleStartsWith") },
+    { value: "ends_with", label: t("structure.invRuleEndsWith") },
+  ];
+
+  // Effective node ids = manual + matched (for preview consistency)
+  const effectiveNodes = (() => {
+    if (mode === "single_node_full") {
+      if (isNodeReport && reportNodes && reportNodes.length > 0) {
+        return reportNodes.slice(0, 1).map((n) => ({ id: n.id, hostname: n.hostname, name: n.name, ipAddress: n.ipAddress } as NodeItem));
+      }
+      const sn = block.singleNodeId ? allNodes.find((n) => n.id === block.singleNodeId) : null;
+      return sn ? [sn] : [];
+    }
+    if (isNodeReport && reportNodes && reportNodes.length > 0) {
+      return reportNodes.map((n) => ({ id: n.id, hostname: n.hostname, name: n.name, ipAddress: n.ipAddress } as NodeItem));
+    }
+    const ids = new Set<number>(block.nodeIds);
+    rulePreview.forEach((id) => ids.add(id));
+    return allNodes.filter((n) => ids.has(n.id));
+  })();
+
+  const showColumnsTab = mode === "multi_node_columns";
+  const showSingleSourceTab = mode === "single_node_full";
+  const showEquipmentTab = mode === "multi_node_columns" && !isNodeReport;
+
   return (
     <div className="space-y-4">
+      {/* Mode banner */}
+      <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide">{t("structure.invModeTitle")}</span>
+          {isNodeReport && (
+            <span className="text-[10px] text-violet-600 dark:text-violet-400 italic">{t("structure.invModeNodeReportHint")}</span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => { updateBlock(block.id, { mode: "multi_node_columns" }); setTab("columns"); }}
+            className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
+              mode === "multi_node_columns"
+                ? "border-violet-500 bg-white dark:bg-slate-900"
+                : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
+            }`}
+          >
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeMultiTitle")}</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeMultiDesc")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { updateBlock(block.id, { mode: "single_node_full" }); setTab("source"); }}
+            className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
+              mode === "single_node_full"
+                ? "border-violet-500 bg-white dark:bg-slate-900"
+                : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
+            }`}
+          >
+            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeSingleTitle")}</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeSingleDesc")}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
-        <button type="button" className={tabBtnClass(tab === "columns")} onClick={() => setTab("columns")}>
-          {t("structure.inventoryColumns")}
-        </button>
-        <button type="button" className={tabBtnClass(tab === "equipment")} onClick={() => setTab("equipment")}>
-          {t("structure.inventoryEquipment")}
-          {block.nodeIds.length > 0 && (
-            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
-              {block.nodeIds.length}
-            </span>
-          )}
-        </button>
+        {showColumnsTab && (
+          <button type="button" className={tabBtnClass(tab === "columns")} onClick={() => setTab("columns")}>
+            {t("structure.inventoryColumns")}
+          </button>
+        )}
+        {showSingleSourceTab && (
+          <button type="button" className={tabBtnClass(tab === "source")} onClick={() => setTab("source")}>
+            {t("structure.invSourceTab")}
+          </button>
+        )}
+        {showEquipmentTab && (
+          <button type="button" className={tabBtnClass(tab === "equipment")} onClick={() => setTab("equipment")}>
+            {t("structure.inventoryEquipment")}
+            {(block.nodeIds.length > 0 || (nodeRules.length > 0 && rulePreview.length > 0)) && (
+              <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+                {block.nodeIds.length + ruleMatchedNodes.length}
+              </span>
+            )}
+          </button>
+        )}
         <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>
           {t("structure.inventoryStyle")}
         </button>
@@ -2378,6 +2728,57 @@ function InventoryTableProperties({
         </div>
       )}
 
+      {/* Source tab — single_node_full mode */}
+      {tab === "source" && (
+        <div className="space-y-4">
+          {!isNodeReport && (
+            <div className="space-y-1.5">
+              <label className={labelClass}>{t("structure.invSourceNode")}</label>
+              <select
+                value={block.singleNodeId ?? ""}
+                onChange={(e) => updateBlock(block.id, { singleNodeId: e.target.value ? Number(e.target.value) : null })}
+                className={inputClass}
+              >
+                <option value="">{t("structure.invSourceNodePlaceholder")}</option>
+                {allNodes.map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {(n.hostname || n.name || n.ipAddress)} ({n.ipAddress})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {isNodeReport && reportNodes && reportNodes.length > 0 && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 flex items-center gap-2">
+              <Server className="h-4 w-4 text-violet-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">
+                {reportNodes[0].hostname || reportNodes[0].name || reportNodes[0].ipAddress}
+              </span>
+              <span className="text-[10px] text-slate-400 italic ml-auto">{t("structure.invSourceFromReport")}</span>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.invSourceCategory")}</label>
+            <select
+              value={block.singleCategory ?? ""}
+              onChange={(e) => updateBlock(block.id, { singleCategory: e.target.value || null })}
+              className={inputClass}
+            >
+              <option value="">{t("structure.invSourceCategoryPlaceholder")}</option>
+              {structure.map((c) => (
+                <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+              ))}
+            </select>
+            {structure.length === 0 && structureLoaded && (
+              <p className="text-[10px] text-slate-400 italic">{t("structure.inventoryNoData")}</p>
+            )}
+          </div>
+
+          <p className="text-[10px] text-slate-400">{t("structure.invSourceHint")}</p>
+        </div>
+      )}
+
       {/* Equipment tab */}
       {tab === "equipment" && (
         <div className="space-y-3">
@@ -2442,6 +2843,201 @@ function InventoryTableProperties({
                 <span className="text-[10px] text-slate-400 shrink-0">{node.ipAddress}</span>
               </button>
             ))}
+          </div>
+
+          {/* Auto-selection rules */}
+          <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className={labelClass}>{t("structure.invAutoRulesTitle")}</label>
+                <p className="text-[10px] text-slate-400">{t("structure.invAutoRulesHint")}</p>
+              </div>
+              <button
+                type="button"
+                onClick={addNodeRule}
+                className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+              >
+                <Plus className="h-3 w-3" />
+                {t("structure.invAutoRulesAdd")}
+              </button>
+            </div>
+
+            {nodeRules.length > 0 && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500">{t("structure.invAutoRulesMatch")}</span>
+                <select
+                  value={nodeRulesMatch}
+                  onChange={(e) => updateBlock(block.id, { nodeRulesMatch: e.target.value as "all" | "any" })}
+                  className="bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                >
+                  <option value="any">{t("structure.invAutoRulesAny")}</option>
+                  <option value="all">{t("structure.invAutoRulesAll")}</option>
+                </select>
+              </div>
+            )}
+
+            {nodeRules.map((rule) => {
+              const isInventory = rule.type === "inventory";
+              const isTag = rule.type === "tag";
+              const isManufacturer = rule.type === "manufacturer";
+              const isModel = rule.type === "model";
+              const allowedOps: InventoryNodeRuleOperator[] = isTag || isManufacturer || isModel
+                ? ["eq", "neq"]
+                : ["eq", "neq", "contains", "not_contains", "starts_with", "ends_with"];
+              return (
+                <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={rule.type}
+                      onChange={(e) => {
+                        const t2 = e.target.value as InventoryNodeRuleType;
+                        const patch: Partial<InventoryNodeRule> = { type: t2, value: undefined, tagId: undefined, category: undefined, entryKey: undefined, colLabel: undefined };
+                        if (t2 === "tag" || t2 === "manufacturer" || t2 === "model") {
+                          if (!["eq", "neq"].includes(rule.operator)) patch.operator = "eq";
+                        }
+                        updateNodeRule(rule.id, patch);
+                      }}
+                      className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      {ruleTypeOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={rule.operator}
+                      onChange={(e) => updateNodeRule(rule.id, { operator: e.target.value as InventoryNodeRuleOperator })}
+                      className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      {ruleOperatorOptions.filter((o) => allowedOps.includes(o.value)).map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={() => removeNodeRule(rule.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Type-specific value picker */}
+                  {isTag && (
+                    <select
+                      value={rule.tagId ?? ""}
+                      onChange={(e) => updateNodeRule(rule.id, { tagId: e.target.value ? Number(e.target.value) : undefined })}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.invAutoRulePickTag")}</option>
+                      {tags.map((tg) => (
+                        <option key={tg.id} value={tg.id}>{tg.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {isManufacturer && (
+                    <select
+                      value={rule.value ?? ""}
+                      onChange={(e) => updateNodeRule(rule.id, { value: e.target.value || undefined })}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.invAutoRulePickManufacturer")}</option>
+                      {manufacturers.map((m) => (
+                        <option key={m.id} value={String(m.id)}>{m.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {isModel && (
+                    <select
+                      value={rule.value ?? ""}
+                      onChange={(e) => updateNodeRule(rule.id, { value: e.target.value || undefined })}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.invAutoRulePickModel")}</option>
+                      {models.map((m) => (
+                        <option key={m.id} value={String(m.id)}>{m.manufacturer ? `${m.manufacturer.name} — ${m.name}` : m.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {isInventory && (
+                    <div className="space-y-2">
+                      <select
+                        value={rule.category ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { category: e.target.value || undefined, entryKey: undefined, colLabel: undefined })}
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="">{t("structure.inventoryPickCategory")}</option>
+                        {structure.map((c) => (
+                          <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+                        ))}
+                      </select>
+                      {rule.category && (
+                        <select
+                          value={rule.entryKey ?? ""}
+                          onChange={(e) => updateNodeRule(rule.id, { entryKey: e.target.value || undefined, colLabel: undefined })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                        >
+                          <option value="">{t("structure.inventoryPickKey")}</option>
+                          {(structure.find((c) => c.categoryName === rule.category)?.entries ?? []).map((e) => (
+                            <option key={e.key} value={e.key}>{e.key}</option>
+                          ))}
+                        </select>
+                      )}
+                      {rule.category && rule.entryKey && (
+                        <select
+                          value={rule.colLabel ?? ""}
+                          onChange={(e) => updateNodeRule(rule.id, { colLabel: e.target.value || undefined })}
+                          className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                        >
+                          <option value="">{t("structure.inventoryPickValue")}</option>
+                          {(structure.find((c) => c.categoryName === rule.category)?.entries.find((e) => e.key === rule.entryKey)?.columns ?? []).map((col) => (
+                            <option key={col} value={col}>{col}</option>
+                          ))}
+                        </select>
+                      )}
+                      <input
+                        type="text"
+                        value={rule.value ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { value: e.target.value })}
+                        placeholder={t("structure.ruleValue")}
+                        className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                      />
+                    </div>
+                  )}
+                  {!isTag && !isManufacturer && !isModel && !isInventory && (
+                    <input
+                      type="text"
+                      value={rule.value ?? ""}
+                      onChange={(e) => updateNodeRule(rule.id, { value: e.target.value })}
+                      placeholder={t("structure.ruleValue")}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                    />
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Rule preview */}
+            {nodeRules.length > 0 && (
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-2 space-y-1">
+                <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                  {rulePreviewLoading ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Search className="h-3 w-3" />
+                  )}
+                  <span>{t("structure.invAutoRulesMatched", { count: String(rulePreview.length) })}</span>
+                </div>
+                {ruleMatchedNodes.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1">
+                    {ruleMatchedNodes.slice(0, 12).map((n) => (
+                      <span key={n.id} className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-700 dark:text-violet-300">
+                        <Server className="h-2.5 w-2.5" />
+                        {n.hostname || n.name || n.ipAddress}
+                      </span>
+                    ))}
+                    {ruleMatchedNodes.length > 12 && (
+                      <span className="text-[10px] text-slate-400">+{ruleMatchedNodes.length - 12}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2632,7 +3228,64 @@ function InventoryTableProperties({
       {/* Preview tab */}
       {tab === "preview" && (
         <div className="space-y-3">
-          {block.columns.length === 0 || block.nodeIds.length === 0 ? (
+          {mode === "single_node_full" ? (
+            (effectiveNodes.length === 0 || !block.singleCategory) ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400 dark:text-slate-500">
+                <Table2 className="h-8 w-8" />
+                <p className="text-sm">{t("structure.invSinglePreviewEmpty")}</p>
+              </div>
+            ) : (
+              <>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-auto">
+                  {(() => {
+                    const cat = structure.find((c) => c.categoryName === block.singleCategory);
+                    const colLabels: string[] = [];
+                    const rowKeys: string[] = [];
+                    if (cat) {
+                      cat.entries.forEach((e) => {
+                        if (!rowKeys.includes(e.key)) rowKeys.push(e.key);
+                        e.columns.forEach((c) => {
+                          if (!colLabels.includes(c)) colLabels.push(c);
+                        });
+                      });
+                    }
+                    if (rowKeys.length === 0) {
+                      return (
+                        <p className="px-3 py-4 text-slate-400 italic text-center">{t("structure.invSinglePreviewNoEntries")}</p>
+                      );
+                    }
+                    return (
+                      <table className="w-full border-collapse text-sm" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
+                        {block.showHeader && (
+                          <thead>
+                            <tr className="bg-slate-100 dark:bg-slate-800">
+                              <th className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-left">
+                                {block.hostnameHeaderLabel || t("structure.invSingleColKey")}
+                              </th>
+                              {colLabels.map((cl, idx) => (
+                                <th key={cl} className={`${idx < colLabels.length - 1 ? "border-r" : ""} border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-left`}>{cl}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                        )}
+                        <tbody>
+                          {rowKeys.map((k, ridx) => (
+                            <tr key={k} className={ridx % 2 === 1 ? "bg-slate-50 dark:bg-slate-800/30" : ""}>
+                              <td className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">{k}</td>
+                              {colLabels.map((cl, idx) => (
+                                <td key={cl} className={`${idx < colLabels.length - 1 ? "border-r" : ""} border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-400 italic whitespace-nowrap`}>—</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    );
+                  })()}
+                </div>
+                <p className="text-[10px] text-slate-400 italic">{t("structure.inventoryPreviewNote")}</p>
+              </>
+            )
+          ) : block.columns.length === 0 || effectiveNodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3 text-slate-400 dark:text-slate-500">
               <Table2 className="h-8 w-8" />
               <p className="text-sm">{t("structure.inventoryPreviewEmpty")}</p>
@@ -2656,7 +3309,7 @@ function InventoryTableProperties({
                     </thead>
                   )}
                   <tbody>
-                    {selectedNodes.map((node, ni) => (
+                    {effectiveNodes.map((node, ni) => (
                       <tr key={node.id} className={ni % 2 === 1 ? "bg-slate-50 dark:bg-slate-800/30" : ""}>
                         <td className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap" style={{ textAlign: block.hostnameAlign ?? "left", verticalAlign: block.hostnameVAlign ?? "middle" }}>
                           {node.hostname || node.name || node.ipAddress}
@@ -3953,6 +4606,1062 @@ function TopologyBlockProperties({
           placeholder={t("structure.topologyCaptionPlaceholder")}
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
         />
+      </div>
+    </div>
+  );
+}
+
+// --- Compliance helpers (shared) ---
+interface CompliancePolicyOption {
+  id: number;
+  name: string;
+  description?: string | null;
+}
+
+interface ComplianceRuleOption {
+  id: number;
+  identifier?: string | null;
+  name: string;
+  description?: string | null;
+}
+
+function flattenRulesFromTree(folder: { rules?: ComplianceRuleOption[]; children?: unknown[] } | null | undefined, acc: ComplianceRuleOption[] = []): ComplianceRuleOption[] {
+  if (!folder) return acc;
+  for (const r of folder.rules ?? []) acc.push(r);
+  for (const c of (folder.children ?? []) as { rules?: ComplianceRuleOption[]; children?: unknown[] }[]) {
+    flattenRulesFromTree(c, acc);
+  }
+  return acc;
+}
+
+// --- Compliance matrix properties ---
+function ComplianceMatrixProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ComplianceMatrixBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [policies, setPolicies] = useState<CompliancePolicyOption[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/compliance-policies?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPolicies(Array.isArray(d) ? d : []));
+  }, [current]);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.compliancePolicy")} <span className="text-red-500">*</span></label>
+        <select
+          value={block.policyId ?? ""}
+          onChange={(e) => updateBlock(block.id, { policyId: e.target.value ? Number(e.target.value) : null })}
+          className={inputClass}
+        >
+          <option value="">--</option>
+          {policies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showRuleId}
+            onChange={(e) => updateBlock(block.id, { showRuleId: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowRuleId")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showTotal}
+            onChange={(e) => updateBlock(block.id, { showTotal: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowTotal")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={6}
+            max={14}
+            step={0.5}
+            value={block.fontSize ?? 9}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Reusable inventory columns panel ---
+interface InventoryColumnsPanelProps {
+  columns: InventoryTableColumn[];
+  onChange: (cols: InventoryTableColumn[]) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}
+
+function InventoryColumnsPanel({ columns, onChange, t }: InventoryColumnsPanelProps) {
+  const { current } = useAppContext();
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [structureLoaded, setStructureLoaded] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerCat, setPickerCat] = useState<string | null>(null);
+  const [pickerKey, setPickerKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!current || structureLoaded) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: InvStructureCategory[]) => { setStructure(data); setStructureLoaded(true); })
+      .catch(() => setStructureLoaded(true));
+  }, [current, structureLoaded]);
+
+  const pickerCatData = pickerCat ? structure.find((c) => c.categoryName === pickerCat) : null;
+  const pickerKeyData = pickerCatData && pickerKey ? pickerCatData.entries.find((e) => e.key === pickerKey) : null;
+
+  const addColumn = (category: string, entryKey: string, colLabel: string) => {
+    const col: InventoryTableColumn = { id: uid(), category, entryKey, colLabel, label: `${category} > ${entryKey} > ${colLabel}` };
+    onChange([...columns, col]);
+    setPickerOpen(false); setPickerCat(null); setPickerKey(null);
+  };
+
+  const removeColumn = (colId: string) => onChange(columns.filter((c) => c.id !== colId));
+  const updateColumn = (colId: string, patch: Partial<InventoryTableColumn>) => onChange(columns.map((c) => (c.id === colId ? { ...c, ...patch } : c)));
+  const moveColumn = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= columns.length) return;
+    const cols = [...columns];
+    [cols[idx], cols[target]] = [cols[target], cols[idx]];
+    onChange(cols);
+  };
+
+  const alignBtn = (active: boolean) =>
+    `p-1 rounded transition-colors ${active ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-400 dark:text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700"}`;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-slate-500">{t("structure.complianceColumnsHint")}</p>
+
+      {columns.map((col, idx) => (
+        <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">{idx + 1}</span>
+            <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={`${col.category} > ${col.entryKey} > ${col.colLabel}`}>
+              {col.category} &gt; {col.entryKey} &gt; {col.colLabel}
+            </span>
+            <div className="flex items-center gap-0.5">
+              <button onClick={() => moveColumn(idx, -1)} disabled={idx === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                <ChevronUp className="h-3 w-3" />
+              </button>
+              <button onClick={() => moveColumn(idx, 1)} disabled={idx === columns.length - 1} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </div>
+            <button onClick={() => removeColumn(col.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={col.headerLabel ?? ""}
+              onChange={(e) => updateColumn(col.id, { headerLabel: e.target.value })}
+              placeholder={col.label || `${col.category} > ${col.entryKey} > ${col.colLabel}`}
+              className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+              title={t("structure.inventoryHeaderLabel")}
+            />
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button type="button" onClick={() => updateColumn(col.id, { align: "left" })} className={alignBtn((col.align ?? "left") === "left")}><AlignLeft className="h-3 w-3" /></button>
+              <button type="button" onClick={() => updateColumn(col.id, { align: "center" })} className={alignBtn(col.align === "center")}><AlignCenter className="h-3 w-3" /></button>
+              <button type="button" onClick={() => updateColumn(col.id, { align: "right" })} className={alignBtn(col.align === "right")}><AlignRight className="h-3 w-3" /></button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {!pickerOpen ? (
+        <button
+          type="button"
+          onClick={() => setPickerOpen(true)}
+          className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("structure.inventoryAddColumn")}
+        </button>
+      ) : (
+        <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
+              {!pickerCat ? t("structure.inventoryPickCategory") : !pickerKey ? t("structure.inventoryPickKey") : t("structure.inventoryPickValue")}
+            </span>
+            <button onClick={() => { setPickerOpen(false); setPickerCat(null); setPickerKey(null); }} className="p-0.5 text-slate-400 hover:text-slate-600">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          {pickerCat && (
+            <div className="flex items-center gap-1 text-[11px] text-slate-500">
+              <button onClick={() => { setPickerCat(null); setPickerKey(null); }} className="hover:text-violet-600 underline">
+                {t("structure.inventoryCategories")}
+              </button>
+              <ChevronRight className="h-3 w-3" />
+              {pickerKey ? (
+                <>
+                  <button onClick={() => setPickerKey(null)} className="hover:text-violet-600 underline">{pickerCat}</button>
+                  <ChevronRight className="h-3 w-3" />
+                  <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerKey}</span>
+                </>
+              ) : (
+                <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerCat}</span>
+              )}
+            </div>
+          )}
+          {!pickerCat && (
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {structure.length === 0 && <p className="text-xs text-slate-400 italic py-2">{t("structure.inventoryNoData")}</p>}
+              {structure.map((cat) => (
+                <button key={cat.categoryName} onClick={() => setPickerCat(cat.categoryName)} className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30">
+                  {cat.categoryName}
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          )}
+          {pickerCat && !pickerKey && pickerCatData && (
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {pickerCatData.entries.map((entry) => (
+                <button key={entry.key} onClick={() => setPickerKey(entry.key)} className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30">
+                  {entry.key}
+                  <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          )}
+          {pickerCat && pickerKey && pickerKeyData && (
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {pickerKeyData.columns.map((col) => (
+                <button key={col} onClick={() => addColumn(pickerCat, pickerKey, col)} className="w-full flex items-center rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30">
+                  <Plus className="h-3.5 w-3.5 mr-2 text-violet-500" />
+                  {col}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Reusable node selection panel ---
+interface NodeSelectionPanelProps {
+  nodeIds: number[];
+  nodeRules: InventoryNodeRule[];
+  nodeRulesMatch: "all" | "any";
+  onChange: (patch: { nodeIds?: number[]; nodeRules?: InventoryNodeRule[]; nodeRulesMatch?: "all" | "any" }) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}
+
+function NodeSelectionPanel({ nodeIds, nodeRules, nodeRulesMatch, onChange, t }: NodeSelectionPanelProps) {
+  const { current } = useAppContext();
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [tags, setTags] = useState<InvTagItem[]>([]);
+  const [manufacturers, setManufacturers] = useState<InvManufacturerItem[]>([]);
+  const [models, setModels] = useState<InvModelItem[]>([]);
+  const [rulePreview, setRulePreview] = useState<number[]>([]);
+  const [rulePreviewLoading, setRulePreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/nodes?context=${current.id}`).then((r) => r.json()).then((d: NodeItem[]) => { setAllNodes(d); setNodesLoaded(true); }).catch(() => setNodesLoaded(true));
+    fetch(`/api/inventory-categories/structure?context=${current.id}`).then((r) => r.json()).then(setStructure).catch(() => {});
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setTags).catch(() => {});
+    fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers).catch(() => {});
+    fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels).catch(() => {});
+  }, [current]);
+
+  useEffect(() => {
+    if (!current || nodeRules.length === 0) { setRulePreview([]); return; }
+    setRulePreviewLoading(true);
+    fetch(`/api/nodes/match?context=${current.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: nodeRules, match: nodeRulesMatch }),
+    })
+      .then((r) => r.ok ? r.json() : { nodeIds: [] })
+      .then((data: { nodeIds: number[] }) => setRulePreview(data.nodeIds ?? []))
+      .catch(() => setRulePreview([]))
+      .finally(() => setRulePreviewLoading(false));
+  }, [current, JSON.stringify(nodeRules), nodeRulesMatch]);
+
+  const selectedNodes = allNodes.filter((n) => nodeIds.includes(n.id));
+  const ruleMatchedNodes = allNodes.filter((n) => rulePreview.includes(n.id) && !nodeIds.includes(n.id));
+  const availableNodes = allNodes.filter((n) =>
+    !nodeIds.includes(n.id) &&
+    (nodeSearch === "" ||
+      (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+      (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+      n.ipAddress.includes(nodeSearch)),
+  );
+
+  const addNode = (id: number) => onChange({ nodeIds: [...nodeIds, id] });
+  const removeNode = (id: number) => onChange({ nodeIds: nodeIds.filter((n) => n !== id) });
+
+  const addRule = () => {
+    const r: InventoryNodeRule = { id: uid(), type: "tag", operator: "eq" };
+    onChange({ nodeRules: [...nodeRules, r] });
+  };
+  const updateRule = (rid: string, patch: Partial<InventoryNodeRule>) =>
+    onChange({ nodeRules: nodeRules.map((r) => (r.id === rid ? { ...r, ...patch } : r)) });
+  const removeRule = (rid: string) => onChange({ nodeRules: nodeRules.filter((r) => r.id !== rid) });
+
+  const ruleTypeOptions: { value: InventoryNodeRuleType; label: string }[] = [
+    { value: "tag", label: t("structure.invRuleTypeTag") },
+    { value: "manufacturer", label: t("structure.invRuleTypeManufacturer") },
+    { value: "model", label: t("structure.invRuleTypeModel") },
+    { value: "hostname", label: t("structure.invRuleTypeHostname") },
+    { value: "inventory", label: t("structure.invRuleTypeInventory") },
+  ];
+  const ruleOperatorOptions: { value: InventoryNodeRuleOperator; label: string }[] = [
+    { value: "eq", label: "=" },
+    { value: "neq", label: "!=" },
+    { value: "contains", label: t("structure.ruleContains") },
+    { value: "not_contains", label: t("structure.ruleNotContains") },
+    { value: "starts_with", label: t("structure.invRuleStartsWith") },
+    { value: "ends_with", label: t("structure.invRuleEndsWith") },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-slate-500">{t("structure.complianceDevicesHint")}</p>
+
+      {selectedNodes.length > 0 && (
+        <div className="space-y-1">
+          <label className={labelClass}>{t("structure.inventorySelected")}</label>
+          <div className="max-h-48 overflow-y-auto space-y-1">
+            {selectedNodes.map((node) => (
+              <div key={node.id} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5">
+                <Server className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+                  {node.hostname || node.name || node.ipAddress}
+                </span>
+                <span className="text-[10px] text-slate-400">{node.ipAddress}</span>
+                <button onClick={() => removeNode(node.id)} className="p-0.5 text-slate-400 hover:text-red-500">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.inventoryAddEquipment")}</label>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          <input
+            type="text"
+            value={nodeSearch}
+            onChange={(e) => setNodeSearch(e.target.value)}
+            placeholder={t("common.search")}
+            className={`${inputClass} pl-8`}
+          />
+        </div>
+      </div>
+
+      <div className="max-h-56 overflow-y-auto space-y-1 rounded-lg border border-slate-200 dark:border-slate-700 p-1.5">
+        {!nodesLoaded && (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+          </div>
+        )}
+        {nodesLoaded && availableNodes.length === 0 && (
+          <p className="text-xs text-slate-400 italic text-center py-3">{t("common.noResult")}</p>
+        )}
+        {availableNodes.slice(0, 100).map((node) => (
+          <button key={node.id} onClick={() => addNode(node.id)} className="w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800">
+            <Plus className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+            <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+              {node.hostname || node.name || node.ipAddress}
+            </span>
+            <span className="text-[10px] text-slate-400 shrink-0">{node.ipAddress}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+        <div className="flex items-center justify-between">
+          <div>
+            <label className={labelClass}>{t("structure.invAutoRulesTitle")}</label>
+            <p className="text-[10px] text-slate-400">{t("structure.invAutoRulesHint")}</p>
+          </div>
+          <button type="button" onClick={addRule} className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700">
+            <Plus className="h-3 w-3" />
+            {t("structure.invAutoRulesAdd")}
+          </button>
+        </div>
+
+        {nodeRules.length > 0 && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-500">{t("structure.invAutoRulesMatch")}</span>
+            <select
+              value={nodeRulesMatch}
+              onChange={(e) => onChange({ nodeRulesMatch: e.target.value as "all" | "any" })}
+              className="bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+            >
+              <option value="any">{t("structure.invAutoRulesAny")}</option>
+              <option value="all">{t("structure.invAutoRulesAll")}</option>
+            </select>
+          </div>
+        )}
+
+        {nodeRules.map((rule) => {
+          const isInventory = rule.type === "inventory";
+          const isTag = rule.type === "tag";
+          const isManufacturer = rule.type === "manufacturer";
+          const isModel = rule.type === "model";
+          const allowedOps: InventoryNodeRuleOperator[] = isTag || isManufacturer || isModel
+            ? ["eq", "neq"]
+            : ["eq", "neq", "contains", "not_contains", "starts_with", "ends_with"];
+          return (
+            <div key={rule.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={rule.type}
+                  onChange={(e) => {
+                    const t2 = e.target.value as InventoryNodeRuleType;
+                    const patch: Partial<InventoryNodeRule> = { type: t2, value: undefined, tagId: undefined, category: undefined, entryKey: undefined, colLabel: undefined };
+                    if (t2 === "tag" || t2 === "manufacturer" || t2 === "model") {
+                      if (!["eq", "neq"].includes(rule.operator)) patch.operator = "eq";
+                    }
+                    updateRule(rule.id, patch);
+                  }}
+                  className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  {ruleTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <select
+                  value={rule.operator}
+                  onChange={(e) => updateRule(rule.id, { operator: e.target.value as InventoryNodeRuleOperator })}
+                  className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  {ruleOperatorOptions.filter((o) => allowedOps.includes(o.value)).map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => removeRule(rule.id)} className="p-1 text-slate-400 hover:text-red-500">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {isTag && (
+                <select
+                  value={rule.tagId ?? ""}
+                  onChange={(e) => updateRule(rule.id, { tagId: e.target.value ? Number(e.target.value) : undefined })}
+                  className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  <option value="">{t("structure.invAutoRulePickTag")}</option>
+                  {tags.map((tg) => (<option key={tg.id} value={tg.id}>{tg.name}</option>))}
+                </select>
+              )}
+              {isManufacturer && (
+                <select
+                  value={rule.value ?? ""}
+                  onChange={(e) => updateRule(rule.id, { value: e.target.value || undefined })}
+                  className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  <option value="">{t("structure.invAutoRulePickManufacturer")}</option>
+                  {manufacturers.map((m) => (<option key={m.id} value={String(m.id)}>{m.name}</option>))}
+                </select>
+              )}
+              {isModel && (
+                <select
+                  value={rule.value ?? ""}
+                  onChange={(e) => updateRule(rule.id, { value: e.target.value || undefined })}
+                  className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                >
+                  <option value="">{t("structure.invAutoRulePickModel")}</option>
+                  {models.map((m) => (<option key={m.id} value={String(m.id)}>{m.manufacturer ? `${m.manufacturer.name} — ${m.name}` : m.name}</option>))}
+                </select>
+              )}
+              {isInventory && (
+                <div className="space-y-2">
+                  <select
+                    value={rule.category ?? ""}
+                    onChange={(e) => updateRule(rule.id, { category: e.target.value || undefined, entryKey: undefined, colLabel: undefined })}
+                    className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                  >
+                    <option value="">{t("structure.inventoryPickCategory")}</option>
+                    {structure.map((c) => (<option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>))}
+                  </select>
+                  {rule.category && (
+                    <select
+                      value={rule.entryKey ?? ""}
+                      onChange={(e) => updateRule(rule.id, { entryKey: e.target.value || undefined, colLabel: undefined })}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.inventoryPickKey")}</option>
+                      {(structure.find((c) => c.categoryName === rule.category)?.entries ?? []).map((e) => (<option key={e.key} value={e.key}>{e.key}</option>))}
+                    </select>
+                  )}
+                  {rule.category && rule.entryKey && (
+                    <select
+                      value={rule.colLabel ?? ""}
+                      onChange={(e) => updateRule(rule.id, { colLabel: e.target.value || undefined })}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.inventoryPickValue")}</option>
+                      {(structure.find((c) => c.categoryName === rule.category)?.entries.find((e) => e.key === rule.entryKey)?.columns ?? []).map((col) => (<option key={col} value={col}>{col}</option>))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    value={rule.value ?? ""}
+                    onChange={(e) => updateRule(rule.id, { value: e.target.value })}
+                    placeholder={t("structure.ruleValue")}
+                    className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                  />
+                </div>
+              )}
+              {!isTag && !isManufacturer && !isModel && !isInventory && (
+                <input
+                  type="text"
+                  value={rule.value ?? ""}
+                  onChange={(e) => updateRule(rule.id, { value: e.target.value })}
+                  placeholder={t("structure.ruleValue")}
+                  className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {nodeRules.length > 0 && (
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-2 space-y-1">
+            <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              {rulePreviewLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Search className="h-3 w-3" />}
+              <span>{t("structure.invAutoRulesMatched", { count: String(rulePreview.length) })}</span>
+            </div>
+            {ruleMatchedNodes.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {ruleMatchedNodes.slice(0, 12).map((n) => (
+                  <span key={n.id} className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-700 dark:text-violet-300">
+                    <Server className="h-2.5 w-2.5" />
+                    {n.hostname || n.name || n.ipAddress}
+                  </span>
+                ))}
+                {ruleMatchedNodes.length > 12 && (<span className="text-[10px] text-slate-400">+{ruleMatchedNodes.length - 12}</span>)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// --- Shared compliance content tab ---
+function ComplianceRulePicker({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RuleNonCompliantBlock | RuleNodesTableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [policies, setPolicies] = useState<CompliancePolicyOption[]>([]);
+  const [rules, setRules] = useState<ComplianceRuleOption[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/compliance-policies?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPolicies(Array.isArray(d) ? d : []));
+  }, [current]);
+
+  useEffect(() => {
+    if (!block.policyId) { setRules([]); return; }
+    fetch(`/api/compliance-policies/${block.policyId}/rules`)
+      .then((r) => (r.ok ? r.json() : { folder: null, extraRules: [] }))
+      .then((d) => {
+        const fromTree = flattenRulesFromTree(d?.folder);
+        const extras: ComplianceRuleOption[] = Array.isArray(d?.extraRules) ? d.extraRules : [];
+        const all = [...fromTree, ...extras];
+        const seen = new Set<number>();
+        const dedup = all.filter((r) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+        dedup.sort((a, b) => (a.identifier ?? "").localeCompare(b.identifier ?? "") || a.name.localeCompare(b.name));
+        setRules(dedup);
+      });
+  }, [block.policyId]);
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.compliancePolicy")} <span className="text-red-500">*</span></label>
+        <select
+          value={block.policyId ?? ""}
+          onChange={(e) => updateBlock(block.id, { policyId: e.target.value ? Number(e.target.value) : null, ruleId: null })}
+          className={inputClass}
+        >
+          <option value="">--</option>
+          {policies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceRule")} <span className="text-red-500">*</span></label>
+        <select
+          value={block.ruleId ?? ""}
+          onChange={(e) => updateBlock(block.id, { ruleId: e.target.value ? Number(e.target.value) : null })}
+          className={inputClass}
+          disabled={!block.policyId}
+        >
+          <option value="">--</option>
+          {rules.map((r) => <option key={r.id} value={r.id}>{r.identifier ? `[${r.identifier}] ` : ""}{r.name}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function complianceTabBtnClass(active: boolean): string {
+  return `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+    active
+      ? "border-violet-500 text-violet-600 dark:text-violet-400"
+      : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+  }`;
+}
+
+// --- Rule non-compliant nodes properties (tabbed) ---
+function RuleNonCompliantProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RuleNonCompliantBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [activeTab, setActiveTab] = useState<"content" | "columns" | "devices">("content");
+  const blockColumns = block.columns ?? [];
+  const blockNodeIds = block.nodeIds ?? [];
+  const blockNodeRules = block.nodeRules ?? [];
+  const blockNodeRulesMatch = block.nodeRulesMatch ?? "any";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={complianceTabBtnClass(activeTab === "content")} onClick={() => setActiveTab("content")}>
+          {t("structure.complianceTabContent")}
+        </button>
+        <button type="button" className={complianceTabBtnClass(activeTab === "columns")} onClick={() => setActiveTab("columns")}>
+          {t("structure.complianceTabColumns")}
+          {blockColumns.length > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {blockColumns.length}
+            </span>
+          )}
+        </button>
+        <button type="button" className={complianceTabBtnClass(activeTab === "devices")} onClick={() => setActiveTab("devices")}>
+          {t("structure.complianceTabDevices")}
+          {(blockNodeIds.length > 0 || blockNodeRules.length > 0) && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {blockNodeIds.length + blockNodeRules.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === "content" && (
+        <div className="space-y-4">
+          <ComplianceRulePicker block={block} updateBlock={updateBlock} t={t} />
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showRuleDescription}
+                onChange={(e) => updateBlock(block.id, { showRuleDescription: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowRuleDescription")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showSeverity}
+                onChange={(e) => updateBlock(block.id, { showSeverity: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowSeverity")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showMessage}
+                onChange={(e) => updateBlock(block.id, { showMessage: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowMessage")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.pageBreakBefore ?? false}
+                onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input type="range" min={6} max={14} step={0.5} value={block.fontSize ?? 9}
+                onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+                className="flex-1 accent-blue-600" />
+              <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "columns" && (
+        <InventoryColumnsPanel
+          columns={blockColumns}
+          onChange={(cols) => updateBlock(block.id, { columns: cols })}
+          t={t}
+        />
+      )}
+
+      {activeTab === "devices" && (
+        <NodeSelectionPanel
+          nodeIds={blockNodeIds}
+          nodeRules={blockNodeRules}
+          nodeRulesMatch={blockNodeRulesMatch}
+          onChange={(patch) => updateBlock(block.id, patch)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Rule nodes table properties (tabbed) ---
+function RuleNodesTableProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RuleNodesTableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [activeTab, setActiveTab] = useState<"content" | "columns" | "devices">("content");
+  const blockColumns = block.columns ?? [];
+  const blockNodeIds = block.nodeIds ?? [];
+  const blockNodeRules = block.nodeRules ?? [];
+  const blockNodeRulesMatch = block.nodeRulesMatch ?? "any";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={complianceTabBtnClass(activeTab === "content")} onClick={() => setActiveTab("content")}>
+          {t("structure.complianceTabContent")}
+        </button>
+        <button type="button" className={complianceTabBtnClass(activeTab === "columns")} onClick={() => setActiveTab("columns")}>
+          {t("structure.complianceTabColumns")}
+          {blockColumns.length > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {blockColumns.length}
+            </span>
+          )}
+        </button>
+        <button type="button" className={complianceTabBtnClass(activeTab === "devices")} onClick={() => setActiveTab("devices")}>
+          {t("structure.complianceTabDevices")}
+          {(blockNodeIds.length > 0 || blockNodeRules.length > 0) && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {blockNodeIds.length + blockNodeRules.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === "content" && (
+        <div className="space-y-4">
+          <ComplianceRulePicker block={block} updateBlock={updateBlock} t={t} />
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showRuleDescription}
+                onChange={(e) => updateBlock(block.id, { showRuleDescription: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowRuleDescription")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showMessage}
+                onChange={(e) => updateBlock(block.id, { showMessage: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowMessage")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.pageBreakBefore ?? false}
+                onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input type="range" min={6} max={14} step={0.5} value={block.fontSize ?? 9}
+                onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+                className="flex-1 accent-blue-600" />
+              <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "columns" && (
+        <InventoryColumnsPanel
+          columns={blockColumns}
+          onChange={(cols) => updateBlock(block.id, { columns: cols })}
+          t={t}
+        />
+      )}
+
+      {activeTab === "devices" && (
+        <NodeSelectionPanel
+          nodeIds={blockNodeIds}
+          nodeRules={blockNodeRules}
+          nodeRulesMatch={blockNodeRulesMatch}
+          onChange={(patch) => updateBlock(block.id, patch)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Rule recommendation properties ---
+function RuleRecommendationProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RuleRecommendationBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [policies, setPolicies] = useState<CompliancePolicyOption[]>([]);
+  const [recRules, setRecRules] = useState<ComplianceRuleOption[]>([]);
+  const [recNodes, setRecNodes] = useState<NodeItem[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/compliance-policies?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPolicies(Array.isArray(d) ? d : []));
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: NodeItem[]) => setRecNodes(Array.isArray(d) ? d : []));
+  }, [current]);
+
+  useEffect(() => {
+    if (!block.policyId) { setRecRules([]); return; }
+    fetch(`/api/compliance-policies/${block.policyId}/rules`)
+      .then((r) => (r.ok ? r.json() : { folder: null, extraRules: [] }))
+      .then((d) => {
+        const fromTree = flattenRulesFromTree(d?.folder);
+        const extras: ComplianceRuleOption[] = Array.isArray(d?.extraRules) ? d.extraRules : [];
+        const all = [...fromTree, ...extras];
+        const seen = new Set<number>();
+        const dedup = all.filter((r) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; });
+        dedup.sort((a, b) => (a.identifier ?? "").localeCompare(b.identifier ?? "") || a.name.localeCompare(b.name));
+        setRecRules(dedup);
+      });
+  }, [block.policyId]);
+
+  const recPlaceholder =
+    block.displayMode === "cli"
+      ? "configure terminal\ninterface Vlan10\n no ip http server\nend\n! {{hostname}}"
+      : t("structure.recommendationPlaceholder");
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.compliancePolicy")} <span className="text-red-500">*</span></label>
+          <select
+            value={block.policyId ?? ""}
+            onChange={(e) => updateBlock(block.id, { policyId: e.target.value ? Number(e.target.value) : null, ruleId: null })}
+            className={inputClass}
+          >
+            <option value="">--</option>
+            {policies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.complianceRule")} <span className="text-red-500">*</span></label>
+          <select
+            value={block.ruleId ?? ""}
+            onChange={(e) => updateBlock(block.id, { ruleId: e.target.value ? Number(e.target.value) : null })}
+            className={inputClass}
+            disabled={!block.policyId}
+          >
+            <option value="">--</option>
+            {recRules.map((r) => <option key={r.id} value={r.id}>{r.identifier ? `[${r.identifier}] ` : ""}{r.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.recommendationDevice")} <span className="text-red-500">*</span></label>
+        <select
+          value={block.nodeId ?? ""}
+          onChange={(e) => updateBlock(block.id, { nodeId: e.target.value ? Number(e.target.value) : null })}
+          className={inputClass}
+        >
+          <option value="">--</option>
+          {recNodes.map((n) => (
+            <option key={n.id} value={n.id}>
+              {(n.hostname || n.name || n.ipAddress)} ({n.ipAddress})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.recommendationSource")}</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => updateBlock(block.id, { source: "static" })}
+            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              (block.source ?? "static") === "static"
+                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+            }`}
+          >
+            {t("structure.recommendationSourceStatic")}
+          </button>
+          <button
+            type="button"
+            onClick={() => updateBlock(block.id, { source: "dynamic" })}
+            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              block.source === "dynamic"
+                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+            }`}
+          >
+            {t("structure.recommendationSourceDynamic")}
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-400 italic">
+          {(block.source ?? "static") === "dynamic"
+            ? t("structure.recommendationSourceDynamicHint")
+            : t("structure.recommendationSourceStaticHint")}
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.recommendationDisplayMode")}</label>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => updateBlock(block.id, { displayMode: "text" })}
+            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              block.displayMode === "text"
+                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+            }`}
+          >
+            {t("structure.recommendationModeText")}
+          </button>
+          <button
+            type="button"
+            onClick={() => updateBlock(block.id, { displayMode: "cli" })}
+            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              block.displayMode === "cli"
+                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+            }`}
+          >
+            {t("structure.recommendationModeCli")}
+          </button>
+        </div>
+      </div>
+
+      {(block.source ?? "static") === "static" && (
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.recommendationContent")}</label>
+          <textarea
+            value={block.recommendation}
+            onChange={(e) => updateBlock(block.id, { recommendation: e.target.value })}
+            placeholder={recPlaceholder}
+            rows={10}
+            className={`${inputClass} resize-y ${block.displayMode === "cli" ? "font-mono text-xs" : ""}`}
+          />
+          <p className="text-[10px] text-slate-400 italic">{t("structure.recommendationVariablesHint")}</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showHeader}
+            onChange={(e) => updateBlock(block.id, { showHeader: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.recommendationShowHeader")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={6}
+            max={14}
+            step={0.5}
+            value={block.fontSize ?? (block.displayMode === "cli" ? 9 : 11)}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? (block.displayMode === "cli" ? 9 : 11)}pt</span>
+        </div>
       </div>
     </div>
   );
