@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 280" width="1200" height="280" role="img" aria-label="Auditix — Network audit and compliance platform">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#8b5cf6"/>
+      <stop offset="50%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.85" cy="0.5" r="0.5">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#334155" stroke-width="0.5" opacity="0.35"/>
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="280" fill="url(#bg)"/>
+  <rect width="1200" height="280" fill="url(#grid)"/>
+  <rect width="1200" height="280" fill="url(#glow)"/>
+
+  <!-- Decorative network nodes -->
+  <g opacity="0.55">
+    <line x1="900" y1="80" x2="1020" y2="140" stroke="#475569" stroke-width="1"/>
+    <line x1="1020" y1="140" x2="980" y2="220" stroke="#475569" stroke-width="1"/>
+    <line x1="900" y1="80" x2="1100" y2="100" stroke="#475569" stroke-width="1"/>
+    <line x1="1100" y1="100" x2="1020" y2="140" stroke="#475569" stroke-width="1"/>
+    <line x1="1020" y1="140" x2="1130" y2="200" stroke="#475569" stroke-width="1"/>
+    <line x1="980" y1="220" x2="1130" y2="200" stroke="#475569" stroke-width="1"/>
+    <circle cx="900" cy="80" r="5" fill="#06b6d4"/>
+    <circle cx="1020" cy="140" r="6" fill="#3b82f6"/>
+    <circle cx="1100" cy="100" r="4" fill="#8b5cf6"/>
+    <circle cx="980" cy="220" r="4" fill="#3b82f6"/>
+    <circle cx="1130" cy="200" r="5" fill="#06b6d4"/>
+  </g>
+
+  <!-- Logo mark: shield with checkmark -->
+  <g transform="translate(80, 80)">
+    <rect width="120" height="120" rx="24" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <path d="M60 22 L96 32 L96 62 C96 82 80 96 60 102 C40 96 24 82 24 62 L24 32 Z"
+          stroke="#ffffff" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" fill="none"/>
+    <path d="M42 62 L55 75 L78 48"
+          stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="240" y="148" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="84" font-weight="700" fill="#ffffff" letter-spacing="-2">Auditix</text>
+
+  <!-- Tagline -->
+  <text x="244" y="190" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="22" font-weight="400" fill="#94a3b8">Network audit &amp; compliance platform</text>
+
+  <!-- Accent underline -->
+  <rect x="244" y="206" width="240" height="3" rx="1.5" fill="url(#accent)"/>
+
+  <!-- Subtle keywords -->
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="13" font-weight="500" fill="#64748b">
+    <text x="244" y="234">DISCOVER</text>
+    <text x="340" y="234" fill="#475569">·</text>
+    <text x="356" y="234">AUDIT</text>
+    <text x="416" y="234" fill="#475569">·</text>
+    <text x="432" y="234">VISUALIZE</text>
+    <text x="528" y="234" fill="#475569">·</text>
+    <text x="544" y="234">REPORT</text>
+  </g>
+</svg>

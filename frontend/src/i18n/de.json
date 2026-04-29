@@ -12,7 +12,8 @@
     "default": "Standard",
     "underConstruction": "In Bearbeitung",
     "underConstructionDesc": "Diese Funktion wird bald verfugbar sein.",
-    "close": "Schliessen"
+    "close": "Schliessen",
+    "featureRequest": "Feature vorschlagen"
   },
   "auth": {
     "title": "Auditix",

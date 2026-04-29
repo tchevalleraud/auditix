@@ -12,7 +12,8 @@
     "default": "デフォルト",
     "underConstruction": "準備中",
     "underConstructionDesc": "この機能は近日公開予定です。",
-    "close": "閉じる"
+    "close": "閉じる",
+    "featureRequest": "機能をリクエスト"
   },
   "auth": {
     "title": "Auditix",

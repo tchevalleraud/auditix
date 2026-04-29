@@ -1,6 +1,7 @@
 import Sidebar from "@/components/layout/Sidebar";
 import Topbar from "@/components/layout/Topbar";
 import ContextProvider from "@/components/ContextProvider";
+import FeedbackButton from "@/components/FeedbackButton";
 
 export default function AuthenticatedLayout({
   children,
@@ -14,6 +15,7 @@ export default function AuthenticatedLayout({
         <Topbar />
         <main className="p-6">{children}</main>
       </div>
+      <FeedbackButton />
     </ContextProvider>
   );
 }
