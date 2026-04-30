@@ -1248,7 +1248,18 @@
     "keyLabelPlaceholder": "ex. nom_interface",
     "keyLabelHint": "Libelle optionnel pour la colonne cle affichee dans les tables d'inventaire",
     "confirmDelete": "Supprimer la categorie \"{name}\" ?",
-    "deleteUsageWarning": "{count} entrees d'inventaire referencent cette categorie. Elles seront detachees mais pas supprimees."
+    "deleteUsageWarning": "{count} entrees d'inventaire referencent cette categorie. Elles seront detachees mais pas supprimees.",
+    "manageColumns": "Colonnes",
+    "columnsTitle": "Colonnes de \"{name}\"",
+    "columnsHint": "Reorganisez et masquez les colonnes affichees dans l'inventaire des nodes.",
+    "columnsEmpty": "Aucune colonne detectee pour cette categorie.",
+    "columnVisible": "Visible",
+    "columnHidden": "Masquee",
+    "columnsSaved": "Colonnes enregistrees",
+    "sortBy": "Trier par",
+    "sortByKey": "Cle (par defaut)",
+    "sortAsc": "Croissant",
+    "sortDesc": "Decroissant"
   },
   "compliance_rules": {
     "title": "Regles de conformite",

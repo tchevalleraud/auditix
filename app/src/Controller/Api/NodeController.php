@@ -283,44 +283,96 @@ class NodeController extends AbstractController
         $categories = [];
         foreach ($entries as $entry) {
             $catName = $entry->getCategoryName();
-            $catId = $entry->getCategory()?->getId();
-            $catKeyLabel = $entry->getCategory()?->getKeyLabel();
+            $cat = $entry->getCategory();
+            $catId = $cat?->getId();
+            $catKeyLabel = $cat?->getKeyLabel();
+            $catColumnConfig = $cat?->getColumnConfig();
             $catKey = $catId ? (string)$catId : '__' . $catName;
 
             if (!isset($categories[$catKey])) {
                 $categories[$catKey] = [
                     'categoryName' => $catName,
                     'keyLabel' => $catKeyLabel,
-                    'columns' => [],
+                    'columnConfig' => $catColumnConfig,
+                    'sortConfig' => $cat?->getSortConfig(),
+                    'discoveredColumns' => [],
                     'rows' => [],
-                    'columnSet' => [],
                 ];
             }
 
             $key = $entry->getEntryKey();
             $label = $entry->getColLabel();
 
-            // Track columns
-            if (!in_array($label, $categories[$catKey]['columnSet'], true)) {
-                $categories[$catKey]['columnSet'][] = $label;
-                $categories[$catKey]['columns'][] = ['colKey' => 'col:' . $label, 'label' => $label];
+            if (!in_array($label, $categories[$catKey]['discoveredColumns'], true)) {
+                $categories[$catKey]['discoveredColumns'][] = $label;
             }
 
-            // Build rows
             if (!isset($categories[$catKey]['rows'][$key])) {
                 $categories[$catKey]['rows'][$key] = ['key' => $key, 'values' => []];
             }
             $categories[$catKey]['rows'][$key]['values']['col:' . $label] = $entry->getValue();
         }
 
-        // Convert to indexed arrays with natural sort on keys
+        // Build ordered columns list (config first, then unconfigured discovered) with visibility flag
         $result = [];
         foreach ($categories as $cat) {
-            unset($cat['columnSet']);
+            $columns = [];
+            $known = [];
+            foreach (($cat['columnConfig'] ?? []) as $item) {
+                $label = $item['label'] ?? null;
+                if (!is_string($label) || $label === '' || isset($known[$label])) {
+                    continue;
+                }
+                $known[$label] = true;
+                $columns[] = [
+                    'colKey' => 'col:' . $label,
+                    'label' => $label,
+                    'visible' => !isset($item['visible']) || (bool)$item['visible'],
+                ];
+            }
+            foreach ($cat['discoveredColumns'] as $label) {
+                if (isset($known[$label])) {
+                    continue;
+                }
+                $known[$label] = true;
+                $columns[] = ['colKey' => 'col:' . $label, 'label' => $label, 'visible' => true];
+            }
+
             $rows = array_values($cat['rows']);
-            usort($rows, fn($a, $b) => strnatcmp($a['key'], $b['key']));
-            $cat['rows'] = $rows;
-            $result[] = $cat;
+            $sortColumn = null;
+            $sortDirection = 'asc';
+            if (is_array($cat['sortConfig'] ?? null)) {
+                $rawCol = $cat['sortConfig']['column'] ?? null;
+                if (is_string($rawCol) && $rawCol !== '') {
+                    $sortColumn = $rawCol;
+                }
+                $rawDir = $cat['sortConfig']['direction'] ?? null;
+                if (is_string($rawDir) && strtolower($rawDir) === 'desc') {
+                    $sortDirection = 'desc';
+                }
+            }
+
+            if ($sortColumn !== null) {
+                $sortKey = 'col:' . $sortColumn;
+                usort($rows, function ($a, $b) use ($sortKey) {
+                    $av = $a['values'][$sortKey] ?? '';
+                    $bv = $b['values'][$sortKey] ?? '';
+                    return strnatcmp((string)$av, (string)$bv);
+                });
+            } else {
+                usort($rows, fn($a, $b) => strnatcmp($a['key'], $b['key']));
+            }
+
+            if ($sortDirection === 'desc') {
+                $rows = array_reverse($rows);
+            }
+
+            $result[] = [
+                'categoryName' => $cat['categoryName'],
+                'keyLabel' => $cat['keyLabel'],
+                'columns' => $columns,
+                'rows' => $rows,
+            ];
         }
 
         return $this->json($result);

@@ -100,7 +100,7 @@ interface ComplianceData {
 interface InventoryCatData {
   categoryName: string;
   keyLabel: string | null;
-  columns: { colKey: string; label: string }[];
+  columns: { colKey: string; label: string; visible?: boolean }[];
   rows: { key: string; values: Record<string, string> }[];
 }
 
@@ -1234,12 +1234,13 @@ export default function NodeDetailPage() {
                 {(() => {
                   const cat = inventoryData[selectedInventoryCat] ?? inventoryData[0];
                   if (!cat) return null;
+                  const visibleColumns = cat.columns.filter((c) => c.visible !== false);
                   return (
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
                           <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">{cat.keyLabel || t("nodes.inventoryKey")}</th>
-                          {cat.columns.map((col) => (
+                          {visibleColumns.map((col) => (
                             <th key={col.colKey} className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider whitespace-nowrap">{col.label}</th>
                           ))}
                         </tr>
@@ -1250,7 +1251,7 @@ export default function NodeDetailPage() {
                             <td className="px-4 py-2.5 font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">
                               <code className="text-xs bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">{row.key}</code>
                             </td>
-                            {cat.columns.map((col) => (
+                            {visibleColumns.map((col) => (
                               <td key={col.colKey} className="px-4 py-2.5 text-slate-600 dark:text-slate-400">
                                 {row.values[col.colKey] ? (
                                   <code className="text-xs font-mono">{row.values[col.colKey]}</code>

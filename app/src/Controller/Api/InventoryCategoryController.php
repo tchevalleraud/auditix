@@ -130,6 +130,123 @@ class InventoryCategoryController extends AbstractController
         return $this->json(array_map(fn($r) => $r['colLabel'], $rows));
     }
 
+    #[Route('/{id}/column-config', methods: ['GET'])]
+    public function getColumnConfig(InventoryCategory $cat, EntityManagerInterface $em): JsonResponse
+    {
+        $discovered = $this->fetchDiscoveredColumns($cat, $em);
+        return $this->json([
+            'columns' => $this->mergeColumnConfig($cat->getColumnConfig(), $discovered),
+            'sort' => $this->normalizeSortConfig($cat->getSortConfig()),
+        ]);
+    }
+
+    #[Route('/{id}/column-config', methods: ['PUT'])]
+    public function updateColumnConfig(InventoryCategory $cat, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $columns = $data['columns'] ?? null;
+        if (!is_array($columns)) {
+            return $this->json(['error' => 'columns must be an array'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $config = [];
+        $seen = [];
+        foreach ($columns as $col) {
+            $label = is_array($col) ? ($col['label'] ?? null) : null;
+            if (!is_string($label) || $label === '' || isset($seen[$label])) {
+                continue;
+            }
+            $seen[$label] = true;
+            $config[] = [
+                'label' => $label,
+                'visible' => !isset($col['visible']) || (bool)$col['visible'],
+            ];
+        }
+
+        $cat->setColumnConfig($config);
+
+        if (array_key_exists('sort', $data)) {
+            $cat->setSortConfig($this->normalizeSortConfig($data['sort']));
+        }
+
+        $em->flush();
+
+        $discovered = $this->fetchDiscoveredColumns($cat, $em);
+        return $this->json([
+            'columns' => $this->mergeColumnConfig($cat->getColumnConfig(), $discovered),
+            'sort' => $this->normalizeSortConfig($cat->getSortConfig()),
+        ]);
+    }
+
+    /**
+     * @return array{column: string|null, direction: 'asc'|'desc'}
+     */
+    private function normalizeSortConfig(mixed $raw): array
+    {
+        $column = null;
+        $direction = 'asc';
+
+        if (is_array($raw)) {
+            $col = $raw['column'] ?? null;
+            if (is_string($col) && $col !== '') {
+                $column = $col;
+            }
+            $dir = $raw['direction'] ?? null;
+            if (is_string($dir) && strtolower($dir) === 'desc') {
+                $direction = 'desc';
+            }
+        }
+
+        return ['column' => $column, 'direction' => $direction];
+    }
+
+    /** @return string[] */
+    private function fetchDiscoveredColumns(InventoryCategory $cat, EntityManagerInterface $em): array
+    {
+        $rows = $em->createQueryBuilder()
+            ->select('DISTINCT e.colLabel')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->where('e.category = :cat')
+            ->setParameter('cat', $cat)
+            ->orderBy('e.colLabel', 'ASC')
+            ->getQuery()
+            ->getArrayResult();
+
+        return array_map(fn($r) => $r['colLabel'], $rows);
+    }
+
+    /**
+     * @param array<int, array{label: string, visible: bool}>|null $config
+     * @param string[] $discovered
+     * @return array<int, array{label: string, visible: bool}>
+     */
+    private function mergeColumnConfig(?array $config, array $discovered): array
+    {
+        $known = [];
+        $result = [];
+        foreach (($config ?? []) as $item) {
+            $label = $item['label'] ?? null;
+            if (!is_string($label) || $label === '' || isset($known[$label])) {
+                continue;
+            }
+            $known[$label] = true;
+            $result[] = [
+                'label' => $label,
+                'visible' => !isset($item['visible']) || (bool)$item['visible'],
+            ];
+        }
+
+        foreach ($discovered as $label) {
+            if (isset($known[$label])) {
+                continue;
+            }
+            $known[$label] = true;
+            $result[] = ['label' => $label, 'visible' => true];
+        }
+
+        return $result;
+    }
+
     #[Route('/structure', methods: ['GET'], priority: 10)]
     public function structure(Request $request, EntityManagerInterface $em): JsonResponse
     {

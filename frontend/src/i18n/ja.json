@@ -930,7 +930,18 @@
     "keyLabelPlaceholder": "例: interface_name",
     "keyLabelHint": "インベントリテーブルのキー列に表示される任意のラベル",
     "confirmDelete": "カテゴリ「{name}」を削除しますか？",
-    "deleteUsageWarning": "{count} 件のインベントリエントリがこのカテゴリを参照しています。削除されずに切り離されます。"
+    "deleteUsageWarning": "{count} 件のインベントリエントリがこのカテゴリを参照しています。削除されずに切り離されます。",
+    "manageColumns": "列",
+    "columnsTitle": "「{name}」の列",
+    "columnsHint": "ノードのインベントリで表示される列を並べ替えたり非表示にしたりします。",
+    "columnsEmpty": "このカテゴリの列は検出されませんでした。",
+    "columnVisible": "表示",
+    "columnHidden": "非表示",
+    "columnsSaved": "列を保存しました",
+    "sortBy": "並び替え",
+    "sortByKey": "キー（デフォルト）",
+    "sortAsc": "昇順",
+    "sortDesc": "降順"
   },
   "compliance_rules": {
     "title": "コンプライアンスルール",

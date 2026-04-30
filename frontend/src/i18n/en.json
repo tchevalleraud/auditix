@@ -1274,7 +1274,18 @@
     "keyLabelPlaceholder": "e.g. interface_name",
     "keyLabelHint": "Optional label for the key column shown in inventory tables",
     "confirmDelete": "Delete category \"{name}\"?",
-    "deleteUsageWarning": "{count} inventory entries reference this category. They will be detached but not deleted."
+    "deleteUsageWarning": "{count} inventory entries reference this category. They will be detached but not deleted.",
+    "manageColumns": "Columns",
+    "columnsTitle": "Columns of \"{name}\"",
+    "columnsHint": "Reorder and hide columns displayed in the node inventory.",
+    "columnsEmpty": "No columns detected for this category.",
+    "columnVisible": "Visible",
+    "columnHidden": "Hidden",
+    "columnsSaved": "Columns saved",
+    "sortBy": "Sort by",
+    "sortByKey": "Key (default)",
+    "sortAsc": "Ascending",
+    "sortDesc": "Descending"
   },
   "compliance_rules": {
     "title": "Compliance rules",

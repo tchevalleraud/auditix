@@ -11,6 +11,10 @@ import {
   Pencil,
   Trash2,
   X,
+  Columns3,
+  Eye,
+  EyeOff,
+  GripVertical,
 } from "lucide-react";
 
 interface InventoryCategoryItem {
@@ -19,6 +23,16 @@ interface InventoryCategoryItem {
   keyLabel: string | null;
   createdAt: string | null;
   usageCount: number;
+}
+
+interface ColumnConfigItem {
+  label: string;
+  visible: boolean;
+}
+
+interface SortConfig {
+  column: string | null;
+  direction: "asc" | "desc";
 }
 
 export default function InventoryCategoriesPage() {
@@ -34,6 +48,13 @@ export default function InventoryCategoriesPage() {
   const [keyLabel, setKeyLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<InventoryCategoryItem | null>(null);
+
+  const [columnsModal, setColumnsModal] = useState<InventoryCategoryItem | null>(null);
+  const [columnsConfig, setColumnsConfig] = useState<ColumnConfigItem[]>([]);
+  const [sortConfig, setSortConfig] = useState<SortConfig>({ column: null, direction: "asc" });
+  const [columnsLoading, setColumnsLoading] = useState(false);
+  const [columnsSaving, setColumnsSaving] = useState(false);
+  const [columnsDragIdx, setColumnsDragIdx] = useState<number | null>(null);
 
   const dateLocale = locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
 
@@ -95,6 +116,61 @@ export default function InventoryCategoriesPage() {
     await fetch(`/api/inventory-categories/${cat.id}`, { method: "DELETE" });
     setDeleteConfirm(null);
     load();
+  };
+
+  const openColumns = async (cat: InventoryCategoryItem) => {
+    setColumnsModal(cat);
+    setColumnsConfig([]);
+    setSortConfig({ column: null, direction: "asc" });
+    setColumnsLoading(true);
+    try {
+      const res = await fetch(`/api/inventory-categories/${cat.id}/column-config`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.columns)) {
+          setColumnsConfig(data.columns as ColumnConfigItem[]);
+        }
+        if (data && data.sort) {
+          setSortConfig({
+            column: typeof data.sort.column === "string" && data.sort.column ? data.sort.column : null,
+            direction: data.sort.direction === "desc" ? "desc" : "asc",
+          });
+        }
+      }
+    } finally {
+      setColumnsLoading(false);
+    }
+  };
+
+  const moveColumn = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= columnsConfig.length) return;
+    setColumnsConfig((prev) => {
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  };
+
+  const toggleColumnVisible = (idx: number) => {
+    setColumnsConfig((prev) =>
+      prev.map((c, i) => (i === idx ? { ...c, visible: !c.visible } : c))
+    );
+  };
+
+  const handleSaveColumns = async () => {
+    if (!columnsModal) return;
+    setColumnsSaving(true);
+    try {
+      await fetch(`/api/inventory-categories/${columnsModal.id}/column-config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: columnsConfig, sort: sortConfig }),
+      });
+      setColumnsModal(null);
+    } finally {
+      setColumnsSaving(false);
+    }
   };
 
   const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
@@ -198,6 +274,13 @@ export default function InventoryCategoriesPage() {
                     <td className="px-5 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
+                          onClick={() => openColumns(cat)}
+                          title={t("inventory_categories.manageColumns")}
+                          className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                          <Columns3 className="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+                        </button>
+                        <button
                           onClick={() => openEdit(cat)}
                           className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
@@ -267,6 +350,115 @@ export default function InventoryCategoriesPage() {
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {editing ? t("common.save") : t("common.create")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {columnsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg flex flex-col max-h-[80vh]">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                {t("inventory_categories.columnsTitle", { name: columnsModal.name })}
+              </h3>
+              <button onClick={() => setColumnsModal(null)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                <X className="h-5 w-5 text-slate-400" />
+              </button>
+            </div>
+            <div className="px-6 py-4 flex-1 overflow-y-auto">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">{t("inventory_categories.columnsHint")}</p>
+
+              <div className="mb-4 grid grid-cols-[1fr_auto] gap-2">
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("inventory_categories.sortBy")}</label>
+                  <select
+                    value={sortConfig.column ?? ""}
+                    onChange={(e) => setSortConfig((s) => ({ ...s, column: e.target.value || null }))}
+                    className={inputClass}
+                  >
+                    <option value="">{t("inventory_categories.sortByKey")}</option>
+                    {columnsConfig.map((c) => (
+                      <option key={c.label} value={c.label}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-500 dark:text-slate-400 invisible">.</label>
+                  <div className="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setSortConfig((s) => ({ ...s, direction: "asc" }))}
+                      className={`px-3 py-2.5 text-xs font-medium transition-colors ${sortConfig.direction === "asc" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"}`}
+                    >
+                      {t("inventory_categories.sortAsc")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSortConfig((s) => ({ ...s, direction: "desc" }))}
+                      className={`px-3 py-2.5 text-xs font-medium transition-colors ${sortConfig.direction === "desc" ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900" : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"}`}
+                    >
+                      {t("inventory_categories.sortDesc")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {columnsLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+                </div>
+              ) : columnsConfig.length === 0 ? (
+                <p className="text-sm text-slate-400 dark:text-slate-500 text-center py-12">
+                  {t("inventory_categories.columnsEmpty")}
+                </p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {columnsConfig.map((col, idx) => (
+                    <li
+                      key={col.label}
+                      draggable
+                      onDragStart={() => setColumnsDragIdx(idx)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (columnsDragIdx !== null) moveColumn(columnsDragIdx, idx);
+                        setColumnsDragIdx(null);
+                      }}
+                      onDragEnd={() => setColumnsDragIdx(null)}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 ${columnsDragIdx === idx ? "opacity-40" : ""}`}
+                    >
+                      <GripVertical className="h-4 w-4 text-slate-300 dark:text-slate-600 cursor-grab shrink-0" />
+                      <span className={`flex-1 truncate text-sm font-mono ${col.visible ? "text-slate-700 dark:text-slate-200" : "text-slate-400 dark:text-slate-500 line-through"}`}>
+                        {col.label}
+                      </span>
+                      <button
+                        onClick={() => toggleColumnVisible(idx)}
+                        title={col.visible ? t("inventory_categories.columnVisible") : t("inventory_categories.columnHidden")}
+                        className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors shrink-0"
+                      >
+                        {col.visible ? (
+                          <Eye className="h-4 w-4 text-slate-600 dark:text-slate-300" />
+                        ) : (
+                          <EyeOff className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+              <button onClick={() => setColumnsModal(null)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={handleSaveColumns}
+                disabled={columnsSaving || columnsLoading}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {columnsSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {t("common.save")}
               </button>
             </div>
           </div>

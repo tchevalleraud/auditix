@@ -930,7 +930,18 @@
     "keyLabelPlaceholder": "z.B. interface_name",
     "keyLabelHint": "Optionale Bezeichnung fur die Schlusselspalte in den Inventartabellen",
     "confirmDelete": "Kategorie \"{name}\" loschen?",
-    "deleteUsageWarning": "{count} Inventareintrage referenzieren diese Kategorie. Sie werden getrennt, aber nicht geloscht."
+    "deleteUsageWarning": "{count} Inventareintrage referenzieren diese Kategorie. Sie werden getrennt, aber nicht geloscht.",
+    "manageColumns": "Spalten",
+    "columnsTitle": "Spalten von \"{name}\"",
+    "columnsHint": "Spalten im Node-Inventar neu anordnen oder ausblenden.",
+    "columnsEmpty": "Keine Spalten fur diese Kategorie erkannt.",
+    "columnVisible": "Sichtbar",
+    "columnHidden": "Ausgeblendet",
+    "columnsSaved": "Spalten gespeichert",
+    "sortBy": "Sortieren nach",
+    "sortByKey": "Schlussel (Standard)",
+    "sortAsc": "Aufsteigend",
+    "sortDesc": "Absteigend"
   },
   "compliance_rules": {
     "title": "Konformitatsregeln",

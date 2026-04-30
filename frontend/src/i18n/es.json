@@ -930,7 +930,18 @@
     "keyLabelPlaceholder": "ej. nombre_interfaz",
     "keyLabelHint": "Etiqueta opcional para la columna de clave en las tablas de inventario",
     "confirmDelete": "Eliminar la categoria \"{name}\"?",
-    "deleteUsageWarning": "{count} entradas de inventario hacen referencia a esta categoria. Seran desvinculadas pero no eliminadas."
+    "deleteUsageWarning": "{count} entradas de inventario hacen referencia a esta categoria. Seran desvinculadas pero no eliminadas.",
+    "manageColumns": "Columnas",
+    "columnsTitle": "Columnas de \"{name}\"",
+    "columnsHint": "Reordene u oculte las columnas mostradas en el inventario del nodo.",
+    "columnsEmpty": "No se han detectado columnas para esta categoria.",
+    "columnVisible": "Visible",
+    "columnHidden": "Oculta",
+    "columnsSaved": "Columnas guardadas",
+    "sortBy": "Ordenar por",
+    "sortByKey": "Clave (predeterminado)",
+    "sortAsc": "Ascendente",
+    "sortDesc": "Descendente"
   },
   "compliance_rules": {
     "title": "Reglas de conformidad",
