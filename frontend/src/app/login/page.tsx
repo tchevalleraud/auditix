@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Loader2, KeyRound } from "lucide-react";
+import { ShieldCheck, Loader2, KeyRound, ServerCog } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
+import { useBackendReady } from "@/hooks/useBackendReady";
 
 type Step = "credentials" | "totp";
 
@@ -18,6 +19,10 @@ export default function LoginPage() {
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const backend = useBackendReady();
+  const backendReady = backend.status === "ready";
+  const backendBlocked = backend.status === "not_ready" || backend.status === "checking";
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,7 +142,8 @@ export default function LoginPage() {
                 onChange={(e) => setUsername(e.target.value)}
                 required
                 autoFocus
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                disabled={backendBlocked}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder={t("auth.usernamePlaceholder")}
               />
             </div>
@@ -155,19 +161,30 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                disabled={backendBlocked}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 placeholder={t("auth.passwordPlaceholder")}
               />
             </div>
 
             <button
               type="submit"
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/20 disabled:opacity-50 transition-colors"
+              disabled={loading || backendBlocked}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading && <Loader2 className="h-4 w-4 animate-spin" />}
               {t("auth.login")}
             </button>
+
+            {backendBlocked && (
+              <div className="flex items-start gap-2 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+                <ServerCog className="h-4 w-4 shrink-0 mt-0.5 animate-pulse" />
+                <div className="flex-1">
+                  <p className="font-medium">{t("auth.backendStartingTitle")}</p>
+                  <p className="text-amber-700 dark:text-amber-400/80 mt-0.5">{t("auth.backendStartingDesc")}</p>
+                </div>
+              </div>
+            )}
           </form>
         )}
 

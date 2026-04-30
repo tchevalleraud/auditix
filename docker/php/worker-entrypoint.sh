@@ -17,5 +17,5 @@ until php -r "
     sleep 3
 done
 
-echo ">> Application ready, starting worker."
-exec "$@"
+echo ">> Application ready, starting worker as www-data."
+exec gosu www-data "$@"

@@ -34,7 +34,9 @@
     "totpCancel": "Retour",
     "totpUseBackup": "Utiliser un code de secours",
     "totpUseApp": "Utiliser l'application",
-    "invalidTotpCode": "Code invalide ou expire"
+    "invalidTotpCode": "Code invalide ou expire",
+    "backendStartingTitle": "Backend en cours de demarrage",
+    "backendStartingDesc": "L'application sera disponible dans quelques instants. La connexion est temporairement desactivee."
   },
   "sidebar": {
     "administration": "Administration",

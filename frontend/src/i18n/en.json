@@ -34,7 +34,9 @@
     "totpCancel": "Back",
     "totpUseBackup": "Use a backup code",
     "totpUseApp": "Use the app",
-    "invalidTotpCode": "Invalid or expired code"
+    "invalidTotpCode": "Invalid or expired code",
+    "backendStartingTitle": "Backend is starting up",
+    "backendStartingDesc": "The application will be available shortly. Sign-in is temporarily disabled."
   },
   "sidebar": {
     "administration": "Administration",
