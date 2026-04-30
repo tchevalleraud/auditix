@@ -54,6 +54,9 @@ class CollectionRule
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $translations = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $conditionTree = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -89,5 +92,7 @@ class CollectionRule
     public function removeExtract(CollectionRuleExtract $e): static { $this->extracts->removeElement($e); return $this; }
     public function getTranslations(): ?array { return $this->translations; }
     public function setTranslations(?array $v): static { $this->translations = $v; return $this; }
+    public function getConditionTree(): ?array { return $this->conditionTree; }
+    public function setConditionTree(?array $v): static { $this->conditionTree = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

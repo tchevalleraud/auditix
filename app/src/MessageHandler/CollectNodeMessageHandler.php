@@ -10,7 +10,10 @@ use App\Entity\CollectionRuleExtract;
 use App\Entity\CollectionRuleFolder;
 use App\Entity\InventoryCategory;
 use App\Entity\Node;
+use App\Entity\NodeDynamicTag;
 use App\Entity\NodeInventoryEntry;
+use App\Entity\NodeTag;
+use App\Service\ConditionTreeEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -32,6 +35,7 @@ class CollectNodeMessageHandler
         private readonly HubInterface $hub,
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
+        private readonly ConditionTreeEvaluator $conditionTree,
     ) {}
 
     public function __invoke(CollectNodeMessage $message): void
@@ -367,6 +371,16 @@ class CollectNodeMessageHandler
             ->getQuery()
             ->execute();
 
+        // Purge dynamic tag assignments — they will be recomputed by
+        // collection rules' condition trees below. Manual tag assignments
+        // (node_node_tag) are preserved untouched.
+        $this->em->createQueryBuilder()
+            ->delete(NodeDynamicTag::class, 'd')
+            ->where('d.node = :node')
+            ->setParameter('node', $node)
+            ->getQuery()
+            ->execute();
+
         // Reset dedup index for this node
         $this->entryIndex = [];
 
@@ -407,7 +421,74 @@ class CollectNodeMessageHandler
             };
         }
 
+        // Flush extracts so condition tree inventory lookups read fresh data.
         $this->em->flush();
+
+        $this->applyConditionTrees($rules, $node, $collection);
+
+        $this->em->flush();
+    }
+
+    /**
+     * Phase 2: evaluate each rule's conditionTree and apply results
+     * (set_tag → NodeDynamicTag, set_inventory → NodeInventoryEntry).
+     * Tags are deduplicated against manual tags + already-applied dynamic tags.
+     */
+    private function applyConditionTrees(array $rules, Node $node, Collection $collection): void
+    {
+        $manualTagIds = [];
+        foreach ($node->getTags() as $t) {
+            $manualTagIds[$t->getId()] = true;
+        }
+        $appliedDynamicTagIds = [];
+
+        foreach ($rules as $rule) {
+            /** @var CollectionRule $rule */
+            $tree = $rule->getConditionTree();
+            if (!$tree || empty($tree['blocks'] ?? [])) {
+                continue;
+            }
+
+            $result = $this->conditionTree->evaluateBlocks($tree['blocks'], [], $node);
+            if (!is_array($result)) {
+                continue;
+            }
+
+            // Result may be a single action (legacy) or a list of actions.
+            $actions = isset($result['type']) ? [$result] : $result;
+            foreach ($actions as $action) {
+                if (!is_array($action)) continue;
+                $type = $action['type'] ?? null;
+                if ($type === 'set_tag') {
+                    $tagId = isset($action['tagId']) ? (int) $action['tagId'] : 0;
+                    if (!$tagId) continue;
+                    if (isset($manualTagIds[$tagId]) || isset($appliedDynamicTagIds[$tagId])) {
+                        continue;
+                    }
+                    $tag = $this->em->getRepository(NodeTag::class)->find($tagId);
+                    if (!$tag || $tag->getContext()?->getId() !== $node->getContext()?->getId()) {
+                        continue;
+                    }
+                    $assignment = new NodeDynamicTag();
+                    $assignment->setNode($node);
+                    $assignment->setTag($tag);
+                    $assignment->setRule($rule);
+                    $this->em->persist($assignment);
+                    $appliedDynamicTagIds[$tagId] = true;
+                } elseif ($type === 'set_inventory') {
+                    $catId = isset($action['categoryId']) ? (int) $action['categoryId'] : 0;
+                    $key = isset($action['key']) ? trim((string) $action['key']) : '';
+                    $col = isset($action['column']) && $action['column'] !== '' ? (string) $action['column'] : 'Value#1';
+                    $value = (string) ($action['value'] ?? '');
+                    if (!$catId || $key === '') continue;
+                    $category = $this->em->getRepository(InventoryCategory::class)->find($catId);
+                    if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) {
+                        continue;
+                    }
+                    $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $collection);
+                }
+            }
+        }
     }
 
     private function getRuleOutput(CollectionRule $rule, string $baseDir, Collection $collection, Node $node): ?string
