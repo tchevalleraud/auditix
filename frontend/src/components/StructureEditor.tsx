@@ -103,12 +103,27 @@ export interface TableBlock {
   columnVAligns?: ("top" | "middle" | "bottom")[];
 }
 
+export type InventoryCountOperator = "eq" | "neq" | "contains" | "not_contains";
+
 export interface InventoryTableColumn {
   id: string;
   category: string;
   entryKey: string;
   colLabel: string;
   label?: string;
+  headerLabel?: string;
+  align?: "left" | "center" | "right";
+  valign?: "top" | "middle" | "bottom";
+  aggregation?: "value" | "count";
+  matchValue?: string;
+  matchOperator?: InventoryCountOperator;
+}
+
+export interface InventoryCountColumn {
+  id: string;
+  colLabel: string;
+  matchValue: string;
+  matchOperator?: InventoryCountOperator;
   headerLabel?: string;
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
@@ -164,6 +179,8 @@ export interface InventoryTableBlock {
   nodeRulesMatch?: "all" | "any";
   singleNodeId?: number | null;
   singleCategory?: string | null;
+  countMode?: boolean;
+  countColumns?: InventoryCountColumn[];
   showHeader: boolean;
   hostnameHeaderLabel?: string;
   hostnameAlign?: "left" | "center" | "right";
@@ -2251,6 +2268,10 @@ function InventoryTableProperties({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerCat, setPickerCat] = useState<string | null>(null);
   const [pickerKey, setPickerKey] = useState<string | null>(null);
+  const [pickerMode, setPickerMode] = useState<"value" | "count">("value");
+  const [pickerCountCol, setPickerCountCol] = useState<string | null>(null);
+  const [pickerMatchValue, setPickerMatchValue] = useState("");
+  const [pickerMatchOp, setPickerMatchOp] = useState<InventoryCountOperator>("eq");
 
   // Load inventory structure
   useEffect(() => {
@@ -2316,6 +2337,15 @@ function InventoryTableProperties({
     updateBlock(block.id, { nodeIds: block.nodeIds.filter((n) => n !== id) });
   };
 
+  const resetPicker = () => {
+    setPickerOpen(false);
+    setPickerCat(null);
+    setPickerKey(null);
+    setPickerCountCol(null);
+    setPickerMatchValue("");
+    setPickerMatchOp("eq");
+  };
+
   const addColumn = (category: string, entryKey: string, colLabel: string) => {
     const col: InventoryTableColumn = {
       id: uid(),
@@ -2323,11 +2353,25 @@ function InventoryTableProperties({
       entryKey,
       colLabel,
       label: `${category} > ${entryKey} > ${colLabel}`,
+      aggregation: "value",
     };
     updateBlock(block.id, { columns: [...block.columns, col] });
-    setPickerOpen(false);
-    setPickerCat(null);
-    setPickerKey(null);
+    resetPicker();
+  };
+
+  const addCountColumn = (category: string, colLabel: string, matchValue: string, matchOperator: InventoryCountOperator) => {
+    const col: InventoryTableColumn = {
+      id: uid(),
+      category,
+      entryKey: "",
+      colLabel,
+      label: `${category} > ${colLabel} = ${matchValue}`,
+      aggregation: "count",
+      matchValue,
+      matchOperator,
+    };
+    updateBlock(block.id, { columns: [...block.columns, col] });
+    resetPicker();
   };
 
   const removeColumn = (colId: string) => {
@@ -2359,6 +2403,43 @@ function InventoryTableProperties({
     [cols[idx], cols[target]] = [cols[target], cols[idx]];
     updateBlock(block.id, { columns: cols });
   };
+
+  // --- Single-node count columns helpers ---
+  const countColumns = block.countColumns ?? [];
+  const addCountSingle = (colLabel: string) => {
+    const c: InventoryCountColumn = {
+      id: uid(),
+      colLabel,
+      matchValue: "",
+      matchOperator: "eq",
+    };
+    updateBlock(block.id, { countColumns: [...countColumns, c] });
+  };
+  const updateCountSingle = (cid: string, patch: Partial<InventoryCountColumn>) => {
+    updateBlock(block.id, {
+      countColumns: countColumns.map((c) => (c.id === cid ? { ...c, ...patch } : c)),
+    });
+  };
+  const removeCountSingle = (cid: string) => {
+    updateBlock(block.id, { countColumns: countColumns.filter((c) => c.id !== cid) });
+  };
+  const moveCountSingle = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= countColumns.length) return;
+    const arr = [...countColumns];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    updateBlock(block.id, { countColumns: arr });
+  };
+
+  // Available colLabels for the selected single category
+  const singleCategoryColLabels = (() => {
+    if (!block.singleCategory) return [];
+    const cat = structure.find((c) => c.categoryName === block.singleCategory);
+    if (!cat) return [];
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+    return Array.from(labels);
+  })();
 
   const tabBtnClass = (active: boolean) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -2583,12 +2664,26 @@ function InventoryTableProperties({
           </div>
 
           {/* Defined columns */}
-          {block.columns.map((col, idx) => (
+          {block.columns.map((col, idx) => {
+            const isCount = col.aggregation === "count";
+            const colTitle = isCount
+              ? `${col.category} > ${col.colLabel} (count)`
+              : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
+            return (
             <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-slate-400 uppercase tracking-wide">{idx + 2}</span>
-                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={`${col.category} > ${col.entryKey} > ${col.colLabel}`}>
-                  {col.category} &gt; {col.entryKey} &gt; {col.colLabel}
+                {isCount && (
+                  <span className="text-[9px] font-bold text-violet-600 dark:text-violet-400 bg-violet-100 dark:bg-violet-500/20 rounded px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                    {t("structure.invCountBadge")}
+                  </span>
+                )}
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={colTitle}>
+                  {isCount ? (
+                    <>{col.category} &gt; {col.colLabel}</>
+                  ) : (
+                    <>{col.category} &gt; {col.entryKey} &gt; {col.colLabel}</>
+                  )}
                 </span>
                 <div className="flex items-center gap-0.5">
                   <button onClick={() => moveColumn(idx, -1)} disabled={idx === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
@@ -2602,12 +2697,34 @@ function InventoryTableProperties({
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
+              {isCount && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0">{t("structure.invCountWhere")}</span>
+                  <select
+                    value={col.matchOperator ?? "eq"}
+                    onChange={(e) => updateColumnProp(col.id, { matchOperator: e.target.value as InventoryCountOperator })}
+                    className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                  >
+                    <option value="eq">=</option>
+                    <option value="neq">!=</option>
+                    <option value="contains">{t("structure.ruleContains")}</option>
+                    <option value="not_contains">{t("structure.ruleNotContains")}</option>
+                  </select>
+                  <input
+                    type="text"
+                    value={col.matchValue ?? ""}
+                    onChange={(e) => updateColumnProp(col.id, { matchValue: e.target.value })}
+                    placeholder={t("structure.invCountMatchValue")}
+                    className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
                 <input
                   type="text"
                   value={col.headerLabel ?? ""}
                   onChange={(e) => updateColumnHeaderLabel(col.id, e.target.value)}
-                  placeholder={col.label || `${col.category} > ${col.entryKey} > ${col.colLabel}`}
+                  placeholder={col.label || colTitle}
                   className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   title={t("structure.inventoryHeaderLabel")}
                 />
@@ -2624,7 +2741,8 @@ function InventoryTableProperties({
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
 
           {/* Add column button / picker */}
           {!pickerOpen ? (
@@ -2642,26 +2760,64 @@ function InventoryTableProperties({
                 <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
                   {!pickerCat
                     ? t("structure.inventoryPickCategory")
-                    : !pickerKey
-                      ? t("structure.inventoryPickKey")
-                      : t("structure.inventoryPickValue")}
+                    : pickerMode === "count"
+                      ? (!pickerCountCol ? t("structure.invCountPickColumn") : t("structure.invCountConfigure"))
+                      : !pickerKey
+                        ? t("structure.inventoryPickKey")
+                        : t("structure.inventoryPickValue")}
                 </span>
                 <button
-                  onClick={() => { setPickerOpen(false); setPickerCat(null); setPickerKey(null); }}
+                  onClick={resetPicker}
                   className="p-0.5 text-slate-400 hover:text-slate-600"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
               </div>
 
+              {/* Mode toggle */}
+              <div className="flex items-center gap-1 rounded-md bg-white dark:bg-slate-800 p-0.5 border border-violet-200 dark:border-violet-700">
+                <button
+                  type="button"
+                  onClick={() => { setPickerMode("value"); setPickerKey(null); setPickerCountCol(null); }}
+                  className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                    pickerMode === "value"
+                      ? "bg-violet-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t("structure.invModeValue")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setPickerMode("count"); setPickerKey(null); setPickerCountCol(null); }}
+                  className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                    pickerMode === "count"
+                      ? "bg-violet-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t("structure.invModeCount")}
+                </button>
+              </div>
+
               {/* Breadcrumb */}
               {pickerCat && (
                 <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                  <button onClick={() => { setPickerCat(null); setPickerKey(null); }} className="hover:text-violet-600 underline">
+                  <button onClick={() => { setPickerCat(null); setPickerKey(null); setPickerCountCol(null); }} className="hover:text-violet-600 underline">
                     {t("structure.inventoryCategories")}
                   </button>
                   <ChevronRight className="h-3 w-3" />
-                  {pickerKey ? (
+                  {pickerMode === "count" ? (
+                    pickerCountCol ? (
+                      <>
+                        <button onClick={() => setPickerCountCol(null)} className="hover:text-violet-600 underline">{pickerCat}</button>
+                        <ChevronRight className="h-3 w-3" />
+                        <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerCountCol}</span>
+                      </>
+                    ) : (
+                      <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerCat}</span>
+                    )
+                  ) : pickerKey ? (
                     <>
                       <button onClick={() => setPickerKey(null)} className="hover:text-violet-600 underline">{pickerCat}</button>
                       <ChevronRight className="h-3 w-3" />
@@ -2692,8 +2848,69 @@ function InventoryTableProperties({
                 </div>
               )}
 
-              {/* Level 2: Entry keys */}
-              {pickerCat && !pickerKey && pickerCatData && (
+              {/* COUNT MODE — Level 2: pick colLabel (aggregated across entries) */}
+              {pickerMode === "count" && pickerCat && !pickerCountCol && pickerCatData && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {(() => {
+                    const labels = new Set<string>();
+                    pickerCatData.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+                    const arr = Array.from(labels);
+                    if (arr.length === 0) {
+                      return <p className="text-xs text-slate-400 italic py-2">{t("structure.inventoryNoData")}</p>;
+                    }
+                    return arr.map((cl) => (
+                      <button
+                        key={cl}
+                        onClick={() => setPickerCountCol(cl)}
+                        className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30 transition-colors"
+                      >
+                        {cl}
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    ));
+                  })()}
+                </div>
+              )}
+
+              {/* COUNT MODE — Level 3: configure matchValue + operator */}
+              {pickerMode === "count" && pickerCat && pickerCountCol && (
+                <div className="space-y-2 rounded-md bg-white dark:bg-slate-800 p-2 border border-slate-200 dark:border-slate-700">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invCountHint")}</p>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">{pickerCountCol}</span>
+                    <select
+                      value={pickerMatchOp}
+                      onChange={(e) => setPickerMatchOp(e.target.value as InventoryCountOperator)}
+                      className="shrink-0 bg-slate-50 dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="eq">=</option>
+                      <option value="neq">!=</option>
+                      <option value="contains">{t("structure.ruleContains")}</option>
+                      <option value="not_contains">{t("structure.ruleNotContains")}</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={pickerMatchValue}
+                      onChange={(e) => setPickerMatchValue(e.target.value)}
+                      placeholder={t("structure.invCountMatchValue")}
+                      autoFocus
+                      className="flex-1 bg-slate-50 dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={pickerMatchValue.length === 0}
+                    onClick={() => addCountColumn(pickerCat, pickerCountCol, pickerMatchValue, pickerMatchOp)}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-violet-500 text-white px-3 py-1.5 text-xs font-medium hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("structure.invCountAdd")}
+                  </button>
+                </div>
+              )}
+
+              {/* VALUE MODE — Level 2: Entry keys */}
+              {pickerMode === "value" && pickerCat && !pickerKey && pickerCatData && (
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {pickerCatData.entries.map((entry) => (
                     <button
@@ -2708,8 +2925,8 @@ function InventoryTableProperties({
                 </div>
               )}
 
-              {/* Level 3: Column labels (values) */}
-              {pickerCat && pickerKey && pickerKeyData && (
+              {/* VALUE MODE — Level 3: Column labels (values) */}
+              {pickerMode === "value" && pickerCat && pickerKey && pickerKeyData && (
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {pickerKeyData.columns.map((col) => (
                     <button
@@ -2772,6 +2989,93 @@ function InventoryTableProperties({
             </select>
             {structure.length === 0 && structureLoaded && (
               <p className="text-[10px] text-slate-400 italic">{t("structure.inventoryNoData")}</p>
+            )}
+          </div>
+
+          {/* Count mode toggle */}
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!block.countMode}
+                onChange={(e) => updateBlock(block.id, { countMode: e.target.checked })}
+                className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-400"
+              />
+              <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.invSingleCountTitle")}</span>
+            </label>
+            <p className="text-[10px] text-slate-400 dark:text-slate-500 pl-6">{t("structure.invSingleCountHint")}</p>
+
+            {block.countMode && (
+              <div className="space-y-2 pt-1">
+                {countColumns.length === 0 && (
+                  <p className="text-[11px] text-slate-400 italic">{t("structure.invSingleCountEmpty")}</p>
+                )}
+                {countColumns.map((cc, idx) => (
+                  <div key={cc.id} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">{idx + 1}</span>
+                      <select
+                        value={cc.colLabel}
+                        onChange={(e) => updateCountSingle(cc.id, { colLabel: e.target.value })}
+                        className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="">{t("structure.invCountPickColumn")}</option>
+                        {singleCategoryColLabels.map((cl) => (
+                          <option key={cl} value={cl}>{cl}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-0.5">
+                        <button onClick={() => moveCountSingle(idx, -1)} disabled={idx === 0} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                          <ChevronUp className="h-3 w-3" />
+                        </button>
+                        <button onClick={() => moveCountSingle(idx, 1)} disabled={idx === countColumns.length - 1} className="p-0.5 text-slate-400 hover:text-slate-600 disabled:opacity-30">
+                          <ChevronDown className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <button onClick={() => removeCountSingle(cc.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0">{t("structure.invCountWhere")}</span>
+                      <select
+                        value={cc.matchOperator ?? "eq"}
+                        onChange={(e) => updateCountSingle(cc.id, { matchOperator: e.target.value as InventoryCountOperator })}
+                        className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="eq">=</option>
+                        <option value="neq">!=</option>
+                        <option value="contains">{t("structure.ruleContains")}</option>
+                        <option value="not_contains">{t("structure.ruleNotContains")}</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={cc.matchValue}
+                        onChange={(e) => updateCountSingle(cc.id, { matchValue: e.target.value })}
+                        placeholder={t("structure.invCountMatchValue")}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={cc.headerLabel ?? ""}
+                      onChange={(e) => updateCountSingle(cc.id, { headerLabel: e.target.value })}
+                      placeholder={cc.matchValue || t("structure.inventoryHeaderLabel")}
+                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                      title={t("structure.inventoryHeaderLabel")}
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  disabled={!block.singleCategory}
+                  onClick={() => addCountSingle(singleCategoryColLabels[0] ?? "")}
+                  className="flex items-center gap-1.5 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("structure.invCountAdd")}
+                </button>
+              </div>
             )}
           </div>
 
@@ -3234,6 +3538,38 @@ function InventoryTableProperties({
                 <Table2 className="h-8 w-8" />
                 <p className="text-sm">{t("structure.invSinglePreviewEmpty")}</p>
               </div>
+            ) : block.countMode ? (
+              <>
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-auto">
+                  <table className="w-full border-collapse text-sm" style={block.fontSize ? { fontSize: `${block.fontSize}px` } : undefined}>
+                    {block.showHeader && (
+                      <thead>
+                        <tr className="bg-slate-100 dark:bg-slate-800">
+                          <th className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-left">
+                            {block.hostnameHeaderLabel || "Hostname"}
+                          </th>
+                          {countColumns.map((cc, idx) => (
+                            <th key={cc.id} className={`${idx < countColumns.length - 1 ? "border-r" : ""} border-b border-slate-200 dark:border-slate-700 px-3 py-2 font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap text-left`}>
+                              {cc.headerLabel || cc.matchValue || cc.colLabel || "—"}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                    )}
+                    <tbody>
+                      <tr>
+                        <td className="border-r border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap">
+                          {effectiveNodes[0].hostname || effectiveNodes[0].name || effectiveNodes[0].ipAddress}
+                        </td>
+                        {countColumns.map((cc, idx) => (
+                          <td key={cc.id} className={`${idx < countColumns.length - 1 ? "border-r" : ""} border-b border-slate-200 dark:border-slate-700 px-3 py-2 text-slate-400 italic whitespace-nowrap`}>—</td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[10px] text-slate-400 italic">{t("structure.inventoryPreviewNote")}</p>
+              </>
             ) : (
               <>
                 <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-auto">

@@ -1154,6 +1154,9 @@ class GenerateReportMessageHandler
                     $node = $forNode ?? $this->em->getRepository(Node::class)->find($singleNodeId);
                     if (!$node) continue;
 
+                    $countModeOn = !empty($block['countMode']);
+                    $countCols = $block['countColumns'] ?? [];
+
                     if ($firstBlock) {
                         $pdf->SetMargins($mLeft, $mTop, $mRight);
                         $pdf->SetAutoPageBreak(true, $mBottom);
@@ -1169,6 +1172,124 @@ class GenerateReportMessageHandler
                     $borderColor = $this->hexToRgb($tableStyle['borderColor'] ?? '#e2e8f0');
                     $alternateRows = $tableStyle['alternateRows'] ?? true;
                     $alternateBg = $this->hexToRgb($tableStyle['alternateBg'] ?? '#f8fafc');
+
+                    // Count-mode rendering: one row, one column per countColumn
+                    if ($countModeOn && !empty($countCols)) {
+                        $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
+
+                        $hostname = $node->getHostname() ?? $node->getName() ?? $node->getIpAddress();
+                        $hostnameAlign = strtoupper(substr($block['hostnameAlign'] ?? 'left', 0, 1));
+                        if (!in_array($hostnameAlign, ['L', 'C', 'R'])) $hostnameAlign = 'L';
+                        $hostnameVAlign = strtoupper(substr($block['hostnameVAlign'] ?? 'middle', 0, 1));
+                        if (!in_array($hostnameVAlign, ['T', 'M', 'B'])) $hostnameVAlign = 'M';
+
+                        // Build headers, values, and aligns
+                        $headers = [$hostnameHeaderLabel ?: 'Hostname'];
+                        $values = [$hostname];
+                        $colAligns = [$hostnameAlign];
+                        $colVAligns = [$hostnameVAlign];
+                        foreach ($countCols as $cc) {
+                            $colLabel = (string) ($cc['colLabel'] ?? '');
+                            $matchValue = (string) ($cc['matchValue'] ?? '');
+                            $matchOp = $cc['matchOperator'] ?? 'eq';
+
+                            $hLabel = (string) ($cc['headerLabel'] ?? '');
+                            if ($hLabel === '') $hLabel = $matchValue !== '' ? $matchValue : $colLabel;
+                            $headers[] = $hLabel;
+
+                            $cnt = 0;
+                            if ($colLabel !== '') {
+                                $rows = $invRepo->createQueryBuilder('e')
+                                    ->select('e.value AS val')
+                                    ->where('e.node = :n')
+                                    ->andWhere('e.categoryName = :cat')
+                                    ->andWhere('e.colLabel = :col')
+                                    ->setParameter('n', $node)
+                                    ->setParameter('cat', $singleCategory)
+                                    ->setParameter('col', $colLabel)
+                                    ->getQuery()
+                                    ->getArrayResult();
+                                foreach ($rows as $r) {
+                                    $val = (string) ($r['val'] ?? '');
+                                    if ($this->matchCountValue($val, $matchValue, $matchOp)) {
+                                        $cnt++;
+                                    }
+                                }
+                            }
+                            $values[] = (string) $cnt;
+
+                            $a = strtoupper(substr($cc['align'] ?? 'left', 0, 1));
+                            $colAligns[] = in_array($a, ['L', 'C', 'R']) ? $a : 'L';
+                            $va = strtoupper(substr($cc['valign'] ?? 'middle', 0, 1));
+                            $colVAligns[] = in_array($va, ['T', 'M', 'B']) ? $va : 'M';
+                        }
+
+                        $pageW = $pdf->getPageWidth();
+                        $contentW = $pageW - $mLeft - $mRight;
+                        $minLineH = $invFontSize * 0.3528 + 3;
+                        $cellPadding = 4;
+                        $colCountInv = count($headers);
+                        $maxWidths = array_fill(0, $colCountInv, 0);
+
+                        $pdf->SetFont($bodyFont, 'B', $invFontSize);
+                        foreach ($headers as $hi => $h) {
+                            $maxWidths[$hi] = max($maxWidths[$hi], $pdf->GetStringWidth($h) + $cellPadding);
+                        }
+                        $pdf->SetFont($bodyFont, '', $invFontSize);
+                        foreach ($values as $vi => $v) {
+                            $maxWidths[$vi] = max($maxWidths[$vi], $pdf->GetStringWidth($v) + $cellPadding);
+                        }
+                        $totalNatural = array_sum($maxWidths);
+                        $colWidthsInv = [];
+                        $scale = $totalNatural > 0 ? ($contentW / $totalNatural) : 1;
+                        foreach ($maxWidths as $w) {
+                            $colWidthsInv[] = $w * $scale;
+                        }
+
+                        $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                        $pdf->SetLineWidth(0.2);
+
+                        if ($showHeader) {
+                            $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                            $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                            $pdf->SetFont($bodyFont, 'B', $invFontSize);
+                            $maxH = $minLineH;
+                            foreach ($headers as $hi => $h) {
+                                $maxH = max($maxH, $pdf->getStringHeight($colWidthsInv[$hi], $h) + 2);
+                            }
+                            $startY = $pdf->GetY();
+                            $startX = $mLeft;
+                            foreach ($headers as $hi => $h) {
+                                $pdf->MultiCell($colWidthsInv[$hi], $maxH, $h, 1, $colAligns[$hi], true, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                                $startX += $colWidthsInv[$hi];
+                            }
+                            $pdf->SetXY($mLeft, $startY + $maxH);
+                        }
+
+                        $pdf->SetFont($bodyFont, '', $invFontSize);
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $maxH = $minLineH;
+                        foreach ($values as $vi => $v) {
+                            $maxH = max($maxH, $pdf->getStringHeight($colWidthsInv[$vi], $v) + 2);
+                        }
+                        $startY = $pdf->GetY();
+                        if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
+                        }
+                        $startX = $mLeft;
+                        foreach ($values as $vi => $v) {
+                            $pdf->MultiCell($colWidthsInv[$vi], $maxH, $v, 1, $colAligns[$vi], false, 0, $startX, $startY, true, 0, false, true, $maxH, $colVAligns[$vi]);
+                            $startX += $colWidthsInv[$vi];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $maxH);
+
+                        if ($pSpaceAfter > 0) {
+                            $pdf->Ln($pSpaceAfter);
+                        }
+                        $prevType = 'table';
+                        continue;
+                    }
 
                     $entries = $this->em->getRepository(NodeInventoryEntry::class)->createQueryBuilder('e')
                         ->where('e.node = :n')
@@ -1349,33 +1470,70 @@ class GenerateReportMessageHandler
 
                 // Load inventory entries for selected nodes and columns
                 $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
-                // Build lookup: nodeId -> "cat|key|col" -> value
+                // Build lookup: nodeId -> colId -> value (or count as string)
                 $invData = [];
                 foreach ($nodeIds as $nid) {
                     $invData[$nid] = [];
                 }
                 foreach ($columns as $colDef) {
+                    $colId = $colDef['id'] ?? '';
                     $cat = $colDef['category'] ?? '';
-                    $key = $colDef['entryKey'] ?? '';
                     $col = $colDef['colLabel'] ?? '';
-                    if (empty($cat) || empty($key) || empty($col)) continue;
+                    $aggregation = $colDef['aggregation'] ?? 'value';
 
-                    $entries = $invRepo->createQueryBuilder('e')
-                        ->where('e.node IN (:nodes)')
-                        ->andWhere('e.categoryName = :cat')
-                        ->andWhere('e.entryKey = :key')
-                        ->andWhere('e.colLabel = :col')
-                        ->setParameter('nodes', $nodeIds)
-                        ->setParameter('cat', $cat)
-                        ->setParameter('key', $key)
-                        ->setParameter('col', $col)
-                        ->getQuery()
-                        ->getResult();
+                    if ($aggregation === 'count') {
+                        if ($colId === '') continue;
+                        $matchValue = (string) ($colDef['matchValue'] ?? '');
+                        $matchOp = $colDef['matchOperator'] ?? 'eq';
 
-                    foreach ($entries as $entry) {
-                        $nid = $entry->getNode()->getId();
-                        $lookupKey = $cat . '|' . $key . '|' . $col;
-                        $invData[$nid][$lookupKey] = $entry->getValue() ?? '';
+                        // Always initialize to "0" so cells show 0 even if no entries exist
+                        foreach ($nodeIds as $nid) {
+                            $invData[$nid][$colId] = '0';
+                        }
+
+                        if ($cat === '' || $col === '') continue;
+
+                        $entries = $invRepo->createQueryBuilder('e')
+                            ->where('e.node IN (:nodes)')
+                            ->andWhere('e.categoryName = :cat')
+                            ->andWhere('e.colLabel = :col')
+                            ->setParameter('nodes', $nodeIds)
+                            ->setParameter('cat', $cat)
+                            ->setParameter('col', $col)
+                            ->getQuery()
+                            ->getResult();
+
+                        $counts = [];
+                        foreach ($entries as $entry) {
+                            $nid = $entry->getNode()->getId();
+                            $val = (string) ($entry->getValue() ?? '');
+                            if ($this->matchCountValue($val, $matchValue, $matchOp)) {
+                                $counts[$nid] = ($counts[$nid] ?? 0) + 1;
+                            }
+                        }
+                        foreach ($counts as $nid => $cnt) {
+                            $invData[$nid][$colId] = (string) $cnt;
+                        }
+                    } else {
+                        $key = $colDef['entryKey'] ?? '';
+                        if ($colId === '' || $cat === '' || $key === '' || $col === '') continue;
+
+                        $entries = $invRepo->createQueryBuilder('e')
+                            ->where('e.node IN (:nodes)')
+                            ->andWhere('e.categoryName = :cat')
+                            ->andWhere('e.entryKey = :key')
+                            ->andWhere('e.colLabel = :col')
+                            ->setParameter('nodes', $nodeIds)
+                            ->setParameter('cat', $cat)
+                            ->setParameter('key', $key)
+                            ->setParameter('col', $col)
+                            ->getQuery()
+                            ->getResult();
+
+                        foreach ($entries as $entry) {
+                            $nid = $entry->getNode()->getId();
+                            $invData[$nid][$colId] = $entry->getValue() ?? '';
+                        }
                     }
                 }
 
@@ -1403,8 +1561,8 @@ class GenerateReportMessageHandler
                     $maxWidths[0] = max($maxWidths[0], $pdf->GetStringWidth($hostname) + $cellPadding);
 
                     foreach ($columns as $ci => $colDef) {
-                        $lookupKey = ($colDef['category'] ?? '') . '|' . ($colDef['entryKey'] ?? '') . '|' . ($colDef['colLabel'] ?? '');
-                        $val = $invData[$nid][$lookupKey] ?? '';
+                        $colId = $colDef['id'] ?? '';
+                        $val = $invData[$nid][$colId] ?? '';
                         $maxWidths[$ci + 1] = max($maxWidths[$ci + 1], $pdf->GetStringWidth($val) + $cellPadding);
                     }
                 }
@@ -1473,8 +1631,8 @@ class GenerateReportMessageHandler
                     // Build all cell values for this row: index 0 = hostname, 1..N = columns
                     $allValues = [$hostname];
                     foreach ($columns as $ci => $colDef) {
-                        $lookupKey = ($colDef['category'] ?? '') . '|' . ($colDef['entryKey'] ?? '') . '|' . ($colDef['colLabel'] ?? '');
-                        $allValues[] = $invData[$nid][$lookupKey] ?? '';
+                        $colId = $colDef['id'] ?? '';
+                        $allValues[] = $invData[$nid][$colId] ?? '';
                     }
 
                     // Evaluate style rules per cell (first match wins per cell)
@@ -3915,6 +4073,21 @@ class GenerateReportMessageHandler
     private function sanitizeHtml(string $html): string
     {
         return strip_tags($html, ['b', 'i', 'br']);
+    }
+
+    private function matchCountValue(string $cellVal, string $matchVal, string $op): bool
+    {
+        switch ($op) {
+            case 'neq':
+                return $cellVal !== $matchVal;
+            case 'contains':
+                return $matchVal !== '' && str_contains(mb_strtolower($cellVal), mb_strtolower($matchVal));
+            case 'not_contains':
+                return $matchVal === '' || !str_contains(mb_strtolower($cellVal), mb_strtolower($matchVal));
+            case 'eq':
+            default:
+                return $cellVal === $matchVal;
+        }
     }
 
     private function hexToRgb(string $hex): array
