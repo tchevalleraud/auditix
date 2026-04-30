@@ -50,6 +50,7 @@ class CollectionRuleController extends AbstractController
                 $r->getExtracts()->toArray()
             )),
             'translations' => $r->getTranslations(),
+            'conditionTree' => $r->getConditionTree(),
             'createdAt' => $r->getCreatedAt()->format('c'),
         ];
     }
@@ -337,6 +338,9 @@ class CollectionRuleController extends AbstractController
         }
         if (array_key_exists('translations', $data)) {
             $rule->setTranslations($data['translations']);
+        }
+        if (array_key_exists('conditionTree', $data)) {
+            $rule->setConditionTree($data['conditionTree']);
         }
 
         $em->flush();

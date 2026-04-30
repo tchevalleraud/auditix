@@ -43,6 +43,11 @@ interface NodeTag {
   color: string;
 }
 
+interface NodeDynamicTag extends NodeTag {
+  ruleId: number | null;
+  ruleName: string | null;
+}
+
 interface NodeItem {
   id: number;
   name: string | null;
@@ -62,6 +67,7 @@ interface NodeItem {
   model: { id: number; name: string } | null;
   profile: { id: number; name: string } | null;
   tags: NodeTag[];
+  dynamicTags: NodeDynamicTag[];
   createdAt: string;
 }
 
@@ -934,24 +940,37 @@ export default function NodesPage() {
                           <span className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
                             {node.hostname || node.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
                           </span>
-                          {node.tags && node.tags.length > 0 && (
-                            <div className="flex items-center gap-1 mt-0.5">
-                              {node.tags.slice(0, 3).map((tag) => (
-                                <span
-                                  key={tag.id}
-                                  className="inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium text-white leading-4"
-                                  style={{ backgroundColor: tag.color }}
-                                >
-                                  {tag.name}
-                                </span>
-                              ))}
-                              {node.tags.length > 3 && (
-                                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                                  +{node.tags.length - 3}
-                                </span>
-                              )}
-                            </div>
-                          )}
+                          {(() => {
+                            const dyn = node.dynamicTags ?? [];
+                            const manualIds = new Set((node.tags ?? []).map((t) => t.id));
+                            const dynUnique = dyn.filter((t) => !manualIds.has(t.id));
+                            const allTags = [
+                              ...(node.tags ?? []).map((t) => ({ ...t, dynamic: false, ruleName: null as string | null })),
+                              ...dynUnique.map((t) => ({ ...t, dynamic: true })),
+                            ];
+                            if (allTags.length === 0) return null;
+                            const visible = allTags.slice(0, 3);
+                            const extra = allTags.length - visible.length;
+                            return (
+                              <div className="flex items-center gap-1 mt-0.5">
+                                {visible.map((tag, i) => (
+                                  <span
+                                    key={`${tag.dynamic ? "d" : "m"}-${tag.id}-${i}`}
+                                    className={`inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium text-white leading-4 ${tag.dynamic ? "border border-dashed border-white/60" : ""}`}
+                                    style={{ backgroundColor: tag.color }}
+                                    title={tag.dynamic ? `Auto${tag.ruleName ? ` · ${tag.ruleName}` : ""}` : undefined}
+                                  >
+                                    {tag.name}
+                                  </span>
+                                ))}
+                                {extra > 0 && (
+                                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
+                                    +{extra}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </Link>
                     </td>

@@ -36,6 +36,7 @@ import {
   FolderOpen,
   Copy,
   Languages,
+  Workflow,
 } from "lucide-react";
 
 interface ExtractItem {
@@ -86,6 +87,36 @@ interface TranslationEntry {
   conditionTree: { blocks: TranslationBlock[] };
 }
 
+interface ConditionItem {
+  type: "inventory";
+  inventoryCategoryId: number | null;
+  inventoryKey: string;
+  inventoryColumn: string;
+  operator: string;
+  value: string;
+  nodeManufacturerId?: number | null;
+  nodeModelId?: number | null;
+  nodeTagId?: number | null;
+}
+
+type ConditionAction =
+  | { type: "set_tag"; tagId: number | null }
+  | { type: "set_inventory"; categoryId: number | null; key: string; column: string; value: string };
+
+type ConditionResult = ConditionAction[] | null;
+
+interface ConditionBlock {
+  type: "if" | "else_if" | "else";
+  logic?: "and" | "or";
+  conditions?: ConditionItem[];
+  result: ConditionResult;
+  children?: ConditionBlock[];
+}
+
+interface ConditionTree {
+  blocks: ConditionBlock[];
+}
+
 interface RuleDetail {
   id: number;
   name: string;
@@ -97,7 +128,25 @@ interface RuleDetail {
   folderId: number | null;
   extracts: ExtractItem[];
   translations: TranslationEntry[] | null;
+  conditionTree: ConditionTree | null;
   createdAt: string;
+}
+
+interface NodeTagItem {
+  id: number;
+  name: string;
+  color: string;
+}
+
+interface InventoryStructureEntry {
+  key: string;
+  columns: string[];
+}
+
+interface InventoryStructureCategory {
+  categoryId: number | null;
+  categoryName: string;
+  entries: InventoryStructureEntry[];
 }
 
 interface NodeItem {
@@ -118,7 +167,7 @@ const HIGHLIGHT_COLORS = [
   { bg: "bg-pink-200/60 dark:bg-pink-500/30", text: "text-pink-800 dark:text-pink-200", badge: "bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300 border-pink-300 dark:border-pink-700" },
 ];
 
-const tabKeys = ["collect", "extracts", "translations", "test", "edit"] as const;
+const tabKeys = ["collect", "extracts", "translations", "conditions", "test", "edit"] as const;
 type TabKey = (typeof tabKeys)[number];
 
 export default function CollectionRuleEditPage() {
@@ -197,6 +246,8 @@ export default function CollectionRuleEditPage() {
     });
   }, [detectedGroupCount]);
   const [categories, setCategories] = useState<InventoryCategory[]>([]);
+  const [nodeTags, setNodeTags] = useState<NodeTagItem[]>([]);
+  const [inventoryStructure, setInventoryStructure] = useState<InventoryStructureCategory[]>([]);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [showExtractModal, setShowExtractModal] = useState(false);
@@ -276,6 +327,12 @@ export default function CollectionRuleEditPage() {
     }
   }, [activeTab, loadNodes]);
 
+  const loadNodeTags = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/node-tags?context=${current.id}`);
+    if (res.ok) setNodeTags(await res.json());
+  }, [current]);
+
   const saveEdit = async () => {
     if (!name.trim()) return;
     setSaving(true);
@@ -322,6 +379,20 @@ export default function CollectionRuleEditPage() {
     const res = await fetch(`/api/inventory-categories?context=${current.id}`);
     if (res.ok) setCategories(await res.json());
   }, [current]);
+
+  const loadInventoryStructure = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/inventory-categories/structure?context=${current.id}`);
+    if (res.ok) setInventoryStructure(await res.json());
+  }, [current]);
+
+  useEffect(() => {
+    if (activeTab === "conditions") {
+      loadCategories();
+      loadNodeTags();
+      loadInventoryStructure();
+    }
+  }, [activeTab, loadCategories, loadNodeTags, loadInventoryStructure]);
 
   const createCategory = async () => {
     if (!newCategoryName.trim() || !current) return;
@@ -944,6 +1015,7 @@ export default function CollectionRuleEditPage() {
     { key: "collect", label: t("collection_rules.tabCollect"), icon: <Terminal className="h-4 w-4" /> },
     { key: "extracts", label: t("collection_rules.tabExtracts"), icon: <ScanSearch className="h-4 w-4" /> },
     { key: "translations", label: t("collection_rules.tabTranslations"), icon: <Languages className="h-4 w-4" /> },
+    { key: "conditions", label: t("collection_rules.tabConditions"), icon: <Workflow className="h-4 w-4" /> },
     { key: "test", label: t("collection_rules.tabTest"), icon: <FlaskConical className="h-4 w-4" /> },
     { key: "edit", label: t("collection_rules.tabEdit"), icon: <Pencil className="h-4 w-4" /> },
   ];
@@ -1681,6 +1753,26 @@ export default function CollectionRuleEditPage() {
         />
       )}
 
+      {/* Conditions tab */}
+      {activeTab === "conditions" && rule && (
+        <ConditionsTab
+          rule={rule}
+          categories={categories}
+          tags={nodeTags}
+          inventoryStructure={inventoryStructure}
+          onSave={async (conditionTree) => {
+            await fetch(`/api/collection-rules/${ruleId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({ conditionTree }),
+            });
+            setRule({ ...rule, conditionTree });
+          }}
+          t={t}
+        />
+      )}
+
       {/* Test tab */}
       {activeTab === "test" && (
         <div className="flex flex-col flex-1 min-h-0 gap-4">
@@ -2062,6 +2154,10 @@ export default function CollectionRuleEditPage() {
 }
 
 const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+const inputClsCompactBase = "rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+const inputClsCompact = inputClsCompactBase + " w-full";
+const selectClsBase = "rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+const selectCls = selectClsBase + " w-full";
 const btnPrimaryCls = "flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors";
 
 /* ─── Translation evaluation (shared by test tab and components) ─── */
@@ -2363,6 +2459,518 @@ function TranslationBlockEditor({ blocks, onChange, t }: {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ─── Suggest field: select if options exist, otherwise free input ─── */
+
+function SuggestField({ value, options, onChange, placeholder, className }: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  placeholder: string;
+  className?: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const hasOptions = options.length > 0;
+  const inSelect = hasOptions && !editing && (value === "" || options.includes(value));
+  const cls = className ?? "";
+
+  if (!inSelect) {
+    return (
+      <div className={`flex items-center gap-1 ${cls}`}>
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className={inputClsCompactBase + " flex-1 min-w-0"}
+        />
+        {hasOptions && (
+          <button type="button" onClick={() => setEditing(false)}
+            title="Retour à la liste"
+            className="px-1.5 py-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center gap-1 min-w-0 ${cls}`}>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={selectClsBase + " flex-1 min-w-0"}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+      <button type="button" onClick={() => setEditing(true)}
+        title="Saisir une valeur libre"
+        className="px-1.5 py-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800">
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/* ─── Conditions Tab (collection rule conditionTree) ─── */
+
+const COND_OPERATORS = [
+  { key: "equals", label: "equals" },
+  { key: "not_equals", label: "not equals" },
+  { key: "contains", label: "contains" },
+  { key: "not_contains", label: "not contains" },
+  { key: "matches", label: "matches (regex)" },
+  { key: "greater_than", label: ">" },
+  { key: "less_than", label: "<" },
+  { key: "exists", label: "exists", noValue: true },
+  { key: "not_exists", label: "not exists", noValue: true },
+  { key: "is_empty", label: "is empty", noValue: true },
+  { key: "is_not_empty", label: "is not empty", noValue: true },
+];
+
+const emptyInventoryCondition = (): ConditionItem => ({
+  type: "inventory",
+  inventoryCategoryId: null,
+  inventoryKey: "",
+  inventoryColumn: "Value#1",
+  operator: "equals",
+  value: "",
+});
+
+const emptyAction = (): ConditionAction => ({ type: "set_tag", tagId: null });
+const defaultResult = (): ConditionResult => [emptyAction()];
+
+/** Normalize legacy single-action result to a list. */
+const normalizeResult = (r: any): ConditionAction[] => {
+  if (!r) return [];
+  if (Array.isArray(r)) return r as ConditionAction[];
+  if (typeof r === "object" && "type" in r) return [r as ConditionAction];
+  return [];
+};
+const normalizeBlock = (b: ConditionBlock): ConditionBlock => ({
+  ...b,
+  result: normalizeResult(b.result),
+  children: b.children?.map(normalizeBlock),
+});
+
+function ConditionsTab({ rule, categories, tags, inventoryStructure, onSave, t }: {
+  rule: RuleDetail;
+  categories: InventoryCategory[];
+  tags: NodeTagItem[];
+  inventoryStructure: InventoryStructureCategory[];
+  onSave: (tree: ConditionTree | null) => Promise<void>;
+  t: (k: string) => string;
+}) {
+  const [blocks, setBlocks] = useState<ConditionBlock[]>(
+    rule.conditionTree?.blocks
+      ? rule.conditionTree.blocks.map(normalizeBlock)
+      : [{
+          type: "if",
+          logic: "and",
+          conditions: [emptyInventoryCondition()],
+          result: defaultResult(),
+        }]
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(blocks.length === 0 ? null : { blocks });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+        <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+          {t("collection_rules.conditionsHelp")}
+        </p>
+        <ConditionBlockEditor
+          blocks={blocks}
+          onChange={setBlocks}
+          categories={categories}
+          tags={tags}
+          inventoryStructure={inventoryStructure}
+          t={t}
+        />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving} className={btnPrimaryCls}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {t("common.save")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStructure, t }: {
+  blocks: ConditionBlock[];
+  onChange: (blocks: ConditionBlock[]) => void;
+  categories: InventoryCategory[];
+  tags: NodeTagItem[];
+  inventoryStructure: InventoryStructureCategory[];
+  t: (k: string) => string;
+}) {
+  const lookupKeys = (catId: number | null): string[] => {
+    if (!catId) return [];
+    const cat = inventoryStructure.find((c) => c.categoryId === catId);
+    return cat ? Array.from(new Set(cat.entries.map((e) => e.key))).sort() : [];
+  };
+  const lookupColumns = (catId: number | null, key?: string): string[] => {
+    if (!catId) return [];
+    const cat = inventoryStructure.find((c) => c.categoryId === catId);
+    if (!cat) return [];
+    if (key) {
+      const entry = cat.entries.find((e) => e.key === key);
+      if (entry) return Array.from(new Set(entry.columns)).sort();
+    }
+    const all = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => all.add(c)));
+    return Array.from(all).sort();
+  };
+  const updateBlock = (idx: number, block: ConditionBlock) => {
+    onChange(blocks.map((b, i) => i === idx ? block : b));
+  };
+
+  const removeBlock = (idx: number) => {
+    onChange(blocks.filter((_, i) => i !== idx));
+  };
+
+  const addElseIf = () => {
+    const insertIdx = blocks.findIndex((b) => b.type === "else");
+    const newBlock: ConditionBlock = {
+      type: "else_if",
+      logic: "and",
+      conditions: [emptyInventoryCondition()],
+      result: defaultResult(),
+    };
+    if (insertIdx >= 0) {
+      const next = [...blocks];
+      next.splice(insertIdx, 0, newBlock);
+      onChange(next);
+    } else {
+      onChange([...blocks, newBlock]);
+    }
+  };
+
+  const addElse = () => {
+    if (blocks.some((b) => b.type === "else")) return;
+    onChange([...blocks, { type: "else", result: defaultResult() }]);
+  };
+
+  const hasElse = blocks.some((b) => b.type === "else");
+
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, idx) => (
+        <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-500 uppercase">
+                {block.type === "if" ? t("collection_rules.translationIf") :
+                 block.type === "else_if" ? t("collection_rules.translationElseIf") :
+                 t("collection_rules.translationElse")}
+              </span>
+              {block.type !== "else" && block.conditions && block.conditions.length > 1 && (
+                <select value={block.logic ?? "and"}
+                  onChange={(e) => updateBlock(idx, { ...block, logic: e.target.value as "and" | "or" })}
+                  className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-1.5 py-0.5">
+                  <option value="and">AND</option>
+                  <option value="or">OR</option>
+                </select>
+              )}
+            </div>
+            {idx > 0 && (
+              <button onClick={() => removeBlock(idx)} className="p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                <X className="h-3.5 w-3.5 text-red-400" />
+              </button>
+            )}
+          </div>
+
+          <div className="p-4 space-y-4">
+            {block.type !== "else" && (
+              <div className="space-y-2">
+                {(block.conditions ?? []).map((cond, ci) => {
+                  const opMeta = COND_OPERATORS.find((o) => o.key === cond.operator);
+                  const noValue = !!(opMeta as any)?.noValue;
+                  const keyOptions = lookupKeys(cond.inventoryCategoryId);
+                  const columnOptions = lookupColumns(cond.inventoryCategoryId, cond.inventoryKey);
+                  return (
+                    <div key={ci} className="grid grid-cols-12 gap-2 items-center">
+                      <select
+                        value={cond.inventoryCategoryId ?? ""}
+                        onChange={(e) => {
+                          const next = [...(block.conditions ?? [])];
+                          next[ci] = { ...cond, inventoryCategoryId: e.target.value ? Number(e.target.value) : null };
+                          updateBlock(idx, { ...block, conditions: next });
+                        }}
+                        className={selectCls + " col-span-3"}
+                      >
+                        <option value="">{t("collection_rules.conditionCategory")}</option>
+                        {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      </select>
+                      <SuggestField
+                        value={cond.inventoryKey}
+                        options={keyOptions}
+                        placeholder={t("collection_rules.conditionKey")}
+                        onChange={(v) => {
+                          const next = [...(block.conditions ?? [])];
+                          next[ci] = { ...cond, inventoryKey: v };
+                          updateBlock(idx, { ...block, conditions: next });
+                        }}
+                        className="col-span-2"
+                      />
+                      <SuggestField
+                        value={cond.inventoryColumn}
+                        options={columnOptions}
+                        placeholder={t("collection_rules.conditionColumn")}
+                        onChange={(v) => {
+                          const next = [...(block.conditions ?? [])];
+                          next[ci] = { ...cond, inventoryColumn: v };
+                          updateBlock(idx, { ...block, conditions: next });
+                        }}
+                        className="col-span-2"
+                      />
+                      <select
+                        value={cond.operator}
+                        onChange={(e) => {
+                          const next = [...(block.conditions ?? [])];
+                          next[ci] = { ...cond, operator: e.target.value };
+                          updateBlock(idx, { ...block, conditions: next });
+                        }}
+                        className={selectCls + " col-span-2"}
+                      >
+                        {COND_OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
+                      </select>
+                      {!noValue ? (
+                        <input
+                          type="text"
+                          value={cond.value}
+                          onChange={(e) => {
+                            const next = [...(block.conditions ?? [])];
+                            next[ci] = { ...cond, value: e.target.value };
+                            updateBlock(idx, { ...block, conditions: next });
+                          }}
+                          placeholder={t("collection_rules.translationValue")}
+                          className={inputClsCompact + " col-span-2"}
+                        />
+                      ) : <div className="col-span-2" />}
+                      {(block.conditions ?? []).length > 1 && (
+                        <button onClick={() => {
+                          const next = (block.conditions ?? []).filter((_, j) => j !== ci);
+                          updateBlock(idx, { ...block, conditions: next });
+                        }} className="col-span-1 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 justify-self-end">
+                          <X className="h-3.5 w-3.5 text-red-400" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button onClick={() => {
+                  const next = [...(block.conditions ?? []), emptyInventoryCondition()];
+                  updateBlock(idx, { ...block, conditions: next });
+                }} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+                  + {t("collection_rules.translationAddCondition")}
+                </button>
+              </div>
+            )}
+
+            <ConditionResultEditor
+              result={block.result}
+              tags={tags}
+              categories={categories}
+              inventoryStructure={inventoryStructure}
+              onChange={(result) => updateBlock(idx, { ...block, result })}
+              t={t}
+            />
+          </div>
+        </div>
+      ))}
+
+      <div className="flex items-center gap-2">
+        <button onClick={addElseIf}
+          className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
+          + {t("collection_rules.translationAddElseIf")}
+        </button>
+        {!hasElse && (
+          <button onClick={addElse}
+            className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
+            + {t("collection_rules.translationAddElse")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConditionResultEditor({ result, tags, categories, inventoryStructure, onChange, t }: {
+  result: ConditionResult;
+  tags: NodeTagItem[];
+  categories: InventoryCategory[];
+  inventoryStructure: InventoryStructureCategory[];
+  onChange: (r: ConditionResult) => void;
+  t: (k: string) => string;
+}) {
+  const actions = normalizeResult(result);
+
+  const updateAction = (i: number, next: ConditionAction) => {
+    onChange(actions.map((a, idx) => idx === i ? next : a));
+  };
+  const removeAction = (i: number) => {
+    const next = actions.filter((_, idx) => idx !== i);
+    onChange(next.length === 0 ? null : next);
+  };
+  const addAction = () => {
+    onChange([...actions, emptyAction()]);
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          {t("collection_rules.conditionThen")}
+        </span>
+        <button type="button" onClick={addAction}
+          className="text-xs px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
+          + {t("collection_rules.conditionAddAction")}
+        </button>
+      </div>
+
+      {actions.length === 0 && (
+        <p className="text-xs italic text-slate-400 dark:text-slate-500">
+          {t("collection_rules.conditionNoAction")}
+        </p>
+      )}
+
+      <div className="space-y-2">
+        {actions.map((action, i) => (
+          <ConditionActionRow
+            key={i}
+            action={action}
+            tags={tags}
+            categories={categories}
+            inventoryStructure={inventoryStructure}
+            onChange={(next) => updateAction(i, next)}
+            onRemove={() => removeAction(i)}
+            t={t}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConditionActionRow({ action, tags, categories, inventoryStructure, onChange, onRemove, t }: {
+  action: ConditionAction;
+  tags: NodeTagItem[];
+  categories: InventoryCategory[];
+  inventoryStructure: InventoryStructureCategory[];
+  onChange: (a: ConditionAction) => void;
+  onRemove: () => void;
+  t: (k: string) => string;
+}) {
+  const inv = action.type === "set_inventory" ? action : null;
+  const cat = inv?.categoryId
+    ? inventoryStructure.find((c) => c.categoryId === inv.categoryId)
+    : null;
+  const keyOptions = cat ? Array.from(new Set(cat.entries.map((e) => e.key))).sort() : [];
+  const colOptions = (() => {
+    if (!cat) return [];
+    if (inv?.key) {
+      const entry = cat.entries.find((e) => e.key === inv.key);
+      if (entry) return Array.from(new Set(entry.columns)).sort();
+    }
+    const all = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => all.add(c)));
+    return Array.from(all).sort();
+  })();
+
+  const switchType = (next: "set_tag" | "set_inventory") => {
+    if (next === "set_tag") {
+      onChange({ type: "set_tag", tagId: null });
+    } else {
+      onChange({ type: "set_inventory", categoryId: null, key: "", column: "Value#1", value: "" });
+    }
+  };
+
+  return (
+    <div className="flex items-start gap-2 rounded-md bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 p-2">
+      <select
+        value={action.type}
+        onChange={(e) => switchType(e.target.value as "set_tag" | "set_inventory")}
+        className={selectClsBase + " shrink-0"}
+      >
+        <option value="set_tag">{t("collection_rules.conditionResultTag")}</option>
+        <option value="set_inventory">{t("collection_rules.conditionResultInventory")}</option>
+      </select>
+
+      <div className="flex-1 min-w-0">
+        {action.type === "set_tag" && (
+          <select
+            value={action.tagId ?? ""}
+            onChange={(e) => onChange({ type: "set_tag", tagId: e.target.value ? Number(e.target.value) : null })}
+            className={selectCls}
+          >
+            <option value="">{t("collection_rules.conditionSelectTag")}</option>
+            {tags.map((tg) => (
+              <option key={tg.id} value={tg.id}>{tg.name}</option>
+            ))}
+          </select>
+        )}
+
+        {action.type === "set_inventory" && (
+          <div className="grid grid-cols-12 gap-2">
+            <select
+              value={action.categoryId ?? ""}
+              onChange={(e) => onChange({ ...action, categoryId: e.target.value ? Number(e.target.value) : null })}
+              className={selectCls + " col-span-3"}
+            >
+              <option value="">{t("collection_rules.conditionCategory")}</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <SuggestField
+              value={action.key ?? ""}
+              options={keyOptions}
+              placeholder={t("collection_rules.conditionKey")}
+              onChange={(v) => onChange({ ...action, key: v })}
+              className="col-span-3"
+            />
+            <SuggestField
+              value={action.column ?? "Value#1"}
+              options={colOptions}
+              placeholder={t("collection_rules.conditionColumn")}
+              onChange={(v) => onChange({ ...action, column: v })}
+              className="col-span-3"
+            />
+            <input
+              type="text"
+              value={action.value ?? ""}
+              onChange={(e) => onChange({ ...action, value: e.target.value })}
+              placeholder={t("collection_rules.conditionValue")}
+              className={inputClsCompact + " col-span-3"}
+            />
+          </div>
+        )}
+      </div>
+
+      <button type="button" onClick={onRemove}
+        title={t("collection_rules.conditionRemoveAction")}
+        className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 mt-1">
+        <X className="h-3.5 w-3.5 text-red-400" />
+      </button>
     </div>
   );
 }

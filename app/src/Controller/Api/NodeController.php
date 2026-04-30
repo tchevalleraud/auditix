@@ -9,6 +9,7 @@ use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
 use App\Entity\Node;
+use App\Entity\NodeDynamicTag;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\NodeTag;
 use App\Entity\Profile;
@@ -36,6 +37,7 @@ class NodeController extends AbstractController
         private readonly MessageBusInterface $bus,
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
+        private readonly EntityManagerInterface $em,
     ) {}
 
     private function serialize(Node $n): array
@@ -44,6 +46,8 @@ class NodeController extends AbstractController
         $model = $n->getModel();
         $profile = $n->getProfile();
         $context = $n->getContext();
+
+        $dynamicTags = $this->em->getRepository(NodeDynamicTag::class)->findBy(['node' => $n]);
 
         return [
             'id' => $n->getId(),
@@ -80,6 +84,13 @@ class NodeController extends AbstractController
                 'name' => $t->getName(),
                 'color' => $t->getColor(),
             ])->toArray(),
+            'dynamicTags' => array_map(fn(NodeDynamicTag $d) => [
+                'id' => $d->getTag()->getId(),
+                'name' => $d->getTag()->getName(),
+                'color' => $d->getTag()->getColor(),
+                'ruleId' => $d->getRule()?->getId(),
+                'ruleName' => $d->getRule()?->getName(),
+            ], $dynamicTags),
             'createdAt' => $n->getCreatedAt()->format('c'),
         ];
     }

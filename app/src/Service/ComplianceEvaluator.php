@@ -30,6 +30,7 @@ class ComplianceEvaluator
         private readonly EntityManagerInterface $em,
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
+        private readonly ConditionTreeEvaluator $conditionTree,
     ) {}
 
     /**
@@ -422,157 +423,32 @@ class ComplianceEvaluator
         }
     }
 
-    /**
-     * Get an inventory value for a node.
-     */
     public function getInventoryValue(?int $categoryId, ?string $key, ?string $column, Node $node): ?string
     {
-        if (!$categoryId || !$key) return null;
-
-        $category = $this->em->getRepository(InventoryCategory::class)->find($categoryId);
-        if (!$category) return null;
-
-        $col = $column ?: 'Value#1';
-        $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
-            'node' => $node, 'category' => $category, 'entryKey' => $key, 'colLabel' => $col,
-        ]);
-
-        $values = array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
-        return empty($values) ? null : (count($values) === 1 ? $values[0] : implode(', ', $values));
+        return $this->conditionTree->getInventoryValue($categoryId, $key, $column, $node);
     }
 
-    // ---- Condition evaluation ----
+    // ---- Condition evaluation (delegated to ConditionTreeEvaluator) ----
 
     public function evaluateBlocks(array $blocks, array $fields, ?Node $node = null): ?array
     {
-        foreach ($blocks as $block) {
-            if ($block['type'] === 'else' || $this->evaluateConditions($block, $fields, $node)) {
-                if (!empty($block['children'])) {
-                    return $this->evaluateBlocks($block['children'], $fields, $node);
-                }
-                return $block['result'] ?? null;
-            }
-        }
-        return null;
+        $result = $this->conditionTree->evaluateBlocks($blocks, $fields, $node);
+        return is_array($result) ? $result : null;
     }
 
     public function evaluateConditions(array $block, array $fields, ?Node $node = null): bool
     {
-        $logic = $block['logic'] ?? 'and';
-        $conditions = $block['conditions'] ?? [];
-        if (empty($conditions)) return true;
-
-        $evaluated = 0;
-
-        foreach ($conditions as $cond) {
-            // Node filter: by nodeId, tag, manufacturer or model
-            if ($node !== null) {
-                $condNodeId = $cond['nodeId'] ?? null;
-                $condNodeTagId = $cond['nodeTagId'] ?? null;
-                $condMfrId = $cond['nodeManufacturerId'] ?? null;
-                $condModelId = $cond['nodeModelId'] ?? null;
-
-                if ($condNodeId !== null && (int) $condNodeId !== $node->getId()) {
-                    continue;
-                }
-                if ($condNodeTagId !== null) {
-                    $hasTag = false;
-                    foreach ($node->getTags() as $tag) {
-                        if ($tag->getId() === (int) $condNodeTagId) { $hasTag = true; break; }
-                    }
-                    if (!$hasTag) continue;
-                }
-                if ($condMfrId !== null) {
-                    if (!$node->getManufacturer() || $node->getManufacturer()->getId() !== (int) $condMfrId) continue;
-                }
-                if ($condModelId !== null) {
-                    if (!$node->getModel() || $node->getModel()->getId() !== (int) $condModelId) continue;
-                }
-            }
-
-            $evaluated++;
-            $result = $this->evaluateSingleCondition($cond, $fields, $node);
-            if ($logic === 'or' && $result) return true;
-            if ($logic === 'and' && !$result) return false;
-        }
-
-        if ($evaluated === 0) return false;
-
-        return $logic === 'and';
+        return $this->conditionTree->evaluateConditions($block, $fields, $node);
     }
 
-    /**
-     * Evaluate a single condition. Supports both 'source' and 'inventory' types.
-     */
     public function evaluateSingleCondition(array $cond, array $fields, ?Node $node = null): bool
     {
-        $type = $cond['type'] ?? 'source';
-        $fieldValue = null;
-
-        if ($type === 'inventory') {
-            // Direct inventory lookup
-            if ($node) {
-                $fieldValue = $this->getInventoryValue(
-                    $cond['inventoryCategoryId'] ?? null,
-                    $cond['inventoryKey'] ?? null,
-                    $cond['inventoryColumn'] ?? null,
-                    $node
-                );
-            }
-        } else {
-            // Source field lookup: "sourceName.fieldName"
-            $source = $cond['source'] ?? '';
-            $field = $cond['field'] ?? '$value';
-
-            // Multi-row wildcard: source.*.field → check ALL rows
-            if (str_contains($field, '*.')) {
-                $actualField = str_replace('*.', '', $field);
-                $rows = $fields["$source.\$rows"] ?? null;
-                if (is_array($rows) && !empty($rows)) {
-                    $operator = $cond['operator'] ?? '';
-                    $compareValue = $cond['value'] ?? null;
-                    // ALL rows must match the condition
-                    foreach ($rows as $row) {
-                        $rowVal = isset($row[$actualField]) ? trim((string) $row[$actualField]) : null;
-                        if (!$this->compareValue($rowVal, $operator, $compareValue)) {
-                            return false;
-                        }
-                    }
-                    return true;
-                }
-                return false; // no rows = condition fails
-            } else {
-                $key = $source ? "$source.$field" : $field;
-                $fieldValue = $fields[$key] ?? null;
-            }
-        }
-
-        return $this->compareValue($fieldValue, $cond['operator'] ?? '', $cond['value'] ?? null);
+        return $this->conditionTree->evaluateSingleCondition($cond, $fields, $node);
     }
 
-    /**
-     * Compare a field value against operator and compare value.
-     */
     public function compareValue(mixed $fieldValue, string $operator, mixed $compareValue): bool
     {
-        if (is_array($fieldValue)) {
-            $fieldValue = json_encode($fieldValue);
-        }
-
-        return match ($operator) {
-            'equals' => (string) $fieldValue === (string) $compareValue,
-            'not_equals' => (string) $fieldValue !== (string) $compareValue,
-            'exists' => $fieldValue !== null,
-            'not_exists' => $fieldValue === null,
-            'contains' => is_string($fieldValue) && str_contains($fieldValue, (string) $compareValue),
-            'not_contains' => !is_string($fieldValue) || !str_contains($fieldValue, (string) $compareValue),
-            'matches' => is_string($fieldValue) && (bool) @preg_match('~' . str_replace('~', '\\~', (string) $compareValue) . '~', $fieldValue),
-            'greater_than' => is_numeric($fieldValue) && is_numeric($compareValue) && (float) $fieldValue > (float) $compareValue,
-            'less_than' => is_numeric($fieldValue) && is_numeric($compareValue) && (float) $fieldValue < (float) $compareValue,
-            'is_empty' => $fieldValue === null || $fieldValue === '' || $fieldValue === '[]',
-            'is_not_empty' => $fieldValue !== null && $fieldValue !== '' && $fieldValue !== '[]',
-            default => false,
-        };
+        return $this->conditionTree->compareValue($fieldValue, $operator, $compareValue);
     }
 
     // ---- Extraction helpers ----
