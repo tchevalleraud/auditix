@@ -2160,6 +2160,22 @@ const selectClsBase = "rounded-lg border border-slate-200 dark:border-slate-700 
 const selectCls = selectClsBase + " w-full";
 const btnPrimaryCls = "flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors";
 
+const smallInput = "rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+
+const blockColors: Record<string, { border: string; bg: string; badge: string }> = {
+  if: { border: "border-l-blue-500", bg: "bg-blue-50/50 dark:bg-blue-500/5", badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
+  else_if: { border: "border-l-amber-500", bg: "bg-amber-50/50 dark:bg-amber-500/5", badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" },
+  else: { border: "border-l-slate-400", bg: "bg-slate-50/50 dark:bg-slate-500/5", badge: "bg-slate-200 text-slate-600 dark:bg-slate-600/30 dark:text-slate-300" },
+};
+
+const logicBadge = (logic: "and" | "or" | undefined) => logic === "or"
+  ? "text-violet-500 bg-violet-50 dark:bg-violet-500/10"
+  : "text-indigo-500 bg-indigo-50 dark:bg-indigo-500/10";
+
+const logicToggleBadge = (logic: "and" | "or" | undefined) => logic === "or"
+  ? "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+  : "bg-indigo-100 text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300";
+
 /* ─── Translation evaluation (shared by test tab and components) ─── */
 
 function applyFrontendTranslation(rule: RuleDetail | null, extractId: number, value: string): string {
@@ -2330,12 +2346,31 @@ function TranslationBlockEditor({ blocks, onChange, t }: {
   onChange: (blocks: TranslationBlock[]) => void;
   t: (k: string) => string;
 }) {
+  const [editingCond, setEditingCond] = useState<string | null>(null);
+  const [editingResult, setEditingResult] = useState<string | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const noValueOps = new Set(OPERATORS.filter((o) => (o as any).noValue).map((o) => o.key));
+  const opLabel = (key: string) => OPERATORS.find((o) => o.key === key)?.label ?? key;
+
   const updateBlock = (idx: number, block: TranslationBlock) => {
     onChange(blocks.map((b, i) => i === idx ? block : b));
   };
 
   const removeBlock = (idx: number) => {
     onChange(blocks.filter((_, i) => i !== idx));
+  };
+
+  const reorderBlocks = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    const next = [...blocks];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    next.forEach((b, i) => {
+      if (i === 0 && b.type === "else_if") b.type = "if";
+      else if (i > 0 && b.type === "if") b.type = "else_if";
+    });
+    onChange(next);
   };
 
   const addElseIf = () => {
@@ -2359,103 +2394,231 @@ function TranslationBlockEditor({ blocks, onChange, t }: {
     onChange([...blocks, { type: "else", result: { value: null } }]);
   };
 
+  const blockLabel = (type: TranslationBlock["type"]) =>
+    type === "if" ? t("collection_rules.translationIf")
+    : type === "else_if" ? t("collection_rules.translationElseIf")
+    : t("collection_rules.translationElse");
+
   const hasElse = blocks.some((b) => b.type === "else");
 
   return (
-    <div className="space-y-3">
-      {blocks.map((block, idx) => (
-        <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-          {/* Block header */}
-          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-800/50">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-500 uppercase">
-                {block.type === "if" ? t("collection_rules.translationIf") :
-                 block.type === "else_if" ? t("collection_rules.translationElseIf") :
-                 t("collection_rules.translationElse")}
-              </span>
-              {block.type !== "else" && block.conditions && block.conditions.length > 1 && (
-                <select value={block.logic ?? "and"}
-                  onChange={(e) => updateBlock(idx, { ...block, logic: e.target.value as "and" | "or" })}
-                  className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-1.5 py-0.5">
-                  <option value="and">AND</option>
-                  <option value="or">OR</option>
-                </select>
-              )}
-            </div>
-            {idx > 0 && (
-              <button onClick={() => removeBlock(idx)} className="p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                <X className="h-3.5 w-3.5 text-red-400" />
-              </button>
-            )}
-          </div>
+    <div className="space-y-2">
+      {blocks.map((block, idx) => {
+        const colors = blockColors[block.type] || blockColors.if;
+        const conditions = block.conditions ?? [];
 
-          <div className="p-4 space-y-3">
+        return (
+          <div
+            key={idx}
+            className={`border-l-4 ${colors.border} rounded-lg border border-slate-200 dark:border-slate-700 ${colors.bg} ${dragOverIdx === idx && dragIdx !== idx ? "ring-2 ring-blue-400" : ""}`}
+            draggable
+            onDragStart={(e) => { setDragIdx(idx); e.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={(e) => { e.preventDefault(); setDragOverIdx(null); if (dragIdx !== null && dragIdx !== idx) reorderBlocks(dragIdx, idx); setDragIdx(null); }}
+            onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+          >
+            {/* Block header */}
+            <div className="flex items-center justify-between px-4 py-2.5 cursor-grab active:cursor-grabbing">
+              <div className="flex items-center gap-2">
+                <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${colors.badge}`}>
+                  {blockLabel(block.type)}
+                </span>
+                {block.type !== "else" && conditions.length > 1 && (
+                  <button
+                    onClick={() => updateBlock(idx, { ...block, logic: block.logic === "and" ? "or" : "and" })}
+                    className={`px-2 py-0.5 rounded text-xs font-semibold cursor-pointer transition-colors ${logicToggleBadge(block.logic)}`}
+                  >
+                    {block.logic === "or" ? t("compliance_rules.logicOr") : t("compliance_rules.logicAnd")}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {block.type !== "else" && (
+                  <button
+                    onClick={() => {
+                      const newConds = [...conditions, { operator: "contains", value: "" }];
+                      updateBlock(idx, { ...block, conditions: newConds });
+                      setEditingCond(`${idx}-${newConds.length - 1}`);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
+                    title={t("collection_rules.translationAddCondition")}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
+                {idx > 0 && (
+                  <button
+                    onClick={() => removeBlock(idx)}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Conditions (not for else) */}
-            {block.type !== "else" && (
-              <div className="space-y-2">
-                {(block.conditions ?? []).map((cond, ci) => (
-                  <div key={ci} className="flex items-center gap-2">
-                    <select value={cond.operator}
-                      onChange={(e) => {
-                        const newConds = [...(block.conditions ?? [])];
-                        newConds[ci] = { ...cond, operator: e.target.value };
-                        updateBlock(idx, { ...block, conditions: newConds });
-                      }}
-                      className="text-sm rounded-lg border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 w-40">
-                      {OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
-                    </select>
-                    {!OPERATORS.find((o) => o.key === cond.operator && (o as any).noValue) && (
-                      <input type="text" value={cond.value}
-                        onChange={(e) => {
-                          const newConds = [...(block.conditions ?? [])];
-                          newConds[ci] = { ...cond, value: e.target.value };
-                          updateBlock(idx, { ...block, conditions: newConds });
-                        }}
-                        placeholder={t("collection_rules.translationValue")}
-                        className={inputCls + " flex-1"} />
-                    )}
-                    {(block.conditions ?? []).length > 1 && (
-                      <button onClick={() => {
-                        const newConds = (block.conditions ?? []).filter((_, j) => j !== ci);
-                        updateBlock(idx, { ...block, conditions: newConds });
-                      }} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                        <X className="h-3.5 w-3.5 text-red-400" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                <button onClick={() => {
-                  const newConds = [...(block.conditions ?? []), { operator: "contains", value: "" }];
-                  updateBlock(idx, { ...block, conditions: newConds });
-                }} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
-                  + {t("collection_rules.translationAddCondition")}
-                </button>
+            {block.type !== "else" && conditions.length > 0 && (
+              <div className="px-4 pb-3 space-y-2">
+                {conditions.map((cond, ci) => {
+                  const condKey = `${idx}-${ci}`;
+                  const isEditing = editingCond === condKey;
+                  const noValue = noValueOps.has(cond.operator);
+
+                  return (
+                    <div key={ci}>
+                      {!isEditing && (
+                        <div
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+                          onClick={() => setEditingCond(condKey)}
+                        >
+                          {ci > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${logicBadge(block.logic)}`}>
+                              {block.logic === "or" ? t("compliance_rules.logicOr") : t("compliance_rules.logicAnd")}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">{opLabel(cond.operator)}</span>
+                          {!noValue && (
+                            <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{cond.value}&quot;</span>
+                          )}
+                          <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <Pencil className="h-3 w-3 text-slate-400" />
+                            {conditions.length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const newConds = conditions.filter((_, j) => j !== ci);
+                                  updateBlock(idx, { ...block, conditions: newConds });
+                                }}
+                                className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {isEditing && (
+                        <div className="rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Test</span>
+                            <select
+                              value={cond.operator}
+                              onChange={(e) => {
+                                const newConds = [...conditions];
+                                newConds[ci] = { ...cond, operator: e.target.value };
+                                updateBlock(idx, { ...block, conditions: newConds });
+                              }}
+                              className={`${smallInput} min-w-[160px]`}
+                            >
+                              {OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
+                            </select>
+                            {!noValue && (
+                              <input
+                                type="text"
+                                value={cond.value}
+                                onChange={(e) => {
+                                  const newConds = [...conditions];
+                                  newConds[ci] = { ...cond, value: e.target.value };
+                                  updateBlock(idx, { ...block, conditions: newConds });
+                                }}
+                                placeholder={t("collection_rules.translationValue")}
+                                className={`${smallInput} flex-1 font-mono`}
+                              />
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between pt-1">
+                            {conditions.length > 1 && (
+                              <button
+                                onClick={() => {
+                                  setEditingCond(null);
+                                  const newConds = conditions.filter((_, j) => j !== ci);
+                                  updateBlock(idx, { ...block, conditions: newConds });
+                                }}
+                                className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                {t("common.delete")}
+                              </button>
+                            )}
+                            <button onClick={() => setEditingCond(null)} className="ml-auto flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                              <CheckCircle2 className="h-3 w-3" />
+                              OK
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
             {/* Result value */}
-            <div>
-              <label className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.translationResult")}</label>
-              <input type="text"
-                value={block.result.value ?? ""}
-                onChange={(e) => updateBlock(idx, { ...block, result: { value: e.target.value || null } })}
-                placeholder={t("collection_rules.translationKeepOriginal")}
-                className={inputCls} />
-            </div>
+            {(() => {
+              const resultKey = `${idx}`;
+              const isEditingResult = editingResult === resultKey;
+              const value = block.result.value;
+
+              return isEditingResult ? (
+                <div className="mx-4 mb-3 rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 p-3 space-y-2">
+                  <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("collection_rules.translationResult")}</label>
+                  <input
+                    type="text"
+                    value={value ?? ""}
+                    onChange={(e) => updateBlock(idx, { ...block, result: { value: e.target.value || null } })}
+                    placeholder={t("collection_rules.translationKeepOriginal")}
+                    className={`${smallInput} w-full font-mono`}
+                  />
+                  <div className="flex justify-end pt-1">
+                    <button onClick={() => setEditingResult(null)} className="flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                      <CheckCircle2 className="h-3 w-3" />
+                      OK
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  className="mx-4 mb-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+                  onClick={() => setEditingResult(resultKey)}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 shrink-0">
+                      {t("collection_rules.translationResult")}
+                    </span>
+                    {value ? (
+                      <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">&quot;{value}&quot;</span>
+                    ) : (
+                      <span className="text-xs text-slate-400 dark:text-slate-500 italic">{t("collection_rules.translationKeepOriginal")}</span>
+                    )}
+                    <Pencil className="h-3 w-3 text-slate-400 ml-auto opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {/* Add buttons */}
-      <div className="flex items-center gap-2">
-        <button onClick={addElseIf}
-          className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
-          + {t("collection_rules.translationAddElseIf")}
+      <div className="flex items-center gap-2 pl-2">
+        <button
+          onClick={addElseIf}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("collection_rules.translationAddElseIf")}
         </button>
         {!hasElse && (
-          <button onClick={addElse}
-            className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
-            + {t("collection_rules.translationAddElse")}
+          <button
+            onClick={addElse}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
+          >
+            <Plus className="h-3 w-3" />
+            {t("collection_rules.translationAddElse")}
           </button>
         )}
       </div>
@@ -2624,6 +2787,24 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
   inventoryStructure: InventoryStructureCategory[];
   t: (k: string) => string;
 }) {
+  const [editingCond, setEditingCond] = useState<string | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+  const noValueOps = new Set(COND_OPERATORS.filter((o) => (o as any).noValue).map((o) => o.key));
+  const opLabel = (key: string) => COND_OPERATORS.find((o) => o.key === key)?.label ?? key;
+
+  const reorderBlocks = (fromIdx: number, toIdx: number) => {
+    if (fromIdx === toIdx) return;
+    const next = [...blocks];
+    const [moved] = next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, moved);
+    next.forEach((b, i) => {
+      if (i === 0 && b.type === "else_if") b.type = "if";
+      else if (i > 0 && b.type === "if") b.type = "else_if";
+    });
+    onChange(next);
+  };
+
   const lookupKeys = (catId: number | null): string[] => {
     if (!catId) return [];
     const cat = inventoryStructure.find((c) => c.categoryId === catId);
@@ -2671,144 +2852,257 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
     onChange([...blocks, { type: "else", result: defaultResult() }]);
   };
 
+  const blockLabel = (type: ConditionBlock["type"]) =>
+    type === "if" ? t("collection_rules.translationIf")
+    : type === "else_if" ? t("collection_rules.translationElseIf")
+    : t("collection_rules.translationElse");
+
   const hasElse = blocks.some((b) => b.type === "else");
 
   return (
-    <div className="space-y-3">
-      {blocks.map((block, idx) => (
-        <div key={idx} className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 bg-slate-50 dark:bg-slate-800/50">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-500 uppercase">
-                {block.type === "if" ? t("collection_rules.translationIf") :
-                 block.type === "else_if" ? t("collection_rules.translationElseIf") :
-                 t("collection_rules.translationElse")}
-              </span>
-              {block.type !== "else" && block.conditions && block.conditions.length > 1 && (
-                <select value={block.logic ?? "and"}
-                  onChange={(e) => updateBlock(idx, { ...block, logic: e.target.value as "and" | "or" })}
-                  className="text-xs rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 px-1.5 py-0.5">
-                  <option value="and">AND</option>
-                  <option value="or">OR</option>
-                </select>
-              )}
-            </div>
-            {idx > 0 && (
-              <button onClick={() => removeBlock(idx)} className="p-0.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                <X className="h-3.5 w-3.5 text-red-400" />
-              </button>
-            )}
-          </div>
+    <div className="space-y-2">
+      {blocks.map((block, idx) => {
+        const colors = blockColors[block.type] || blockColors.if;
+        const conditions = block.conditions ?? [];
 
-          <div className="p-4 space-y-4">
-            {block.type !== "else" && (
-              <div className="space-y-2">
-                {(block.conditions ?? []).map((cond, ci) => {
-                  const opMeta = COND_OPERATORS.find((o) => o.key === cond.operator);
-                  const noValue = !!(opMeta as any)?.noValue;
+        return (
+          <div
+            key={idx}
+            className={`border-l-4 ${colors.border} rounded-lg border border-slate-200 dark:border-slate-700 ${colors.bg} ${dragOverIdx === idx && dragIdx !== idx ? "ring-2 ring-blue-400" : ""}`}
+            draggable
+            onDragStart={(e) => { setDragIdx(idx); e.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+            onDragLeave={() => setDragOverIdx(null)}
+            onDrop={(e) => { e.preventDefault(); setDragOverIdx(null); if (dragIdx !== null && dragIdx !== idx) reorderBlocks(dragIdx, idx); setDragIdx(null); }}
+            onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+          >
+            <div className="flex items-center justify-between px-4 py-2.5 cursor-grab active:cursor-grabbing">
+              <div className="flex items-center gap-2">
+                <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${colors.badge}`}>
+                  {blockLabel(block.type)}
+                </span>
+                {block.type !== "else" && conditions.length > 1 && (
+                  <button
+                    onClick={() => updateBlock(idx, { ...block, logic: block.logic === "and" ? "or" : "and" })}
+                    className={`px-2 py-0.5 rounded text-xs font-semibold cursor-pointer transition-colors ${logicToggleBadge(block.logic)}`}
+                  >
+                    {block.logic === "or" ? t("compliance_rules.logicOr") : t("compliance_rules.logicAnd")}
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {block.type !== "else" && (
+                  <button
+                    onClick={() => {
+                      const next = [...conditions, emptyInventoryCondition()];
+                      updateBlock(idx, { ...block, conditions: next });
+                      setEditingCond(`${idx}-${next.length - 1}`);
+                    }}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
+                    title={t("collection_rules.translationAddCondition")}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+                )}
+                {idx > 0 && (
+                  <button
+                    onClick={() => removeBlock(idx)}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {block.type !== "else" && conditions.length > 0 && (
+              <div className="px-4 pb-3 space-y-2">
+                {conditions.map((cond, ci) => {
+                  const condKey = `${idx}-${ci}`;
+                  const isEditing = editingCond === condKey;
+                  const noValue = noValueOps.has(cond.operator);
                   const keyOptions = lookupKeys(cond.inventoryCategoryId);
                   const columnOptions = lookupColumns(cond.inventoryCategoryId, cond.inventoryKey);
+                  const catName = inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId)?.categoryName
+                    ?? categories.find((c) => c.id === cond.inventoryCategoryId)?.name;
+
                   return (
-                    <div key={ci} className="grid grid-cols-12 gap-2 items-center">
-                      <select
-                        value={cond.inventoryCategoryId ?? ""}
-                        onChange={(e) => {
-                          const next = [...(block.conditions ?? [])];
-                          next[ci] = { ...cond, inventoryCategoryId: e.target.value ? Number(e.target.value) : null };
-                          updateBlock(idx, { ...block, conditions: next });
-                        }}
-                        className={selectCls + " col-span-3"}
-                      >
-                        <option value="">{t("collection_rules.conditionCategory")}</option>
-                        {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                      </select>
-                      <SuggestField
-                        value={cond.inventoryKey}
-                        options={keyOptions}
-                        placeholder={t("collection_rules.conditionKey")}
-                        onChange={(v) => {
-                          const next = [...(block.conditions ?? [])];
-                          next[ci] = { ...cond, inventoryKey: v };
-                          updateBlock(idx, { ...block, conditions: next });
-                        }}
-                        className="col-span-2"
-                      />
-                      <SuggestField
-                        value={cond.inventoryColumn}
-                        options={columnOptions}
-                        placeholder={t("collection_rules.conditionColumn")}
-                        onChange={(v) => {
-                          const next = [...(block.conditions ?? [])];
-                          next[ci] = { ...cond, inventoryColumn: v };
-                          updateBlock(idx, { ...block, conditions: next });
-                        }}
-                        className="col-span-2"
-                      />
-                      <select
-                        value={cond.operator}
-                        onChange={(e) => {
-                          const next = [...(block.conditions ?? [])];
-                          next[ci] = { ...cond, operator: e.target.value };
-                          updateBlock(idx, { ...block, conditions: next });
-                        }}
-                        className={selectCls + " col-span-2"}
-                      >
-                        {COND_OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
-                      </select>
-                      {!noValue ? (
-                        <input
-                          type="text"
-                          value={cond.value}
-                          onChange={(e) => {
-                            const next = [...(block.conditions ?? [])];
-                            next[ci] = { ...cond, value: e.target.value };
-                            updateBlock(idx, { ...block, conditions: next });
-                          }}
-                          placeholder={t("collection_rules.translationValue")}
-                          className={inputClsCompact + " col-span-2"}
-                        />
-                      ) : <div className="col-span-2" />}
-                      {(block.conditions ?? []).length > 1 && (
-                        <button onClick={() => {
-                          const next = (block.conditions ?? []).filter((_, j) => j !== ci);
-                          updateBlock(idx, { ...block, conditions: next });
-                        }} className="col-span-1 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 justify-self-end">
-                          <X className="h-3.5 w-3.5 text-red-400" />
-                        </button>
+                    <div key={ci}>
+                      {!isEditing && (
+                        <div
+                          className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+                          onClick={() => setEditingCond(condKey)}
+                        >
+                          {ci > 0 && (
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase shrink-0 ${logicBadge(block.logic)}`}>
+                              {block.logic === "or" ? t("compliance_rules.logicOr") : t("compliance_rules.logicAnd")}
+                            </span>
+                          )}
+                          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                            INV
+                          </span>
+                          <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
+                            {`${catName || "?"} / ${cond.inventoryKey || "?"}`}
+                            {cond.inventoryColumn && cond.inventoryColumn !== "Value#1" ? ` [${cond.inventoryColumn}]` : ""}
+                          </span>
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">{opLabel(cond.operator)}</span>
+                          {!noValue && (
+                            <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{cond.value}&quot;</span>
+                          )}
+                          <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <Pencil className="h-3 w-3 text-slate-400" />
+                            {conditions.length > 1 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const next = conditions.filter((_, j) => j !== ci);
+                                  updateBlock(idx, { ...block, conditions: next });
+                                }}
+                                className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {isEditing && (
+                        <div className="rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Cat.</span>
+                              <select
+                                value={cond.inventoryCategoryId ?? ""}
+                                onChange={(e) => {
+                                  const next = [...conditions];
+                                  next[ci] = { ...cond, inventoryCategoryId: e.target.value ? Number(e.target.value) : null, inventoryKey: "", inventoryColumn: "Value#1" };
+                                  updateBlock(idx, { ...block, conditions: next });
+                                }}
+                                className={`${smallInput} max-w-[180px]`}
+                              >
+                                <option value="">--</option>
+                                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionKey")}</span>
+                              <SuggestField
+                                value={cond.inventoryKey}
+                                options={keyOptions}
+                                placeholder="--"
+                                onChange={(v) => {
+                                  const next = [...conditions];
+                                  next[ci] = { ...cond, inventoryKey: v };
+                                  updateBlock(idx, { ...block, conditions: next });
+                                }}
+                                className="max-w-[180px]"
+                              />
+                            </div>
+                            {(columnOptions.length > 1 || (cond.inventoryColumn && cond.inventoryColumn !== "Value#1")) && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Col.</span>
+                                <SuggestField
+                                  value={cond.inventoryColumn}
+                                  options={columnOptions}
+                                  placeholder="Value#1"
+                                  onChange={(v) => {
+                                    const next = [...conditions];
+                                    next[ci] = { ...cond, inventoryColumn: v };
+                                    updateBlock(idx, { ...block, conditions: next });
+                                  }}
+                                  className="max-w-[140px]"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Test</span>
+                            <select
+                              value={cond.operator}
+                              onChange={(e) => {
+                                const next = [...conditions];
+                                next[ci] = { ...cond, operator: e.target.value };
+                                updateBlock(idx, { ...block, conditions: next });
+                              }}
+                              className={`${smallInput} min-w-[160px]`}
+                            >
+                              {COND_OPERATORS.map((op) => <option key={op.key} value={op.key}>{op.label}</option>)}
+                            </select>
+                            {!noValue && (
+                              <input
+                                type="text"
+                                value={cond.value}
+                                onChange={(e) => {
+                                  const next = [...conditions];
+                                  next[ci] = { ...cond, value: e.target.value };
+                                  updateBlock(idx, { ...block, conditions: next });
+                                }}
+                                placeholder={t("collection_rules.translationValue")}
+                                className={`${smallInput} flex-1 font-mono`}
+                              />
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1">
+                            {conditions.length > 1 && (
+                              <button
+                                onClick={() => {
+                                  setEditingCond(null);
+                                  const next = conditions.filter((_, j) => j !== ci);
+                                  updateBlock(idx, { ...block, conditions: next });
+                                }}
+                                className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 transition-colors"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                                {t("common.delete")}
+                              </button>
+                            )}
+                            <button onClick={() => setEditingCond(null)} className="ml-auto flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                              <CheckCircle2 className="h-3 w-3" />
+                              OK
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </div>
                   );
                 })}
-                <button onClick={() => {
-                  const next = [...(block.conditions ?? []), emptyInventoryCondition()];
-                  updateBlock(idx, { ...block, conditions: next });
-                }} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
-                  + {t("collection_rules.translationAddCondition")}
-                </button>
               </div>
             )}
 
-            <ConditionResultEditor
-              result={block.result}
-              tags={tags}
-              categories={categories}
-              inventoryStructure={inventoryStructure}
-              onChange={(result) => updateBlock(idx, { ...block, result })}
-              t={t}
-            />
+            <div className="px-4 pb-3">
+              <ConditionResultEditor
+                resultKey={`${idx}`}
+                result={block.result}
+                tags={tags}
+                categories={categories}
+                inventoryStructure={inventoryStructure}
+                onChange={(result) => updateBlock(idx, { ...block, result })}
+                t={t}
+              />
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
-      <div className="flex items-center gap-2">
-        <button onClick={addElseIf}
-          className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
-          + {t("collection_rules.translationAddElseIf")}
+      <div className="flex items-center gap-2 pl-2">
+        <button
+          onClick={addElseIf}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("collection_rules.translationAddElseIf")}
         </button>
         {!hasElse && (
-          <button onClick={addElse}
-            className="text-xs px-3 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
-            + {t("collection_rules.translationAddElse")}
+          <button
+            onClick={addElse}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700/50 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
+          >
+            <Plus className="h-3 w-3" />
+            {t("collection_rules.translationAddElse")}
           </button>
         )}
       </div>
@@ -2816,7 +3110,8 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
   );
 }
 
-function ConditionResultEditor({ result, tags, categories, inventoryStructure, onChange, t }: {
+function ConditionResultEditor({ resultKey, result, tags, categories, inventoryStructure, onChange, t }: {
+  resultKey: string;
   result: ConditionResult;
   tags: NodeTagItem[];
   categories: InventoryCategory[];
@@ -2825,6 +3120,7 @@ function ConditionResultEditor({ result, tags, categories, inventoryStructure, o
   t: (k: string) => string;
 }) {
   const actions = normalizeResult(result);
+  const [editingAction, setEditingAction] = useState<string | null>(null);
 
   const updateAction = (i: number, next: ConditionAction) => {
     onChange(actions.map((a, idx) => idx === i ? next : a));
@@ -2835,17 +3131,22 @@ function ConditionResultEditor({ result, tags, categories, inventoryStructure, o
   };
   const addAction = () => {
     onChange([...actions, emptyAction()]);
+    setEditingAction(`${resultKey}-${actions.length}`);
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 p-3 space-y-2">
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-3 space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+        <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 uppercase tracking-wider">
           {t("collection_rules.conditionThen")}
         </span>
-        <button type="button" onClick={addAction}
-          className="text-xs px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-600 text-slate-500 hover:text-slate-700 hover:border-slate-400 dark:hover:text-slate-300 dark:hover:border-slate-500">
-          + {t("collection_rules.conditionAddAction")}
+        <button
+          type="button"
+          onClick={addAction}
+          className="flex items-center gap-1 px-2 py-1 rounded text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors"
+          title={t("collection_rules.conditionAddAction")}
+        >
+          <Plus className="h-3 w-3" />
         </button>
       </div>
 
@@ -2856,24 +3157,33 @@ function ConditionResultEditor({ result, tags, categories, inventoryStructure, o
       )}
 
       <div className="space-y-2">
-        {actions.map((action, i) => (
-          <ConditionActionRow
-            key={i}
-            action={action}
-            tags={tags}
-            categories={categories}
-            inventoryStructure={inventoryStructure}
-            onChange={(next) => updateAction(i, next)}
-            onRemove={() => removeAction(i)}
-            t={t}
-          />
-        ))}
+        {actions.map((action, i) => {
+          const aKey = `${resultKey}-${i}`;
+          return (
+            <ConditionActionRow
+              key={i}
+              actionKey={aKey}
+              isEditing={editingAction === aKey}
+              setEditing={(open) => setEditingAction(open ? aKey : null)}
+              action={action}
+              tags={tags}
+              categories={categories}
+              inventoryStructure={inventoryStructure}
+              onChange={(next) => updateAction(i, next)}
+              onRemove={() => { setEditingAction(null); removeAction(i); }}
+              t={t}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function ConditionActionRow({ action, tags, categories, inventoryStructure, onChange, onRemove, t }: {
+function ConditionActionRow({ action, tags, categories, inventoryStructure, isEditing, setEditing, onChange, onRemove, t }: {
+  actionKey: string;
+  isEditing: boolean;
+  setEditing: (open: boolean) => void;
   action: ConditionAction;
   tags: NodeTagItem[];
   categories: InventoryCategory[];
@@ -2906,71 +3216,168 @@ function ConditionActionRow({ action, tags, categories, inventoryStructure, onCh
     }
   };
 
-  return (
-    <div className="flex items-start gap-2 rounded-md bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 p-2">
-      <select
-        value={action.type}
-        onChange={(e) => switchType(e.target.value as "set_tag" | "set_inventory")}
-        className={selectClsBase + " shrink-0"}
-      >
-        <option value="set_tag">{t("collection_rules.conditionResultTag")}</option>
-        <option value="set_inventory">{t("collection_rules.conditionResultInventory")}</option>
-      </select>
+  if (!isEditing) {
+    if (action.type === "set_tag") {
+      const tg = tags.find((tt) => tt.id === action.tagId);
+      return (
+        <div
+          className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+          onClick={() => setEditing(true)}
+        >
+          <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400">
+            TAG
+          </span>
+          {tg ? (
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold shrink-0"
+              style={{ backgroundColor: `${tg.color}20`, color: tg.color }}
+            >
+              {tg.name}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-400 italic">{t("collection_rules.conditionSelectTag")}</span>
+          )}
+          <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            <Pencil className="h-3 w-3 text-slate-400" />
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+              className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+              title={t("collection_rules.conditionRemoveAction")}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+      );
+    }
 
-      <div className="flex-1 min-w-0">
-        {action.type === "set_tag" && (
+    const catName = inventoryStructure.find((c) => c.categoryId === action.categoryId)?.categoryName
+      ?? categories.find((c) => c.id === action.categoryId)?.name;
+    return (
+      <div
+        className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
+        onClick={() => setEditing(true)}
+      >
+        <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400">
+          INV
+        </span>
+        <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
+          {`${catName || "?"} / ${action.key || "?"}`}
+          {action.column && action.column !== "Value#1" ? ` [${action.column}]` : ""}
+        </span>
+        <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">=</span>
+        <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{action.value ?? ""}&quot;</span>
+        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+          <Pencil className="h-3 w-3 text-slate-400" />
+          <button
+            onClick={(e) => { e.stopPropagation(); onRemove(); }}
+            className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+            title={t("collection_rules.conditionRemoveAction")}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border-2 border-blue-300 dark:border-blue-500/40 bg-white dark:bg-slate-900 p-3 space-y-2.5">
+      <div className="flex items-center gap-2">
+        <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Type</span>
+        <select
+          value={action.type}
+          onChange={(e) => switchType(e.target.value as "set_tag" | "set_inventory")}
+          className={`${smallInput} min-w-[200px]`}
+        >
+          <option value="set_tag">{t("collection_rules.conditionResultTag")}</option>
+          <option value="set_inventory">{t("collection_rules.conditionResultInventory")}</option>
+        </select>
+      </div>
+
+      {action.type === "set_tag" && (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Tag</span>
           <select
             value={action.tagId ?? ""}
             onChange={(e) => onChange({ type: "set_tag", tagId: e.target.value ? Number(e.target.value) : null })}
-            className={selectCls}
+            className={`${smallInput} flex-1`}
           >
             <option value="">{t("collection_rules.conditionSelectTag")}</option>
             {tags.map((tg) => (
               <option key={tg.id} value={tg.id}>{tg.name}</option>
             ))}
           </select>
-        )}
+        </div>
+      )}
 
-        {action.type === "set_inventory" && (
-          <div className="grid grid-cols-12 gap-2">
-            <select
-              value={action.categoryId ?? ""}
-              onChange={(e) => onChange({ ...action, categoryId: e.target.value ? Number(e.target.value) : null })}
-              className={selectCls + " col-span-3"}
-            >
-              <option value="">{t("collection_rules.conditionCategory")}</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <SuggestField
-              value={action.key ?? ""}
-              options={keyOptions}
-              placeholder={t("collection_rules.conditionKey")}
-              onChange={(v) => onChange({ ...action, key: v })}
-              className="col-span-3"
-            />
-            <SuggestField
-              value={action.column ?? "Value#1"}
-              options={colOptions}
-              placeholder={t("collection_rules.conditionColumn")}
-              onChange={(v) => onChange({ ...action, column: v })}
-              className="col-span-3"
-            />
+      {action.type === "set_inventory" && (
+        <>
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Cat.</span>
+              <select
+                value={action.categoryId ?? ""}
+                onChange={(e) => onChange({ ...action, categoryId: e.target.value ? Number(e.target.value) : null })}
+                className={`${smallInput} max-w-[180px]`}
+              >
+                <option value="">--</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionKey")}</span>
+              <SuggestField
+                value={action.key ?? ""}
+                options={keyOptions}
+                placeholder="--"
+                onChange={(v) => onChange({ ...action, key: v })}
+                className="max-w-[180px]"
+              />
+            </div>
+            {(colOptions.length > 1 || (action.column && action.column !== "Value#1")) && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Col.</span>
+                <SuggestField
+                  value={action.column ?? "Value#1"}
+                  options={colOptions}
+                  placeholder="Value#1"
+                  onChange={(v) => onChange({ ...action, column: v })}
+                  className="max-w-[140px]"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionValue")}</span>
             <input
               type="text"
               value={action.value ?? ""}
               onChange={(e) => onChange({ ...action, value: e.target.value })}
               placeholder={t("collection_rules.conditionValue")}
-              className={inputClsCompact + " col-span-3"}
+              className={`${smallInput} flex-1 font-mono`}
             />
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      <button type="button" onClick={onRemove}
-        title={t("collection_rules.conditionRemoveAction")}
-        className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 mt-1">
-        <X className="h-3.5 w-3.5 text-red-400" />
-      </button>
+      <div className="flex items-center justify-between pt-1">
+        <button
+          type="button"
+          onClick={onRemove}
+          className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600 transition-colors"
+        >
+          <Trash2 className="h-3 w-3" />
+          {t("common.delete")}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="ml-auto flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+        >
+          <CheckCircle2 className="h-3 w-3" />
+          OK
+        </button>
+      </div>
     </div>
   );
 }
