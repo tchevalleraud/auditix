@@ -33,6 +33,7 @@ import {
   RefreshCw,
   Layers,
   Code2,
+  Mail,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -131,6 +132,7 @@ const adminNav: NavCategory[] = [
       { key: "sidebar.health", href: "/admin/health", icon: HeartPulse },
       { key: "sidebar.logs", href: "/admin/logs", icon: ScrollText },
       { key: "sidebar.tasks", href: "/admin/tasks", icon: ListTodo },
+      { key: "sidebar.mailServers", href: "/admin/mail", icon: Mail },
     ],
   },
 ];
