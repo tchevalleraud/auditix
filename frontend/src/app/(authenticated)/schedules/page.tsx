@@ -9,19 +9,16 @@ import {
   Plus,
   Search,
   Loader2,
-  Pencil,
   Trash2,
   X,
   Play,
   ToggleLeft,
   ToggleRight,
-  Server,
-  FileBarChart,
-  ShieldCheck,
-  ChevronDown,
-  ChevronRight,
   Database,
-  Info,
+  ShieldCheck,
+  FileBarChart,
+  Mail,
+  Sparkles,
 } from "lucide-react";
 import CronBuilder from "@/components/CronBuilder";
 
@@ -35,23 +32,13 @@ interface ScheduleItem {
   lastTriggeredAt: string | null;
   lastCompletedAt: string | null;
   nextRunAt: string | null;
-  collectionNodeIds: number[] | null;
+  collectEnabled: boolean;
+  extractEnabled: boolean;
   cleanupEnabled: boolean;
-  complianceNodeIds: number[] | null;
+  complianceEnabled: boolean;
   reportIds: number[] | null;
+  mailReportIds: number[] | null;
   createdAt: string;
-}
-
-interface NodeOption {
-  id: number;
-  name: string | null;
-  ipAddress: string;
-  hostname: string | null;
-}
-
-interface ReportOption {
-  id: number;
-  name: string;
 }
 
 export default function SchedulesPage() {
@@ -62,33 +49,12 @@ export default function SchedulesPage() {
   const [search, setSearch] = useState("");
   const [fetchLoading, setFetchLoading] = useState(true);
 
-  // Modal state
+  // Create modal (name + cron only)
   const [modal, setModal] = useState(false);
-  const [editingSchedule, setEditingSchedule] = useState<ScheduleItem | null>(null);
   const [formName, setFormName] = useState("");
-  const [formCron, setFormCron] = useState("");
-  const [formEnabled, setFormEnabled] = useState(true);
-  const [formCollectionEnabled, setFormCollectionEnabled] = useState(false);
-  const [formCollectionNodeIds, setFormCollectionNodeIds] = useState<number[]>([]);
-  const [formCleanupEnabled, setFormCleanupEnabled] = useState(false);
-  const [formComplianceEnabled, setFormComplianceEnabled] = useState(false);
-  const [formComplianceNodeIds, setFormComplianceNodeIds] = useState<number[]>([]);
-  const [formReportEnabled, setFormReportEnabled] = useState(false);
-  const [formReportIds, setFormReportIds] = useState<number[]>([]);
+  const [formCron, setFormCron] = useState("0 2 * * *");
   const [saving, setSaving] = useState(false);
 
-  // Collapsible sections
-  const [collectionOpen, setCollectionOpen] = useState(false);
-  const [complianceOpen, setComplianceOpen] = useState(false);
-  const [reportOpen, setReportOpen] = useState(false);
-
-  // Options for selectors
-  const [nodes, setNodes] = useState<NodeOption[]>([]);
-  const [reports, setReports] = useState<ReportOption[]>([]);
-  const [nodesLoading, setNodesLoading] = useState(false);
-  const [reportsLoading, setReportsLoading] = useState(false);
-
-  // Confirmation modals
   const [deleteConfirm, setDeleteConfirm] = useState<ScheduleItem | null>(null);
   const [triggerConfirm, setTriggerConfirm] = useState<ScheduleItem | null>(null);
 
@@ -106,93 +72,68 @@ export default function SchedulesPage() {
     loadSchedules();
   }, [loadSchedules]);
 
-  const loadOptions = useCallback(async () => {
-    if (!current) return;
-    setNodesLoading(true);
-    setReportsLoading(true);
-    try {
-      const [nodesRes, reportsRes] = await Promise.all([
-        fetch(`/api/nodes?context=${current.id}`),
-        fetch(`/api/reports?context=${current.id}`),
-      ]);
-      if (nodesRes.ok) setNodes(await nodesRes.json());
-      if (reportsRes.ok) setReports(await reportsRes.json());
-    } finally {
-      setNodesLoading(false);
-      setReportsLoading(false);
-    }
-  }, [current]);
+  // Mercure live updates
+  useEffect(() => {
+    const url = new URL("/.well-known/mercure", window.location.origin);
+    url.searchParams.append("topic", "schedules");
+    const es = new EventSource(url.toString(), { withCredentials: true });
+
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (!data.schedule) return;
+        if (data.event === "schedule.deleted") {
+          setSchedules((prev) => prev.filter((s) => s.id !== data.schedule.id));
+          return;
+        }
+        setSchedules((prev) => {
+          const idx = prev.findIndex((s) => s.id === data.schedule.id);
+          if (idx >= 0) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], ...data.schedule };
+            return next;
+          }
+          if (data.event === "schedule.created") {
+            // Refetch full record (Mercure payload is partial)
+            loadSchedules();
+          }
+          return prev;
+        });
+      } catch {
+        // ignore
+      }
+    };
+
+    return () => es.close();
+  }, [loadSchedules]);
 
   const filtered = schedules.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const openCreate = () => {
-    setEditingSchedule(null);
     setFormName("");
-    setFormCron("");
-    setFormEnabled(true);
-    setFormCollectionEnabled(false);
-    setFormCollectionNodeIds([]);
-    setFormCleanupEnabled(false);
-    setFormComplianceEnabled(false);
-    setFormComplianceNodeIds([]);
-    setFormReportEnabled(false);
-    setFormReportIds([]);
-    setCollectionOpen(false);
-    setComplianceOpen(false);
-    setReportOpen(false);
+    setFormCron("0 2 * * *");
     setModal(true);
-    loadOptions();
   };
 
-  const openEdit = (schedule: ScheduleItem) => {
-    setEditingSchedule(schedule);
-    setFormName(schedule.name);
-    setFormCron(schedule.cronExpression);
-    setFormEnabled(schedule.enabled);
-    setFormCollectionEnabled((schedule.collectionNodeIds ?? []).length > 0);
-    setFormCollectionNodeIds(schedule.collectionNodeIds ?? []);
-    setFormCleanupEnabled(schedule.cleanupEnabled ?? false);
-    setFormComplianceEnabled((schedule.complianceNodeIds ?? []).length > 0);
-    setFormComplianceNodeIds(schedule.complianceNodeIds ?? []);
-    setFormReportEnabled((schedule.reportIds ?? []).length > 0);
-    setFormReportIds(schedule.reportIds ?? []);
-    setCollectionOpen((schedule.collectionNodeIds ?? []).length > 0);
-    setComplianceOpen((schedule.complianceNodeIds ?? []).length > 0);
-    setReportOpen((schedule.reportIds ?? []).length > 0);
-    setModal(true);
-    loadOptions();
-  };
-
-  const handleSave = async () => {
+  const handleCreate = async () => {
     if (!formName.trim() || !formCron.trim() || !current) return;
     setSaving(true);
     try {
-      const body = {
-        name: formName.trim(),
-        cronExpression: formCron.trim(),
-        enabled: formEnabled,
-        collectionNodeIds: formCollectionEnabled ? formCollectionNodeIds : null,
-        cleanupEnabled: formCleanupEnabled,
-        complianceNodeIds: formComplianceEnabled ? formComplianceNodeIds : null,
-        reportIds: formReportEnabled ? formReportIds : null,
-      };
-      const url = editingSchedule
-        ? `/api/schedules/${editingSchedule.id}`
-        : `/api/schedules?context=${current.id}`;
-      const method = editingSchedule ? "PUT" : "POST";
-      const res = await fetch(url, {
-        method,
+      const res = await fetch(`/api/schedules?context=${current.id}`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          name: formName.trim(),
+          cronExpression: formCron.trim(),
+          enabled: true,
+        }),
       });
       if (res.ok) {
+        const created: ScheduleItem = await res.json();
         setModal(false);
-        loadSchedules();
-      } else {
-        const err = await res.json().catch(() => ({}));
-        console.error("Schedule save error:", res.status, err);
+        router.push(`/schedules/${created.id}`);
       }
     } finally {
       setSaving(false);
@@ -215,23 +156,13 @@ export default function SchedulesPage() {
     const res = await fetch(`/api/schedules/${schedule.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...schedule, enabled: !schedule.enabled }),
+      body: JSON.stringify({ enabled: !schedule.enabled }),
     });
     if (res.ok) loadSchedules();
   };
 
-  const toggleNodeId = (list: number[], setList: (v: number[]) => void, id: number) => {
-    setList(list.includes(id) ? list.filter((n) => n !== id) : [...list, id]);
-  };
-
-  const toggleReportId = (id: number) => {
-    setFormReportIds(
-      formReportIds.includes(id) ? formReportIds.filter((r) => r !== id) : [...formReportIds, id]
-    );
-  };
-
   const getStatusBadge = (schedule: ScheduleItem) => {
-    if (schedule.currentPhase && schedule.currentPhaseStatus === "running") {
+    if (schedule.currentPhase) {
       return (
         <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 dark:bg-blue-500/10 px-2.5 py-0.5 text-xs font-medium text-blue-700 dark:text-blue-300">
           <Loader2 className="h-3 w-3 animate-spin" />
@@ -241,42 +172,24 @@ export default function SchedulesPage() {
     }
     return (
       <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400">
-        Idle
+        {t("schedules.statusIdle")}
       </span>
     );
   };
 
   const getPhaseIndicators = (schedule: ScheduleItem) => {
-    const indicators = [];
-    if (schedule.collectionNodeIds && schedule.collectionNodeIds.length > 0) {
-      indicators.push(
-        <span key="c" className="inline-flex items-center justify-center rounded bg-emerald-100 dark:bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-300" title={t("schedules.phaseCollection")}>
-          C
-        </span>
-      );
-    }
-    if (schedule.cleanupEnabled) {
-      indicators.push(
-        <span key="cl" className="inline-flex items-center justify-center rounded bg-rose-100 dark:bg-rose-500/10 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 dark:text-rose-300" title={t("schedules.phaseCleanup")}>
-          Cl
-        </span>
-      );
-    }
-    if (schedule.complianceNodeIds && schedule.complianceNodeIds.length > 0) {
-      indicators.push(
-        <span key="co" className="inline-flex items-center justify-center rounded bg-amber-100 dark:bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300" title={t("schedules.phaseCompliance")}>
-          Co
-        </span>
-      );
-    }
-    if (schedule.reportIds && schedule.reportIds.length > 0) {
-      indicators.push(
-        <span key="r" className="inline-flex items-center justify-center rounded bg-violet-100 dark:bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-bold text-violet-700 dark:text-violet-300" title={t("schedules.phaseReport")}>
-          R
-        </span>
-      );
-    }
-    return indicators;
+    const items: { key: string; icon: typeof Database; title: string; cls: string }[] = [];
+    if (schedule.collectEnabled) items.push({ key: "collect", icon: Database, title: t("schedules.tabCollect"), cls: "bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" });
+    if (schedule.extractEnabled) items.push({ key: "extract", icon: Sparkles, title: t("schedules.tabExtract"), cls: "bg-cyan-100 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-300" });
+    if (schedule.cleanupEnabled) items.push({ key: "cleanup", icon: Trash2, title: t("schedules.tabCleanup"), cls: "bg-rose-100 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300" });
+    if (schedule.complianceEnabled) items.push({ key: "compliance", icon: ShieldCheck, title: t("schedules.tabCompliance"), cls: "bg-amber-100 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300" });
+    if (schedule.reportIds && schedule.reportIds.length > 0) items.push({ key: "report", icon: FileBarChart, title: t("schedules.tabReport"), cls: "bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-300" });
+    if (schedule.mailReportIds && schedule.mailReportIds.length > 0) items.push({ key: "mail", icon: Mail, title: t("schedules.tabMail"), cls: "bg-sky-100 dark:bg-sky-500/10 text-sky-700 dark:text-sky-300" });
+    return items.map(({ key, icon: Icon, title, cls }) => (
+      <span key={key} className={`inline-flex items-center justify-center rounded p-1 ${cls}`} title={title}>
+        <Icon className="h-3 w-3" />
+      </span>
+    ));
   };
 
   const inputClass =
@@ -362,7 +275,7 @@ export default function SchedulesPage() {
                           <Calendar className="h-4 w-4 text-blue-500" />
                           {schedule.name}
                         </button>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 ml-2">
                           {getPhaseIndicators(schedule)}
                         </div>
                       </div>
@@ -373,9 +286,7 @@ export default function SchedulesPage() {
                       </code>
                     </td>
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        {getStatusBadge(schedule)}
-                      </div>
+                      <div className="flex items-center gap-2">{getStatusBadge(schedule)}</div>
                     </td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400">
                       {schedule.nextRunAt
@@ -394,12 +305,6 @@ export default function SchedulesPage() {
                           ) : (
                             <ToggleLeft className="h-4 w-4 text-slate-400" />
                           )}
-                        </button>
-                        <button
-                          onClick={() => openEdit(schedule)}
-                          className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                        >
-                          <Pencil className="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
                         </button>
                         <button
                           onClick={() => setTriggerConfirm(schedule)}
@@ -423,267 +328,33 @@ export default function SchedulesPage() {
         </div>
       </div>
 
-      {/* Create/Edit Modal */}
+      {/* Create modal */}
       {modal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-lg max-h-[90vh] flex flex-col">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                {editingSchedule ? t("schedules.editSchedule") : t("schedules.newSchedule")}
+                {t("schedules.newSchedule")}
               </h3>
               <button onClick={() => setModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                 <X className="h-5 w-5 text-slate-400" />
               </button>
             </div>
-            <div className="p-6 space-y-4 overflow-y-auto">
-              {/* Name */}
+            <div className="p-6 space-y-4">
               <div className="space-y-1.5">
-                <label className={labelClass}>{t("schedules.colName")}</label>
+                <label className={labelClass}>{t("schedules.name")}</label>
                 <input
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
                   placeholder={t("schedules.namePlaceholder")}
                   className={inputClass}
+                  autoFocus
                 />
               </div>
-
-              {/* Cron expression */}
               <div className="space-y-1.5">
                 <label className={labelClass}>{t("schedules.cronExpression")}</label>
                 <CronBuilder value={formCron} onChange={setFormCron} t={t} />
-              </div>
-
-              {/* Enabled toggle */}
-              <div className="flex items-center justify-between">
-                <label className={labelClass}>{t("schedules.enabled")}</label>
-                <button
-                  type="button"
-                  onClick={() => setFormEnabled(!formEnabled)}
-                  className="p-1"
-                >
-                  {formEnabled ? (
-                    <ToggleRight className="h-6 w-6 text-emerald-500" />
-                  ) : (
-                    <ToggleLeft className="h-6 w-6 text-slate-400" />
-                  )}
-                </button>
-              </div>
-
-              {/* Collection section */}
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setCollectionOpen(!collectionOpen)}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <Database className="h-4 w-4 text-emerald-500" />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("schedules.phaseCollection")}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFormCollectionEnabled(!formCollectionEnabled);
-                      }}
-                      className="p-0.5"
-                    >
-                      {formCollectionEnabled ? (
-                        <ToggleRight className="h-5 w-5 text-emerald-500" />
-                      ) : (
-                        <ToggleLeft className="h-5 w-5 text-slate-400" />
-                      )}
-                    </button>
-                    {collectionOpen ? (
-                      <ChevronDown className="h-4 w-4 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
-                    )}
-                  </div>
-                </button>
-                {collectionOpen && (
-                  <div className="px-4 py-3 space-y-2 border-t border-slate-200 dark:border-slate-700">
-                    {nodesLoading ? (
-                      <div className="flex items-center justify-center py-3">
-                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                      </div>
-                    ) : nodes.length === 0 ? (
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{t("schedules.noNodes")}</p>
-                    ) : (
-                      nodes.map((node) => (
-                        <label key={node.id} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formCollectionNodeIds.includes(node.id)}
-                            onChange={() => toggleNodeId(formCollectionNodeIds, setFormCollectionNodeIds, node.id)}
-                            className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
-                          />
-                          <Server className="h-3.5 w-3.5 text-slate-400" />
-                          <span className="text-sm text-slate-700 dark:text-slate-300">
-                            {node.name || node.hostname || node.ipAddress}
-                          </span>
-                          <span className="text-xs text-slate-400 dark:text-slate-500">{node.ipAddress}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Cleanup section */}
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Trash2 className="h-4 w-4 text-rose-500" />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("schedules.phaseCleanup")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setFormCleanupEnabled(!formCleanupEnabled); }}
-                  >
-                    {formCleanupEnabled ? (
-                      <ToggleRight className="h-5 w-5 text-emerald-500" />
-                    ) : (
-                      <ToggleLeft className="h-5 w-5 text-slate-400" />
-                    )}
-                  </button>
-                </div>
-                {formCleanupEnabled && (
-                  <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-                    <p className="text-xs text-slate-400 dark:text-slate-500">{t("schedules.cleanupDesc")}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Compliance section */}
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setComplianceOpen(!complianceOpen)}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-amber-500" />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("schedules.phaseCompliance")}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFormComplianceEnabled(!formComplianceEnabled);
-                      }}
-                      className="p-0.5"
-                    >
-                      {formComplianceEnabled ? (
-                        <ToggleRight className="h-5 w-5 text-emerald-500" />
-                      ) : (
-                        <ToggleLeft className="h-5 w-5 text-slate-400" />
-                      )}
-                    </button>
-                    {complianceOpen ? (
-                      <ChevronDown className="h-4 w-4 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
-                    )}
-                  </div>
-                </button>
-                {complianceOpen && (
-                  <div className="px-4 py-3 space-y-2 border-t border-slate-200 dark:border-slate-700">
-                    {nodesLoading ? (
-                      <div className="flex items-center justify-center py-3">
-                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                      </div>
-                    ) : nodes.length === 0 ? (
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{t("schedules.noNodes")}</p>
-                    ) : (
-                      nodes.map((node) => (
-                        <label key={node.id} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formComplianceNodeIds.includes(node.id)}
-                            onChange={() => toggleNodeId(formComplianceNodeIds, setFormComplianceNodeIds, node.id)}
-                            className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
-                          />
-                          <Server className="h-3.5 w-3.5 text-slate-400" />
-                          <span className="text-sm text-slate-700 dark:text-slate-300">
-                            {node.name || node.hostname || node.ipAddress}
-                          </span>
-                          <span className="text-xs text-slate-400 dark:text-slate-500">{node.ipAddress}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Report section */}
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setReportOpen(!reportOpen)}
-                  className="flex items-center justify-between w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                >
-                  <div className="flex items-center gap-2">
-                    <FileBarChart className="h-4 w-4 text-violet-500" />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("schedules.phaseReport")}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFormReportEnabled(!formReportEnabled);
-                      }}
-                      className="p-0.5"
-                    >
-                      {formReportEnabled ? (
-                        <ToggleRight className="h-5 w-5 text-emerald-500" />
-                      ) : (
-                        <ToggleLeft className="h-5 w-5 text-slate-400" />
-                      )}
-                    </button>
-                    {reportOpen ? (
-                      <ChevronDown className="h-4 w-4 text-slate-400" />
-                    ) : (
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
-                    )}
-                  </div>
-                </button>
-                {reportOpen && (
-                  <div className="px-4 py-3 space-y-2 border-t border-slate-200 dark:border-slate-700">
-                    {reportsLoading ? (
-                      <div className="flex items-center justify-center py-3">
-                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                      </div>
-                    ) : reports.length === 0 ? (
-                      <p className="text-xs text-slate-400 dark:text-slate-500">{t("schedules.noReports")}</p>
-                    ) : (
-                      reports.map((report) => (
-                        <label key={report.id} className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={formReportIds.includes(report.id)}
-                            onChange={() => toggleReportId(report.id)}
-                            className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
-                          />
-                          <FileBarChart className="h-3.5 w-3.5 text-slate-400" />
-                          <span className="text-sm text-slate-700 dark:text-slate-300">{report.name}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Info text */}
-              <div className="flex items-start gap-2 rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2.5">
-                <Info className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {t("schedules.executionOrder")}
-                </p>
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
@@ -694,12 +365,12 @@ export default function SchedulesPage() {
                 {t("common.cancel")}
               </button>
               <button
-                onClick={handleSave}
+                onClick={handleCreate}
                 disabled={saving || !formName.trim() || !formCron.trim()}
                 className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {editingSchedule ? t("common.save") : t("common.create")}
+                {t("common.create")}
               </button>
             </div>
           </div>
@@ -736,7 +407,7 @@ export default function SchedulesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 space-y-4">
             <p className="text-sm text-slate-700 dark:text-slate-300">
-              {t("schedules.confirmTrigger", { name: triggerConfirm.name })}
+              {t("schedules.triggerConfirm")}
             </p>
             <div className="flex items-center justify-end gap-2">
               <button
@@ -749,7 +420,7 @@ export default function SchedulesPage() {
                 onClick={() => handleTrigger(triggerConfirm)}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 transition-colors"
               >
-                {t("schedules.trigger")}
+                {t("schedules.triggerNow")}
               </button>
             </div>
           </div>

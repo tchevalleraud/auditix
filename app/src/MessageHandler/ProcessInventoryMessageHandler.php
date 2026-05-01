@@ -30,14 +30,29 @@ class ProcessInventoryMessageHandler
         $nodeId = $node->getId();
         $baseDir = $this->projectDir . '/var/' . $collection->getStoragePath();
 
-        if (!is_dir($baseDir)) return;
+        if (!is_dir($baseDir)) {
+            $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
+            $collection->setExtractError('Storage directory not found');
+            $this->em->flush();
+            $this->publishExtractionEvent($nodeId, 'failed', 'Storage directory not found');
+            return;
+        }
 
+        $collection->setExtractStatus(Collection::EXTRACT_STATUS_RUNNING);
+        $collection->setExtractError(null);
+        $this->em->flush();
         $this->publishExtractionEvent($nodeId, 'running');
 
         try {
             $this->collectHandler->processInventoryRules($collection, $node, $baseDir);
+            $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
+            $collection->setLastExtractedAt(new \DateTimeImmutable());
+            $this->em->flush();
             $this->publishExtractionEvent($nodeId, 'completed');
         } catch (\Throwable $e) {
+            $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
+            $collection->setExtractError($e->getMessage());
+            $this->em->flush();
             $this->publishExtractionEvent($nodeId, 'failed', $e->getMessage());
             throw $e;
         }

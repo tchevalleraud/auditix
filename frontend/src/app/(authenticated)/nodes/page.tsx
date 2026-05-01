@@ -192,17 +192,27 @@ export default function NodesPage() {
     if (!current) return;
     const res = await fetch(`/api/collections?context=${current.id}`);
     if (!res.ok) return;
-    const cols: { node: { id: number }; status: string }[] = await res.json();
-    const active: Record<number, string> = {};
+    const cols: {
+      node: { id: number };
+      status: string;
+      extractStatus: string | null;
+    }[] = await res.json();
+    const activeCollect: Record<number, string> = {};
+    const activeExtract: Record<number, string> = {};
     for (const col of cols) {
       if (col.status === "pending" || col.status === "running") {
-        // Keep the most "active" status per node (running > pending)
-        if (!active[col.node.id] || col.status === "running") {
-          active[col.node.id] = col.status;
+        if (!activeCollect[col.node.id] || col.status === "running") {
+          activeCollect[col.node.id] = col.status;
+        }
+      }
+      if (col.extractStatus === "pending" || col.extractStatus === "running") {
+        if (!activeExtract[col.node.id] || col.extractStatus === "running") {
+          activeExtract[col.node.id] = col.extractStatus;
         }
       }
     }
-    setCollectStatus((prev) => ({ ...active, ...prev }));
+    setCollectStatus((prev) => ({ ...activeCollect, ...prev }));
+    setExtractStatus((prev) => ({ ...activeExtract, ...prev }));
   }, [current]);
 
   useEffect(() => {
@@ -914,31 +924,31 @@ export default function NodesPage() {
                     {/* Hostname */}
                     <td className="px-4 py-2">
                       <Link href={`/nodes/${node.id}`} className="group flex items-center gap-2">
-                        {collectStatus[node.id] && (
-                          collectStatus[node.id] === "completed" ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                          ) : collectStatus[node.id] === "failed" ? (
-                            <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                          ) : collectStatus[node.id] === "running" ? (
-                            <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
-                          ) : (
-                            <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
-                          )
-                        )}
-                        {extractStatus[node.id] && (
-                          extractStatus[node.id] === "completed" ? (
-                            <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                          ) : extractStatus[node.id] === "failed" ? (
-                            <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                          ) : extractStatus[node.id] === "running" ? (
-                            <ScanSearch className="h-4 w-4 animate-pulse text-amber-500 shrink-0" />
-                          ) : (
-                            <ScanSearch className="h-4 w-4 animate-pulse text-slate-400 shrink-0" />
-                          )
-                        )}
                         <div>
-                          <span className="text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
+                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
                             {node.hostname || node.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
+                            {collectStatus[node.id] && (
+                              collectStatus[node.id] === "completed" ? (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                              ) : collectStatus[node.id] === "failed" ? (
+                                <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                              ) : collectStatus[node.id] === "running" ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
+                              ) : (
+                                <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
+                              )
+                            )}
+                            {extractStatus[node.id] && (
+                              extractStatus[node.id] === "completed" ? (
+                                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                              ) : extractStatus[node.id] === "failed" ? (
+                                <XCircle className="h-4 w-4 text-red-500 shrink-0" />
+                              ) : extractStatus[node.id] === "running" ? (
+                                <ScanSearch className="h-4 w-4 animate-pulse text-amber-500 shrink-0" />
+                              ) : (
+                                <ScanSearch className="h-4 w-4 animate-pulse text-slate-400 shrink-0" />
+                              )
+                            )}
                           </span>
                           {(() => {
                             const dyn = node.dynamicTags ?? [];

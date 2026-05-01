@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\Schedule;
+use App\Service\ScheduleEventPublisher;
 use Cron\CronExpression;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -15,6 +16,10 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/schedules')]
 class ScheduleController extends AbstractController
 {
+    public function __construct(
+        private readonly ScheduleEventPublisher $events,
+    ) {}
+
     private function serialize(Schedule $s): array
     {
         return [
@@ -27,9 +32,13 @@ class ScheduleController extends AbstractController
             'lastTriggeredAt' => $s->getLastTriggeredAt()?->format('c'),
             'lastCompletedAt' => $s->getLastCompletedAt()?->format('c'),
             'nextRunAt' => $s->getNextRunAt()?->format('c'),
-            'collectionNodeIds' => $s->getCollectionNodeIds(),
+            'nodeSelectionMode' => $s->getNodeSelectionMode(),
+            'nodeTagId' => $s->getNodeTagId(),
+            'nodeIds' => $s->getNodeIds(),
+            'collectEnabled' => $s->isCollectEnabled(),
+            'extractEnabled' => $s->isExtractEnabled(),
             'cleanupEnabled' => $s->isCleanupEnabled(),
-            'complianceNodeIds' => $s->getComplianceNodeIds(),
+            'complianceEnabled' => $s->isComplianceEnabled(),
             'reportIds' => $s->getReportIds(),
             'mailReportIds' => $s->getMailReportIds(),
             'createdAt' => $s->getCreatedAt()->format('c'),
@@ -47,6 +56,55 @@ class ScheduleController extends AbstractController
         } catch (\Throwable) {
             $schedule->setNextRunAt(null);
         }
+    }
+
+    private function applyMutableFields(Schedule $schedule, array $data): ?JsonResponse
+    {
+        if (isset($data['name'])) {
+            $schedule->setName($data['name']);
+        }
+        if (isset($data['cronExpression'])) {
+            if (!CronExpression::isValidExpression($data['cronExpression'])) {
+                return $this->json(['error' => 'Invalid cron expression'], Response::HTTP_BAD_REQUEST);
+            }
+            $schedule->setCronExpression($data['cronExpression']);
+        }
+        if (array_key_exists('enabled', $data)) {
+            $schedule->setEnabled((bool) $data['enabled']);
+        }
+        if (array_key_exists('nodeSelectionMode', $data)) {
+            $mode = $data['nodeSelectionMode'];
+            $allowed = [Schedule::NODE_MODE_ALL, Schedule::NODE_MODE_TAG, Schedule::NODE_MODE_INDIVIDUAL, null];
+            if (!in_array($mode, $allowed, true)) {
+                return $this->json(['error' => 'Invalid nodeSelectionMode'], Response::HTTP_BAD_REQUEST);
+            }
+            $schedule->setNodeSelectionMode($mode);
+        }
+        if (array_key_exists('nodeTagId', $data)) {
+            $schedule->setNodeTagId($data['nodeTagId'] !== null ? (int) $data['nodeTagId'] : null);
+        }
+        if (array_key_exists('nodeIds', $data)) {
+            $schedule->setNodeIds(!empty($data['nodeIds']) ? array_map('intval', $data['nodeIds']) : null);
+        }
+        if (array_key_exists('collectEnabled', $data)) {
+            $schedule->setCollectEnabled((bool) $data['collectEnabled']);
+        }
+        if (array_key_exists('extractEnabled', $data)) {
+            $schedule->setExtractEnabled((bool) $data['extractEnabled']);
+        }
+        if (array_key_exists('cleanupEnabled', $data)) {
+            $schedule->setCleanupEnabled((bool) $data['cleanupEnabled']);
+        }
+        if (array_key_exists('complianceEnabled', $data)) {
+            $schedule->setComplianceEnabled((bool) $data['complianceEnabled']);
+        }
+        if (array_key_exists('reportIds', $data)) {
+            $schedule->setReportIds(!empty($data['reportIds']) ? array_map('intval', $data['reportIds']) : null);
+        }
+        if (array_key_exists('mailReportIds', $data)) {
+            $schedule->setMailReportIds(!empty($data['mailReportIds']) ? array_map('intval', $data['mailReportIds']) : null);
+        }
+        return null;
     }
 
     #[Route('', methods: ['GET'])]
@@ -96,29 +154,15 @@ class ScheduleController extends AbstractController
         $schedule->setContext($context);
         $schedule->setCronExpression($data['cronExpression']);
 
-        if (isset($data['enabled'])) {
-            $schedule->setEnabled((bool) $data['enabled']);
-        }
-        if (array_key_exists('collectionNodeIds', $data)) {
-            $schedule->setCollectionNodeIds(!empty($data['collectionNodeIds']) ? $data['collectionNodeIds'] : null);
-        }
-        if (array_key_exists('cleanupEnabled', $data)) {
-            $schedule->setCleanupEnabled((bool) $data['cleanupEnabled']);
-        }
-        if (array_key_exists('complianceNodeIds', $data)) {
-            $schedule->setComplianceNodeIds(!empty($data['complianceNodeIds']) ? $data['complianceNodeIds'] : null);
-        }
-        if (array_key_exists('reportIds', $data)) {
-            $schedule->setReportIds(!empty($data['reportIds']) ? $data['reportIds'] : null);
-        }
-        if (array_key_exists('mailReportIds', $data)) {
-            $schedule->setMailReportIds(!empty($data['mailReportIds']) ? $data['mailReportIds'] : null);
-        }
+        $error = $this->applyMutableFields($schedule, $data);
+        if ($error) return $error;
 
         $this->computeNextRun($schedule);
 
         $em->persist($schedule);
         $em->flush();
+
+        $this->events->publish($schedule, 'schedule.created');
 
         return $this->json($this->serialize($schedule), Response::HTTP_CREATED);
     }
@@ -134,37 +178,14 @@ class ScheduleController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (isset($data['name'])) {
-            $schedule->setName($data['name']);
-        }
-        if (isset($data['cronExpression'])) {
-            if (!CronExpression::isValidExpression($data['cronExpression'])) {
-                return $this->json(['error' => 'Invalid cron expression'], Response::HTTP_BAD_REQUEST);
-            }
-            $schedule->setCronExpression($data['cronExpression']);
-        }
-        if (isset($data['enabled'])) {
-            $schedule->setEnabled((bool) $data['enabled']);
-        }
-        if (array_key_exists('collectionNodeIds', $data)) {
-            $schedule->setCollectionNodeIds(!empty($data['collectionNodeIds']) ? $data['collectionNodeIds'] : null);
-        }
-        if (array_key_exists('cleanupEnabled', $data)) {
-            $schedule->setCleanupEnabled((bool) $data['cleanupEnabled']);
-        }
-        if (array_key_exists('complianceNodeIds', $data)) {
-            $schedule->setComplianceNodeIds(!empty($data['complianceNodeIds']) ? $data['complianceNodeIds'] : null);
-        }
-        if (array_key_exists('reportIds', $data)) {
-            $schedule->setReportIds(!empty($data['reportIds']) ? $data['reportIds'] : null);
-        }
-        if (array_key_exists('mailReportIds', $data)) {
-            $schedule->setMailReportIds(!empty($data['mailReportIds']) ? $data['mailReportIds'] : null);
-        }
+        $error = $this->applyMutableFields($schedule, $data);
+        if ($error) return $error;
 
         $this->computeNextRun($schedule);
         $schedule->setUpdatedAt(new \DateTimeImmutable());
         $em->flush();
+
+        $this->events->publish($schedule, 'schedule.updated');
 
         return $this->json($this->serialize($schedule));
     }
@@ -172,6 +193,7 @@ class ScheduleController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Schedule $schedule, EntityManagerInterface $em): JsonResponse
     {
+        $this->events->publish($schedule, 'schedule.deleted');
         $em->remove($schedule);
         $em->flush();
 
@@ -195,6 +217,8 @@ class ScheduleController extends AbstractController
         $schedule->setCurrentPhaseStatus(Schedule::STATUS_DISPATCHING);
         $em->flush();
 
+        $this->events->publish($schedule, 'schedule.phase.changed');
+
         return $this->json($this->serialize($schedule));
     }
 
@@ -206,6 +230,8 @@ class ScheduleController extends AbstractController
         $schedule->setCollectionIds(null);
         $this->computeNextRun($schedule);
         $em->flush();
+
+        $this->events->publish($schedule, 'schedule.cancelled');
 
         return $this->json($this->serialize($schedule));
     }

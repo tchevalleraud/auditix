@@ -14,6 +14,11 @@ class Collection
     public const STATUS_COMPLETED = 'completed';
     public const STATUS_FAILED = 'failed';
 
+    public const EXTRACT_STATUS_PENDING = 'pending';
+    public const EXTRACT_STATUS_RUNNING = 'running';
+    public const EXTRACT_STATUS_COMPLETED = 'completed';
+    public const EXTRACT_STATUS_FAILED = 'failed';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -51,6 +56,15 @@ class Collection
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $completedAt = null;
 
+    #[ORM\Column(length: 20, nullable: true)]
+    private ?string $extractStatus = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $lastExtractedAt = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $extractError = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -82,6 +96,12 @@ class Collection
     public function setStartedAt(?\DateTimeImmutable $v): static { $this->startedAt = $v; return $this; }
     public function getCompletedAt(): ?\DateTimeImmutable { return $this->completedAt; }
     public function setCompletedAt(?\DateTimeImmutable $v): static { $this->completedAt = $v; return $this; }
+    public function getExtractStatus(): ?string { return $this->extractStatus; }
+    public function setExtractStatus(?string $v): static { $this->extractStatus = $v; return $this; }
+    public function getLastExtractedAt(): ?\DateTimeImmutable { return $this->lastExtractedAt; }
+    public function setLastExtractedAt(?\DateTimeImmutable $v): static { $this->lastExtractedAt = $v; return $this; }
+    public function getExtractError(): ?string { return $this->extractError; }
+    public function setExtractError(?string $v): static { $this->extractError = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 
     public function getStoragePath(): string

@@ -46,6 +46,9 @@ class CollectionController extends AbstractController
             'startedAt' => $c->getStartedAt()?->format('c'),
             'completedAt' => $c->getCompletedAt()?->format('c'),
             'createdAt' => $c->getCreatedAt()->format('c'),
+            'extractStatus' => $c->getExtractStatus(),
+            'lastExtractedAt' => $c->getLastExtractedAt()?->format('c'),
+            'extractError' => $c->getExtractError(),
         ];
     }
 

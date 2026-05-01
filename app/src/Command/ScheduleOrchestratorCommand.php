@@ -11,19 +11,23 @@ use App\Entity\Schedule;
 use App\Message\CollectNodeMessage;
 use App\Message\EvaluateComplianceMessage;
 use App\Message\GenerateReportMessage;
+use App\Message\ProcessInventoryMessage;
 use App\Message\SendMailReportMessage;
 use App\Repository\ScheduleRepository;
+use App\Service\ScheduleEventPublisher;
 use Cron\CronExpression;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Mercure\HubInterface;
+use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 #[AsCommand(
     name: 'app:schedule:orchestrator',
-    description: 'Orchestrates scheduled tasks: collection, compliance, report generation',
+    description: 'Orchestrates scheduled tasks: collect, extract, cleanup, compliance, report, mail',
 )]
 class ScheduleOrchestratorCommand extends Command
 {
@@ -33,8 +37,39 @@ class ScheduleOrchestratorCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly MessageBusInterface $bus,
+        private readonly ScheduleEventPublisher $events,
+        private readonly HubInterface $hub,
     ) {
         parent::__construct();
+    }
+
+    private function publishCollectionPending(Collection $collection): void
+    {
+        $node = $collection->getNode();
+        $this->hub->publish(new Update(
+            'collections/node/' . $node->getId(),
+            json_encode([
+                'event' => 'collection.updated',
+                'collection' => [
+                    'id' => $collection->getId(),
+                    'nodeId' => $node->getId(),
+                    'status' => $collection->getStatus(),
+                    'tags' => $collection->getTags(),
+                ],
+            ]),
+        ));
+    }
+
+    private function publishExtractionPending(int $nodeId): void
+    {
+        $this->hub->publish(new Update(
+            'extractions/node/' . $nodeId,
+            json_encode([
+                'event' => 'extraction.updated',
+                'nodeId' => $nodeId,
+                'status' => 'pending',
+            ]),
+        ));
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -76,13 +111,21 @@ class ScheduleOrchestratorCommand extends Command
             $schedule->setCurrentPhase($firstPhase);
             $schedule->setCurrentPhaseStatus(Schedule::STATUS_DISPATCHING);
             $this->em->flush();
+            $this->events->publish($schedule, 'schedule.phase.changed');
         }
     }
 
     private function processActiveSchedules(\DateTimeImmutable $now, OutputInterface $output): void
     {
         $schedules = $this->em->getRepository(Schedule::class)->findBy([
-            'currentPhase' => [Schedule::PHASE_COLLECTION, Schedule::PHASE_CLEANUP, Schedule::PHASE_COMPLIANCE, Schedule::PHASE_REPORT, Schedule::PHASE_MAIL],
+            'currentPhase' => [
+                Schedule::PHASE_COLLECT,
+                Schedule::PHASE_EXTRACT,
+                Schedule::PHASE_CLEANUP,
+                Schedule::PHASE_COMPLIANCE,
+                Schedule::PHASE_REPORT,
+                Schedule::PHASE_MAIL,
+            ],
         ]);
 
         foreach ($schedules as $schedule) {
@@ -90,6 +133,7 @@ class ScheduleOrchestratorCommand extends Command
             if ($this->isTimedOut($schedule, $now)) {
                 $output->writeln(sprintf('[%s] Schedule "%s" timed out — resetting', $now->format('H:i:s'), $schedule->getName()));
                 $this->resetSchedule($schedule);
+                $this->events->publish($schedule, 'schedule.timed_out');
                 continue;
             }
 
@@ -106,8 +150,11 @@ class ScheduleOrchestratorCommand extends Command
         $phase = $schedule->getCurrentPhase();
 
         switch ($phase) {
-            case Schedule::PHASE_COLLECTION:
-                $this->dispatchCollection($schedule, $output);
+            case Schedule::PHASE_COLLECT:
+                $this->dispatchCollect($schedule, $output);
+                break;
+            case Schedule::PHASE_EXTRACT:
+                $this->dispatchExtract($schedule, $output);
                 break;
             case Schedule::PHASE_CLEANUP:
                 $this->executeCleanup($schedule, $output);
@@ -124,12 +171,11 @@ class ScheduleOrchestratorCommand extends Command
         }
     }
 
-    private function dispatchCollection(Schedule $schedule, OutputInterface $output): void
+    private function dispatchCollect(Schedule $schedule, OutputInterface $output): void
     {
-        $nodeIds = $schedule->getCollectionNodeIds() ?? [];
-        $nodes = $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
+        $nodeIds = $schedule->resolveNodeIds($this->em);
+        $nodes = $nodeIds ? $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]) : [];
         $context = $schedule->getContext();
-        $collectionIds = [];
 
         foreach ($nodes as $node) {
             // Release 'latest' tag from previous collections
@@ -146,16 +192,12 @@ class ScheduleOrchestratorCommand extends Command
             $collection->setTags(['latest']);
 
             $this->em->persist($collection);
-            $collectionIds[] = null; // placeholder, will get IDs after flush
         }
 
         $this->em->flush();
 
-        // Now get the IDs and dispatch
         $realIds = [];
-        $nodeIndex = 0;
         foreach ($nodes as $node) {
-            // Find the collection we just created
             $collections = $this->em->getRepository(Collection::class)->findBy(
                 ['node' => $node, 'status' => Collection::STATUS_PENDING],
                 ['createdAt' => 'DESC'],
@@ -164,16 +206,50 @@ class ScheduleOrchestratorCommand extends Command
             if (!empty($collections)) {
                 $c = $collections[0];
                 $realIds[] = $c->getId();
+                $this->publishCollectionPending($c);
                 $this->bus->dispatch(new CollectNodeMessage($c->getId()));
             }
-            $nodeIndex++;
         }
 
         $schedule->setCollectionIds($realIds);
         $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
         $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
 
-        $output->writeln(sprintf('  Dispatched %d collection(s)', count($realIds)));
+        $output->writeln(sprintf('  Dispatched %d collect job(s)', count($realIds)));
+    }
+
+    private function dispatchExtract(Schedule $schedule, OutputInterface $output): void
+    {
+        $nodeIds = $schedule->resolveNodeIds($this->em);
+        $collectionIds = [];
+        $dispatched = 0;
+
+        foreach ($nodeIds as $nodeId) {
+            $latest = $this->em->getRepository(Collection::class)->findOneBy(
+                ['node' => $nodeId, 'status' => Collection::STATUS_COMPLETED],
+                ['completedAt' => 'DESC'],
+            );
+            if (!$latest) {
+                continue;
+            }
+
+            $latest->setExtractStatus(Collection::EXTRACT_STATUS_PENDING);
+            $latest->setExtractError(null);
+            $collectionIds[] = $latest->getId();
+            $this->publishExtractionPending($nodeId);
+            $this->bus->dispatch(new ProcessInventoryMessage($latest->getId()));
+            $dispatched++;
+        }
+
+        $this->em->flush();
+
+        $schedule->setCollectionIds($collectionIds);
+        $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
+        $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
+
+        $output->writeln(sprintf('  Dispatched %d extract job(s)', $dispatched));
     }
 
     private function executeCleanup(Schedule $schedule, OutputInterface $output): void
@@ -185,7 +261,6 @@ class ScheduleOrchestratorCommand extends Command
         foreach ($collections as $collection) {
             $tags = $collection->getTags();
             if (empty($tags)) {
-                // Delete storage files
                 $storageDir = '/var/www/var/' . $collection->getStoragePath();
                 $this->deleteDirectory($storageDir);
 
@@ -219,8 +294,8 @@ class ScheduleOrchestratorCommand extends Command
 
     private function dispatchCompliance(Schedule $schedule, OutputInterface $output): void
     {
-        $nodeIds = $schedule->getComplianceNodeIds() ?? [];
-        $nodes = $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
+        $nodeIds = $schedule->resolveNodeIds($this->em);
+        $nodes = $nodeIds ? $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]) : [];
         $dispatched = 0;
 
         foreach ($nodes as $node) {
@@ -243,6 +318,7 @@ class ScheduleOrchestratorCommand extends Command
 
         $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
         $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
 
         $output->writeln(sprintf('  Dispatched %d compliance evaluation(s)', $dispatched));
     }
@@ -264,6 +340,7 @@ class ScheduleOrchestratorCommand extends Command
 
         $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
         $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
 
         $output->writeln(sprintf('  Dispatched %d report generation(s)', $dispatched));
     }
@@ -285,6 +362,7 @@ class ScheduleOrchestratorCommand extends Command
 
         $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
         $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
 
         $output->writeln(sprintf('  Dispatched %d mail report(s)', $dispatched));
     }
@@ -295,8 +373,11 @@ class ScheduleOrchestratorCommand extends Command
         $allDone = false;
 
         switch ($phase) {
-            case Schedule::PHASE_COLLECTION:
-                $allDone = $this->isCollectionDone($schedule);
+            case Schedule::PHASE_COLLECT:
+                $allDone = $this->isCollectDone($schedule);
+                break;
+            case Schedule::PHASE_EXTRACT:
+                $allDone = $this->isExtractDone($schedule);
                 break;
             case Schedule::PHASE_COMPLIANCE:
                 $allDone = $this->isComplianceDone($schedule);
@@ -311,11 +392,12 @@ class ScheduleOrchestratorCommand extends Command
 
         if ($allDone) {
             $output->writeln(sprintf('  Phase "%s" completed for schedule "%s"', $phase, $schedule->getName()));
+            $this->events->publish($schedule, 'schedule.phase.completed');
             $this->transitionToNextPhase($schedule, $output);
         }
     }
 
-    private function isCollectionDone(Schedule $schedule): bool
+    private function isCollectDone(Schedule $schedule): bool
     {
         $collectionIds = $schedule->getCollectionIds();
         if (empty($collectionIds)) {
@@ -331,9 +413,26 @@ class ScheduleOrchestratorCommand extends Command
         return true;
     }
 
+    private function isExtractDone(Schedule $schedule): bool
+    {
+        $collectionIds = $schedule->getCollectionIds();
+        if (empty($collectionIds)) {
+            return true;
+        }
+
+        $collections = $this->em->getRepository(Collection::class)->findBy(['id' => $collectionIds]);
+        foreach ($collections as $c) {
+            $status = $c->getExtractStatus();
+            if (!in_array($status, [Collection::EXTRACT_STATUS_COMPLETED, Collection::EXTRACT_STATUS_FAILED], true)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private function isComplianceDone(Schedule $schedule): bool
     {
-        $nodeIds = $schedule->getComplianceNodeIds();
+        $nodeIds = $schedule->resolveNodeIds($this->em);
         if (empty($nodeIds)) {
             return true;
         }
@@ -388,7 +487,12 @@ class ScheduleOrchestratorCommand extends Command
             $output->writeln(sprintf('  Transitioning to phase "%s"', $nextPhase));
             $schedule->setCurrentPhase($nextPhase);
             $schedule->setCurrentPhaseStatus(Schedule::STATUS_DISPATCHING);
-            $schedule->setCollectionIds(null);
+            // Keep collectionIds across collect→extract; reset on other transitions
+            if ($currentPhase !== Schedule::PHASE_COLLECT || $nextPhase !== Schedule::PHASE_EXTRACT) {
+                $schedule->setCollectionIds(null);
+            }
+            $this->em->flush();
+            $this->events->publish($schedule, 'schedule.phase.changed');
         } else {
             $output->writeln(sprintf('  Schedule "%s" completed all phases', $schedule->getName()));
             $schedule->setCurrentPhase(null);
@@ -396,9 +500,9 @@ class ScheduleOrchestratorCommand extends Command
             $schedule->setCollectionIds(null);
             $schedule->setLastCompletedAt(new \DateTimeImmutable());
             $this->computeNextRun($schedule);
+            $this->em->flush();
+            $this->events->publish($schedule, 'schedule.completed');
         }
-
-        $this->em->flush();
     }
 
     private function resetSchedule(Schedule $schedule): void

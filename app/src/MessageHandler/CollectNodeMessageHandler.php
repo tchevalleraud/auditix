@@ -169,7 +169,17 @@ class CollectNodeMessageHandler
 
             // Apply collection rules and extract inventory data
             if (!$hasError) {
-                $this->processInventoryRules($collection, $node, $baseDir);
+                $collection->setExtractStatus(Collection::EXTRACT_STATUS_RUNNING);
+                $this->em->flush();
+                try {
+                    $this->processInventoryRules($collection, $node, $baseDir);
+                    $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
+                    $collection->setLastExtractedAt(new \DateTimeImmutable());
+                } catch (\Throwable $e) {
+                    $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
+                    $collection->setExtractError($e->getMessage());
+                }
+                $this->em->flush();
             }
 
         } catch (\Throwable $e) {
