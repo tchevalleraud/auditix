@@ -3,6 +3,7 @@ import Topbar from "@/components/layout/Topbar";
 import ContextProvider from "@/components/ContextProvider";
 import FeedbackButton from "@/components/FeedbackButton";
 import BackendReadyGate from "@/components/BackendReadyGate";
+import IdleLogoutGuard from "@/components/IdleLogoutGuard";
 
 export default function AuthenticatedLayout({
   children,
@@ -12,6 +13,7 @@ export default function AuthenticatedLayout({
   return (
     <BackendReadyGate>
       <ContextProvider>
+        <IdleLogoutGuard />
         <Sidebar />
         <div className="pl-64">
           <Topbar />

@@ -1,12 +1,35 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Loader2, KeyRound, ServerCog } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { useBackendReady } from "@/hooks/useBackendReady";
 
 type Step = "credentials" | "totp";
+
+interface OidcProvider {
+  slug: string;
+  name: string;
+  buttonLabel: string | null;
+  buttonColor: string | null;
+  buttonIconUrl: string | null;
+  startUrl: string;
+}
+interface OidcStatus {
+  providers: OidcProvider[];
+}
+
+function pickTextColor(bg: string | null | undefined): string {
+  if (!bg) return "#ffffff";
+  const hex = bg.replace("#", "");
+  if (hex.length !== 6) return "#ffffff";
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "#1f2937" : "#ffffff";
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -19,10 +42,36 @@ export default function LoginPage() {
   const [useBackupCode, setUseBackupCode] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oidc, setOidc] = useState<OidcStatus | null>(null);
 
   const backend = useBackendReady();
   const backendReady = backend.status === "ready";
   const backendBlocked = backend.status === "not_ready" || backend.status === "checking";
+
+  useEffect(() => {
+    if (!backendReady) return;
+    fetch("/api/auth/oidc/status")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setOidc(data))
+      .catch(() => setOidc(null));
+  }, [backendReady]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oidcError = params.get("oidc_error");
+    const reason = params.get("reason");
+    if (oidcError) {
+      setError(oidcError);
+    } else if (reason === "idle") {
+      setError(t("auth.idleLogout"));
+    }
+    if (oidcError || reason) {
+      params.delete("oidc_error");
+      params.delete("reason");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+    }
+  }, [t]);
 
   const handleCredentialsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,8 +86,7 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
-        router.push("/");
-        router.refresh();
+        window.location.href = "/";
         return;
       }
 
@@ -74,8 +122,7 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
-        router.push("/");
-        router.refresh();
+        window.location.href = "/";
       } else {
         setError(t("auth.invalidTotpCode"));
       }
@@ -184,6 +231,50 @@ export default function LoginPage() {
                   <p className="text-amber-700 dark:text-amber-400/80 mt-0.5">{t("auth.backendStartingDesc")}</p>
                 </div>
               </div>
+            )}
+
+            {oidc && oidc.providers.length > 0 && (
+              <>
+                <div className="relative my-1">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200 dark:border-slate-700" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-white dark:bg-slate-900 px-2 text-slate-400 dark:text-slate-500">{t("auth.or")}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {oidc.providers.map((p) => {
+                    const label = p.buttonLabel ?? t("auth.ssoLogin");
+                    const styled = !!p.buttonColor;
+                    const textColor = pickTextColor(p.buttonColor);
+                    return (
+                      <a
+                        key={p.slug}
+                        href={p.startUrl}
+                        className={
+                          styled
+                            ? "flex w-full items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-opacity hover:opacity-90"
+                            : "flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                        }
+                        style={styled ? {
+                          backgroundColor: p.buttonColor ?? undefined,
+                          color: textColor,
+                          borderColor: p.buttonColor === "#ffffff" ? "#e2e8f0" : (p.buttonColor ?? undefined),
+                        } : undefined}
+                      >
+                        {p.buttonIconUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={p.buttonIconUrl} alt="" className="h-4 w-4 object-contain" />
+                        ) : (
+                          <KeyRound className="h-4 w-4" />
+                        )}
+                        {label}
+                      </a>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </form>
         )}

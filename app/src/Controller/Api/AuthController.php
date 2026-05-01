@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\User;
+use App\Service\PasswordPolicyService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -56,6 +57,7 @@ class AuthController extends AbstractController
         Request $request,
         EntityManagerInterface $em,
         UserPasswordHasherInterface $passwordHasher,
+        PasswordPolicyService $policy,
     ): JsonResponse {
         /** @var User $user */
         $user = $this->getUser();
@@ -77,6 +79,10 @@ class AuthController extends AbstractController
                     ['error' => 'Current password is incorrect'],
                     Response::HTTP_BAD_REQUEST,
                 );
+            }
+            $violations = $policy->validate((string) $data['newPassword']);
+            if ($violations !== []) {
+                return $this->json(['error' => $violations[0], 'violations' => $violations], Response::HTTP_BAD_REQUEST);
             }
             $user->setPassword($passwordHasher->hashPassword($user, $data['newPassword']));
         }

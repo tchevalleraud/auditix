@@ -27,6 +27,7 @@ security:
             entry_point: App\Security\AuthenticationEntryPoint
             custom_authenticators:
                 - App\Security\JsonLoginAuthenticator
+                - App\Security\OidcAuthenticator
             logout:
                 path: api_logout
                 target: /login
@@ -37,6 +38,8 @@ security:
         - { path: ^/api/v1/, roles: ROLE_USER }
         - { path: ^/api/login, roles: PUBLIC_ACCESS }
         - { path: ^/api/login/totp, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/oidc, roles: PUBLIC_ACCESS }
+        - { path: ^/api/auth/settings, roles: PUBLIC_ACCESS }
         - { path: ^/api/avatars, roles: PUBLIC_ACCESS }
         - { path: ^/api/logos, roles: PUBLIC_ACCESS }
         - { path: ^/api/block-images/.+, methods: [GET], roles: PUBLIC_ACCESS }

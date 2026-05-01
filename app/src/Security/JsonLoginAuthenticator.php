@@ -67,6 +67,9 @@ class JsonLoginAuthenticator extends AbstractAuthenticator
                 if (!$user) {
                     throw new CustomUserMessageAuthenticationException('Invalid credentials.');
                 }
+                if ($user->getPassword() === null) {
+                    throw new CustomUserMessageAuthenticationException('This account uses SSO. Please sign in via SSO.');
+                }
                 return $user;
             }),
             new PasswordCredentials($password),

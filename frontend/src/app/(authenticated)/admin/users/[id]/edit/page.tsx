@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, KeyRound } from "lucide-react";
 
 interface AppUser {
   id: number;
@@ -13,6 +13,9 @@ interface AppUser {
   lastName: string | null;
   roles: string[];
   createdAt: string;
+  oidcProvisioned?: boolean;
+  oidcSubject?: string | null;
+  oidcClaims?: Record<string, unknown> | null;
 }
 
 export default function EditUserPage() {
@@ -31,10 +34,9 @@ export default function EditUserPage() {
   const [fetchLoading, setFetchLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/users")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((users: AppUser[]) => {
-        const found = users.find((u) => u.id === Number(userId));
+    fetch(`/api/users/${userId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((found: AppUser | null) => {
         if (found) {
           setUser(found);
           setUsername(found.username);
@@ -200,6 +202,32 @@ export default function EditUserPage() {
           </div>
         </form>
       </div>
+
+      {user.oidcProvisioned && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Identit&eacute; OIDC</h2>
+          </div>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Ce compte a &eacute;t&eacute; provisionn&eacute; via SSO. Les informations ci-dessous proviennent du dernier ID token re&ccedil;u du fournisseur d'identit&eacute;.
+          </p>
+          <dl className="text-sm space-y-2">
+            <div className="flex flex-col sm:flex-row gap-1 sm:gap-3">
+              <dt className="font-medium text-slate-600 dark:text-slate-400 sm:w-40">Subject (sub)</dt>
+              <dd className="font-mono text-xs text-slate-900 dark:text-slate-200 break-all">{user.oidcSubject ?? "\u2014"}</dd>
+            </div>
+          </dl>
+          {user.oidcClaims && (
+            <div>
+              <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Claims du dernier login</p>
+              <pre className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-xs text-slate-800 dark:text-slate-200 overflow-x-auto whitespace-pre-wrap break-all max-h-96">
+{JSON.stringify(user.oidcClaims, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

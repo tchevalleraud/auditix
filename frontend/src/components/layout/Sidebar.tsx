@@ -122,6 +122,7 @@ const adminNav: NavCategory[] = [
     items: [
       { key: "sidebar.contexts", href: "/admin/contexts", icon: Building2 },
       { key: "sidebar.users", href: "/admin/users", icon: Users },
+      { key: "sidebar.authentication", href: "/admin/auth", icon: KeyRound },
     ],
   },
   {

@@ -31,8 +31,22 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column]
     private array $roles = [];
 
-    #[ORM\Column]
+    #[ORM\Column(nullable: true)]
     private ?string $password = null;
+
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $oidcSubject = null;
+
+    #[ORM\ManyToOne(targetEntity: OidcProvider::class)]
+    #[ORM\JoinColumn(name: 'oidc_provider_id', referencedColumnName: 'id', nullable: true, onDelete: 'SET NULL')]
+    private ?OidcProvider $oidcProvider = null;
+
+    #[ORM\Column(options: ['default' => false])]
+    private bool $oidcProvisioned = false;
+
+    /** @var array<string, mixed>|null */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $oidcClaims = null;
 
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $avatar = null;
@@ -136,9 +150,55 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         return $this->password;
     }
 
-    public function setPassword(string $password): static
+    public function setPassword(?string $password): static
     {
         $this->password = $password;
+        return $this;
+    }
+
+    public function getOidcSubject(): ?string
+    {
+        return $this->oidcSubject;
+    }
+
+    public function setOidcSubject(?string $oidcSubject): static
+    {
+        $this->oidcSubject = $oidcSubject;
+        return $this;
+    }
+
+    public function isOidcProvisioned(): bool
+    {
+        return $this->oidcProvisioned;
+    }
+
+    public function setOidcProvisioned(bool $oidcProvisioned): static
+    {
+        $this->oidcProvisioned = $oidcProvisioned;
+        return $this;
+    }
+
+    public function getOidcProvider(): ?OidcProvider
+    {
+        return $this->oidcProvider;
+    }
+
+    public function setOidcProvider(?OidcProvider $provider): static
+    {
+        $this->oidcProvider = $provider;
+        return $this;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function getOidcClaims(): ?array
+    {
+        return $this->oidcClaims;
+    }
+
+    /** @param array<string, mixed>|null $claims */
+    public function setOidcClaims(?array $claims): static
+    {
+        $this->oidcClaims = $claims;
         return $this;
     }
 

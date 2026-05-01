@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\User;
 use App\Repository\ContextRepository;
 use App\Repository\UserRepository;
+use App\Service\PasswordPolicyService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -16,9 +17,9 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/users')]
 class UserController extends AbstractController
 {
-    private function serialize(User $u): array
+    private function serialize(User $u, bool $includeOidcDetails = false): array
     {
-        return [
+        $data = [
             'id' => $u->getId(),
             'username' => $u->getUsername(),
             'firstName' => $u->getFirstName(),
@@ -26,7 +27,22 @@ class UserController extends AbstractController
             'roles' => $u->getRoles(),
             'avatar' => $u->getAvatar() ? '/api/avatars/' . $u->getAvatar() : null,
             'createdAt' => $u->getCreatedAt()->format('c'),
+            'oidcProvisioned' => $u->isOidcProvisioned(),
+            'oidcSubject' => $u->getOidcSubject(),
         ];
+        if ($includeOidcDetails) {
+            $data['oidcClaims'] = $u->getOidcClaims();
+        }
+        return $data;
+    }
+
+    #[Route('/{id}', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function show(User $user): JsonResponse
+    {
+        if (!$this->isGranted('ROLE_ADMIN')) {
+            return $this->json(['error' => 'Forbidden'], Response::HTTP_FORBIDDEN);
+        }
+        return $this->json($this->serialize($user, includeOidcDetails: true));
     }
 
     #[Route('', methods: ['GET'])]
@@ -44,6 +60,7 @@ class UserController extends AbstractController
         UserPasswordHasherInterface $passwordHasher,
         UserRepository $repository,
         ContextRepository $contextRepository,
+        PasswordPolicyService $policy,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true);
 
@@ -53,6 +70,11 @@ class UserController extends AbstractController
 
         if (empty($data['password'])) {
             return $this->json(['error' => 'Password is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $violations = $policy->validate((string) $data['password']);
+        if ($violations !== []) {
+            return $this->json(['error' => $violations[0], 'violations' => $violations], Response::HTTP_BAD_REQUEST);
         }
 
         if ($repository->findOneBy(['username' => $data['username']])) {
@@ -85,6 +107,7 @@ class UserController extends AbstractController
         Request $request,
         EntityManagerInterface $em,
         UserPasswordHasherInterface $passwordHasher,
+        PasswordPolicyService $policy,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true);
 
@@ -101,6 +124,10 @@ class UserController extends AbstractController
         }
 
         if (!empty($data['password'])) {
+            $violations = $policy->validate((string) $data['password']);
+            if ($violations !== []) {
+                return $this->json(['error' => $violations[0], 'violations' => $violations], Response::HTTP_BAD_REQUEST);
+            }
             $user->setPassword($passwordHasher->hashPassword($user, $data['password']));
         }
 
