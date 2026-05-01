@@ -109,9 +109,10 @@ class EvaluateComplianceMessageHandler
         $complianceGrade = ComplianceEvaluator::calculateGrade($globalScorable, $globalPenalty);
         $node->setComplianceScore($complianceGrade);
 
-        // Combine with vulnerability sub-score if enabled
+        // Combine compliance with vulnerability and/or system-update sub-scores when enabled.
+        // recalculateNodeScore handles all enable-flag combinations internally.
         $context = $node->getContext();
-        if ($context && $context->isVulnerabilityEnabled()) {
+        if ($context) {
             $grade = $this->vulnCalculator->recalculateNodeScore($node);
         } else {
             $grade = $complianceGrade;

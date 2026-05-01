@@ -878,7 +878,7 @@ export default function NodeDetailPage() {
                       {grades.map((g) => (
                         <div key={g} className="flex-1 flex items-center justify-center py-1 text-[10px] font-bold"
                           style={{ backgroundColor: g === globalScore ? gradeColors[globalScore] : undefined, color: g === globalScore ? "#fff" : "#94a3b8" }}>
-                          <span className={`inline-flex h-4 w-4 items-center justify-center rounded-sm ${g === globalScore ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800"}`}>{g}</span>
+                          {g}
                         </div>
                       ))}
                     </div>
@@ -2693,6 +2693,84 @@ function SystemUpdatesTab({ nodeId, node, t }: { nodeId: number; node: NodeDetai
         <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("systemUpdates.lifecycleStatus")}</h3>
         </div>
+
+        {(() => {
+          const release = pr.releaseDate ? new Date(pr.releaseDate).getTime() : null;
+          const eos = pr.endOfSaleDate ? new Date(pr.endOfSaleDate).getTime() : null;
+          const eosp = pr.endOfSupportDate ? new Date(pr.endOfSupportDate).getTime() : null;
+          const eol = pr.endOfLifeDate ? new Date(pr.endOfLifeDate).getTime() : null;
+          const nowMs = Date.now();
+          const milestones: { key: string; label: string; t: number; color: string }[] = [];
+          if (release) milestones.push({ key: "release", label: t("systemUpdates.release"), t: release, color: "#10b981" });
+          if (eos) milestones.push({ key: "eos", label: t("systemUpdates.eosShort"), t: eos, color: "#eab308" });
+          if (eosp) milestones.push({ key: "eosp", label: t("systemUpdates.eospShort"), t: eosp, color: "#f97316" });
+          if (eol) milestones.push({ key: "eol", label: t("systemUpdates.eolShort"), t: eol, color: "#dc2626" });
+          if (milestones.length === 0) return null;
+          milestones.sort((a, b) => a.t - b.t);
+
+          const all = [...milestones.map(m => m.t), nowMs];
+          const tMin = Math.min(...all);
+          const tMax = Math.max(...all);
+          const span = Math.max(tMax - tMin, 1);
+          const pad = span * 0.08;
+          const lo = tMin - pad;
+          const hi = tMax + pad;
+          const range = hi - lo;
+          const pct = (ts: number) => ((ts - lo) / range) * 100;
+
+          // Color segments: before release = muted, then each milestone color extends to next
+          const stops: string[] = [];
+          stops.push(`#e2e8f0 0%`, `#e2e8f0 ${pct(milestones[0].t)}%`);
+          for (let i = 0; i < milestones.length; i++) {
+            const start = pct(milestones[i].t);
+            const end = i + 1 < milestones.length ? pct(milestones[i + 1].t) : 100;
+            stops.push(`${milestones[i].color} ${start}%`, `${milestones[i].color} ${end}%`);
+          }
+
+          const nowPct = pct(nowMs);
+          const formatDate = (ts: number) => new Date(ts).toLocaleDateString();
+
+          return (
+            <div className="px-6 pt-10 pb-12 border-b border-slate-100 dark:border-slate-800">
+              <div className="relative">
+                {/* Now label above */}
+                <div
+                  className="absolute -translate-x-1/2 -top-7 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-900 text-white dark:bg-white dark:text-slate-900 whitespace-nowrap"
+                  style={{ left: `${Math.min(Math.max(nowPct, 0), 100)}%` }}
+                >
+                  {t("systemUpdates.now")}
+                </div>
+                {/* Bar */}
+                <div
+                  className="h-2 rounded-full"
+                  style={{ background: `linear-gradient(to right, ${stops.join(", ")})` }}
+                />
+                {/* Now marker */}
+                <div
+                  className="absolute -translate-x-1/2 -top-2 h-6 w-0.5 bg-slate-900 dark:bg-white"
+                  style={{ left: `${Math.min(Math.max(nowPct, 0), 100)}%` }}
+                />
+                {/* Milestone markers */}
+                {milestones.map((m) => (
+                  <div
+                    key={m.key}
+                    className="absolute -translate-x-1/2 flex flex-col items-center"
+                    style={{ left: `${pct(m.t)}%`, top: "-4px" }}
+                  >
+                    <div
+                      className="h-4 w-4 rounded-full border-2 border-white dark:border-slate-900 shadow"
+                      style={{ backgroundColor: m.color }}
+                      title={`${m.label} — ${formatDate(m.t)}`}
+                    />
+                    <div className="mt-2 text-[10px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{m.label}</div>
+                    <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 whitespace-nowrap">{formatDate(m.t)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="divide-y divide-slate-100 dark:divide-slate-800">
           {dateFields.map((field, i) => (
             <div key={i} className="flex items-center justify-between px-6 py-3">
@@ -2723,9 +2801,9 @@ function SystemUpdatesTab({ nodeId, node, t }: { nodeId: number; node: NodeDetai
         <div className="space-y-2">
           {[
             { label: t("systemUpdates.versionStatus"), pts: details.version?.points, max: 40 },
-            { label: t("systemUpdates.endOfSaleDate"), pts: details.endOfSale?.points, max: 20 },
+            { label: t("systemUpdates.endOfSaleDate"), pts: details.endOfSale?.points, max: 10 },
             { label: t("systemUpdates.endOfSupportDate"), pts: details.endOfSupport?.points, max: 20 },
-            { label: t("systemUpdates.endOfLifeDate"), pts: details.endOfLife?.points, max: 20 },
+            { label: t("systemUpdates.endOfLifeDate"), pts: details.endOfLife?.points, max: 30 },
           ].map((item, i) => (
             <div key={i} className="flex items-center gap-3">
               <span className="text-xs text-slate-500 w-40 shrink-0">{item.label}</span>

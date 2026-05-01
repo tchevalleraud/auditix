@@ -56,16 +56,22 @@ class SystemUpdateScoreCalculator
         );
         $details['version'] = $versionPoints;
 
-        // 2. End of Sale proximity (0-20 points)
-        $eosPoints = $this->scoreDateProximity($eosDate, $now, 20, 5);
+        // Lifecycle weights reflect severity:
+        //  - End of Sale: product can no longer be purchased but is still under support (mild)
+        //  - End of Support: no more software fixes, hardware still replaceable (medium)
+        //  - End of Life: definitively unsupported (severe)
+        // Each sub-score decays linearly to 0 as the date approaches and stays at 0 once passed.
+
+        // 2. End of Sale proximity (0-10 points)
+        $eosPoints = $this->scoreDateProximity($eosDate, $now, 10);
         $details['endOfSale'] = $eosPoints;
 
         // 3. End of Support proximity (0-20 points)
-        $eospPoints = $this->scoreDateProximity($eospDate, $now, 20, 3);
+        $eospPoints = $this->scoreDateProximity($eospDate, $now, 20);
         $details['endOfSupport'] = $eospPoints;
 
-        // 4. End of Life proximity (0-20 points)
-        $eolPoints = $this->scoreDateProximity($eolDate, $now, 20, 0);
+        // 4. End of Life proximity (0-30 points)
+        $eolPoints = $this->scoreDateProximity($eolDate, $now, 30);
         $details['endOfLife'] = $eolPoints;
 
         $score = $versionPoints['points'] + $eosPoints['points'] + $eospPoints['points'] + $eolPoints['points'];
@@ -126,14 +132,13 @@ class SystemUpdateScoreCalculator
 
     /**
      * Score based on date proximity (0-$maxPoints).
-     *
-     * @param float $pastPoints Points awarded when the date has already passed
+     * Score decays linearly across a 24-month horizon and drops to 0 once the date is reached.
      */
     private function scoreDateProximity(
         ?\DateTimeImmutable $date,
         \DateTimeImmutable $now,
         float $maxPoints,
-        float $pastPoints,
+        float $horizonMonths = 24.0,
     ): array {
         if (!$date) {
             return ['points' => $maxPoints, 'status' => 'no_date'];
@@ -142,26 +147,18 @@ class SystemUpdateScoreCalculator
         $diff = $now->diff($date);
         $months = $diff->y * 12 + $diff->m + ($diff->d / 30);
 
-        // Date is in the past
         if ($date < $now) {
-            return ['points' => $pastPoints, 'status' => 'past', 'months_ago' => round($months, 1)];
+            return ['points' => 0.0, 'status' => 'past', 'months_ago' => round($months, 1)];
         }
 
-        // More than 12 months away
-        if ($months > 12) {
+        if ($months >= $horizonMonths) {
             return ['points' => $maxPoints, 'status' => 'safe', 'months_remaining' => round($months, 1)];
         }
 
-        // 6-12 months
-        if ($months > 6) {
-            return ['points' => $maxPoints * 0.75, 'status' => 'approaching', 'months_remaining' => round($months, 1)];
-        }
+        $points = round($maxPoints * ($months / $horizonMonths), 1);
+        $status = $months <= 6 ? 'imminent' : 'approaching';
 
-        // 0-6 months
-        $ratio = $months / 6;
-        $points = $pastPoints + ($maxPoints * 0.5 - $pastPoints) * $ratio;
-
-        return ['points' => round($points, 1), 'status' => 'imminent', 'months_remaining' => round($months, 1)];
+        return ['points' => $points, 'status' => $status, 'months_remaining' => round($months, 1)];
     }
 
     public static function scoreToGrade(float $score): string

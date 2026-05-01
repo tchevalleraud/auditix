@@ -522,7 +522,7 @@ class NodeController extends AbstractController
             'vulnerabilityScore' => $node->getVulnerabilityScore(),
             'cves' => $items,
             'stats' => [
-                'total' => count($cves),
+                'total' => count($items),
                 'bySeverity' => $bySeverity,
             ],
         ]);
