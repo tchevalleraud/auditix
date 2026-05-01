@@ -853,8 +853,11 @@ export default function NodeDetailPage() {
         const compPolicies = complianceData?.policies ?? [];
         const totalCompliant = compPolicies.reduce((s, p) => s + (p.stats.compliant ?? 0), 0);
         const totalNonCompliant = compPolicies.reduce((s, p) => s + (p.stats.non_compliant ?? 0), 0);
-        const totalRules = totalCompliant + totalNonCompliant + compPolicies.reduce((s, p) => s + (p.stats.error ?? 0) + (p.stats.not_applicable ?? 0), 0);
+        const totalError = compPolicies.reduce((s, p) => s + (p.stats.error ?? 0), 0);
+        const totalRules = totalCompliant + totalNonCompliant + totalError;
         const compliancePercent = totalRules > 0 ? Math.round((totalCompliant / totalRules) * 100) : 0;
+        const summaryPC = totalRules > 0 ? (totalCompliant / totalRules) * 100 : 0;
+        const summaryPNC = totalRules > 0 ? ((totalCompliant + totalNonCompliant) / totalRules) * 100 : 0;
 
         const grades = ["A", "B", "C", "D", "E", "F"] as const;
         const gradeColors: Record<string, string> = { A: "#22c55e", B: "#84cc16", C: "#eab308", D: "#f97316", E: "#f87171", F: "#dc2626" };
@@ -914,16 +917,28 @@ export default function NodeDetailPage() {
                 </div>
                 {totalRules > 0 ? (
                   <>
-                    <div className="w-full h-3 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${compliancePercent}%`, backgroundColor: gradeColors[compScore ?? ""] || "#94a3b8" }}
-                      />
+                    <div className="w-full h-3 rounded-full overflow-hidden relative">
+                      <div className="absolute inset-0" style={{
+                        background: `linear-gradient(to right, ${[
+                          ...(totalCompliant > 0 ? [`#10b981 0%, #10b981 ${summaryPC}%`] : []),
+                          ...(totalNonCompliant > 0 ? [`#ef4444 ${summaryPC}%, #ef4444 ${summaryPNC}%`] : []),
+                          ...(totalError > 0 ? [`#ef4444 ${summaryPNC}%, #ef4444 100%`] : []),
+                        ].join(", ")})`
+                      }} />
+                      {totalError > 0 && (
+                        <div className="absolute inset-0" style={{
+                          clipPath: `inset(0 0 0 ${summaryPNC}%)`,
+                          backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
+                        }} />
+                      )}
                     </div>
                     <div className="flex items-center gap-4 mt-2">
                       <span className="text-xs text-emerald-600 dark:text-emerald-400">{totalCompliant} {t("nodes.summaryCompliant")}</span>
                       {totalNonCompliant > 0 && (
                         <span className="text-xs text-red-500">{totalNonCompliant} {t("nodes.summaryNonCompliant")}</span>
+                      )}
+                      {totalError > 0 && (
+                        <span className="text-xs text-red-500">{totalError} {t("compliance.error")}</span>
                       )}
                     </div>
                   </>
@@ -1373,25 +1388,22 @@ export default function NodeDetailPage() {
                             const c = pr.stats.compliant || 0;
                             const nc = pr.stats.non_compliant || 0;
                             const err = pr.stats.error || 0;
-                            const na = pr.stats.not_applicable || 0;
-                            const t2 = c + nc + err + na;
+                            const t2 = c + nc + err;
                             if (t2 === 0) return null;
                             const pC = (c / t2) * 100;
                             const pNC = ((c + nc) / t2) * 100;
-                            const pErr = ((c + nc + err) / t2) * 100;
                             return (
                               <div className="h-2.5 w-56 rounded-full overflow-hidden relative">
                                 <div className="absolute inset-0" style={{
                                   background: `linear-gradient(to right, ${[
                                     ...(c > 0 ? [`#10b981 0%, #10b981 ${pC}%`] : []),
                                     ...(nc > 0 ? [`#ef4444 ${pC}%, #ef4444 ${pNC}%`] : []),
-                                    ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 ${pErr}%`] : []),
-                                    ...(na > 0 ? [`#e2e8f0 ${pErr}%, #e2e8f0 100%`] : []),
+                                    ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 100%`] : []),
                                   ].join(", ")})`
                                 }} />
                                 {err > 0 && (
                                   <div className="absolute inset-0" style={{
-                                    clipPath: `inset(0 ${100 - pErr}% 0 ${pNC}%)`,
+                                    clipPath: `inset(0 0 0 ${pNC}%)`,
                                     backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
                                   }} />
                                 )}

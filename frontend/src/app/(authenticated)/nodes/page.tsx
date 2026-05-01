@@ -1123,8 +1123,7 @@ export default function NodesPage() {
                         const c = st.compliant || 0;
                         const nc = st.non_compliant || 0;
                         const err = st.error || 0;
-                        const na = st.not_applicable || 0;
-                        const total = c + nc + err + na;
+                        const total = c + nc + err;
                         if (total === 0) {
                           return (
                             <div className="flex items-center gap-2">
@@ -1137,7 +1136,6 @@ export default function NodesPage() {
                         }
                         const pC = (c / total) * 100;
                         const pNC = ((c + nc) / total) * 100;
-                        const pErr = ((c + nc + err) / total) * 100;
                         const pct = Math.round((c / total) * 100);
                         return (
                           <div className="flex items-center gap-2">
@@ -1146,13 +1144,12 @@ export default function NodesPage() {
                                 background: `linear-gradient(to right, ${[
                                   ...(c > 0 ? [`#10b981 0%, #10b981 ${pC}%`] : []),
                                   ...(nc > 0 ? [`#ef4444 ${pC}%, #ef4444 ${pNC}%`] : []),
-                                  ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 ${pErr}%`] : []),
-                                  ...(na > 0 ? [`#e2e8f0 ${pErr}%, #e2e8f0 100%`] : []),
+                                  ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 100%`] : []),
                                 ].join(", ")})`
                               }} />
                               {err > 0 && (
                                 <div className="absolute inset-0" style={{
-                                  clipPath: `inset(0 ${100 - pErr}% 0 ${pNC}%)`,
+                                  clipPath: `inset(0 0 0 ${pNC}%)`,
                                   backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
                                 }} />
                               )}
