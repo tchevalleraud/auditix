@@ -2,6 +2,7 @@
 
 namespace App\Controller\Api;
 
+use App\Entity\CollectionCommand;
 use App\Entity\CollectionFolder;
 use App\Entity\Context;
 use Doctrine\ORM\EntityManagerInterface;
@@ -85,5 +86,32 @@ class CollectionFolderController extends AbstractController
         $em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/{id}/toggle', methods: ['POST'])]
+    public function toggle(CollectionFolder $folder, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $enabled = (bool)($data['enabled'] ?? true);
+
+        $count = $this->applyToggleRecursive($folder, $enabled, $em);
+        $em->flush();
+
+        return $this->json(['ok' => true, 'count' => $count]);
+    }
+
+    private function applyToggleRecursive(CollectionFolder $folder, bool $enabled, EntityManagerInterface $em): int
+    {
+        $count = 0;
+        foreach ($em->getRepository(CollectionCommand::class)->findBy(['folder' => $folder]) as $cmd) {
+            if ($cmd->isEnabled() !== $enabled) {
+                $cmd->setEnabled($enabled);
+                $count++;
+            }
+        }
+        foreach ($em->getRepository(CollectionFolder::class)->findBy(['parent' => $folder]) as $child) {
+            $count += $this->applyToggleRecursive($child, $enabled, $em);
+        }
+        return $count;
     }
 }

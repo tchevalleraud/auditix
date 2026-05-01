@@ -721,6 +721,60 @@ class CollectionRuleController extends AbstractController
         return $this->json(null, Response::HTTP_NO_CONTENT);
     }
 
+    #[Route('/{id}/duplicate', methods: ['POST'])]
+    public function duplicate(CollectionRule $rule, EntityManagerInterface $em): JsonResponse
+    {
+        $copy = new CollectionRule();
+        $copy->setName($rule->getName() . ' (copy)');
+        $copy->setDescription($rule->getDescription());
+        $copy->setEnabled($rule->isEnabled());
+        $copy->setSource($rule->getSource());
+        $copy->setCommand($rule->getCommand());
+        $copy->setTag($rule->getTag());
+        $copy->setFolder($rule->getFolder());
+        $copy->setContext($rule->getContext());
+        $copy->setTranslations($rule->getTranslations());
+        $copy->setConditionTree($rule->getConditionTree());
+
+        $em->persist($copy);
+        $em->flush();
+
+        $extractIdMap = [];
+        foreach ($rule->getExtracts() as $original) {
+            $clone = new CollectionRuleExtract();
+            $clone->setName($original->getName());
+            $clone->setRegex($original->getRegex());
+            $clone->setMultiline($original->isMultiline());
+            $clone->setKeyMode($original->getKeyMode());
+            $clone->setKeyManual($original->getKeyManual());
+            $clone->setKeyGroup($original->getKeyGroup());
+            $clone->setKeyLabel($original->getKeyLabel());
+            $clone->setValueGroup($original->getValueGroup());
+            $clone->setValueMap($original->getValueMap());
+            $clone->setCategory($original->getCategory());
+            $clone->setNodeField($original->getNodeField());
+            $clone->setNodeFieldGroup($original->getNodeFieldGroup());
+            $clone->setExtractMode($original->getExtractMode());
+            $clone->setBlockSeparator($original->getBlockSeparator());
+            $clone->setBlockKeyGroup($original->getBlockKeyGroup());
+            $clone->setPosition($original->getPosition());
+            $copy->addExtract($clone);
+            $em->persist($clone);
+            $em->flush();
+            $extractIdMap[$original->getId()] = $clone;
+        }
+
+        foreach ($rule->getExtracts() as $original) {
+            $keyExt = $original->getKeyExtract();
+            if ($keyExt && isset($extractIdMap[$keyExt->getId()])) {
+                $extractIdMap[$original->getId()]->setKeyExtract($extractIdMap[$keyExt->getId()]);
+            }
+        }
+        $em->flush();
+
+        return $this->json($this->serializeRule($copy), Response::HTTP_CREATED);
+    }
+
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(CollectionRule $rule, EntityManagerInterface $em): JsonResponse
     {

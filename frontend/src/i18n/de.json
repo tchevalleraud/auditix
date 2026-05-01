@@ -574,7 +574,11 @@
     "importPreviewTitle": "Import-Vorschau",
     "importCountCommands": "Befehle",
     "importCountFolders": "Unterordner",
-    "importConfirm": "Importieren"
+    "importConfirm": "Importieren",
+    "expandAll": "Alle ausklappen",
+    "collapseAll": "Alle einklappen",
+    "enableAll": "Alle aktivieren",
+    "disableAll": "Alle deaktivieren"
   },
   "collection_rules": {
     "title": "Sammelregeln",
@@ -605,6 +609,11 @@
     "importNew": "Neu",
     "importExists": "Existiert",
     "importConfirm": "Importieren",
+    "expandAll": "Alle ausklappen",
+    "collapseAll": "Alle einklappen",
+    "enableAll": "Alle aktivieren",
+    "disableAll": "Alle deaktivieren",
+    "duplicate": "Duplizieren",
     "tabEdit": "Bearbeiten",
     "tabCollect": "Sammlung",
     "saved": "Gespeichert",

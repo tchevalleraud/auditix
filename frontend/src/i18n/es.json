@@ -574,7 +574,11 @@
     "importPreviewTitle": "Vista previa",
     "importCountCommands": "comandos",
     "importCountFolders": "subcarpetas",
-    "importConfirm": "Importar"
+    "importConfirm": "Importar",
+    "expandAll": "Expandir todo",
+    "collapseAll": "Contraer todo",
+    "enableAll": "Activar todo",
+    "disableAll": "Desactivar todo"
   },
   "collection_rules": {
     "title": "Reglas de recoleccion",
@@ -605,6 +609,11 @@
     "importNew": "Nuevo",
     "importExists": "Existe",
     "importConfirm": "Importar",
+    "expandAll": "Expandir todo",
+    "collapseAll": "Contraer todo",
+    "enableAll": "Activar todo",
+    "disableAll": "Desactivar todo",
+    "duplicate": "Duplicar",
     "tabEdit": "Editar",
     "tabCollect": "Recoleccion",
     "saved": "Guardado",

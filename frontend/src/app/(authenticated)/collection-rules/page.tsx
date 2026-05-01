@@ -19,6 +19,9 @@ import {
   X,
   ChevronRight,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy,
   ToggleLeft,
   ToggleRight,
   Monitor,
@@ -106,6 +109,46 @@ export default function CollectionRulesPage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const collectFolderIds = (folders: Folder[]): number[] => {
+    const ids: number[] = [];
+    const walk = (list: Folder[]) => {
+      for (const f of list) {
+        ids.push(f.id);
+        walk(f.children);
+      }
+    };
+    walk(folders);
+    return ids;
+  };
+
+  const expandAll = () => setExpanded(new Set(collectFolderIds(tree.folders)));
+  const collapseAll = () => setExpanded(new Set());
+
+  const allRulesInFolder = (folder: Folder): Rule[] => [
+    ...folder.rules,
+    ...folder.children.flatMap(allRulesInFolder),
+  ];
+
+  const isFolderAllEnabled = (folder: Folder): boolean => {
+    const rules = allRulesInFolder(folder);
+    return rules.length > 0 && rules.every((r) => r.enabled);
+  };
+
+  const toggleFolder = async (folder: Folder) => {
+    const enabled = !isFolderAllEnabled(folder);
+    await fetch(`/api/collection-rule-folders/${folder.id}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await load();
+  };
+
+  const duplicateRule = async (rule: Rule) => {
+    await fetch(`/api/collection-rules/${rule.id}/duplicate`, { method: "POST" });
+    await load();
   };
 
   // Rule CRUD
@@ -257,6 +300,12 @@ export default function CollectionRulesPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("collection_rules.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={expandAll} title={t("collection_rules.expandAll")} className="flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <ChevronsUpDown className="h-4 w-4" />
+          </button>
+          <button onClick={collapseAll} title={t("collection_rules.collapseAll")} className="flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <ChevronsDownUp className="h-4 w-4" />
+          </button>
           <button onClick={() => { setImportTargetId(null); importInputRef.current?.click(); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
             <Upload className="h-4 w-4" />
             {t("collection_rules.importFolder")}
@@ -283,8 +332,9 @@ export default function CollectionRulesPage() {
             {tree.folders.map((folder) => (
               <RuleFolderNode key={`folder-${folder.id}`} folder={folder} depth={0} t={t}
                 expanded={expanded} toggle={toggle}
-                openCreateRule={openCreateRule} openEditRule={openEditRule} toggleRule={toggleRule}
+                openCreateRule={openCreateRule} openEditRule={openEditRule} toggleRule={toggleRule} duplicateRule={duplicateRule}
                 openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
+                onToggleFolder={toggleFolder} isFolderAllEnabled={isFolderAllEnabled}
                 deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
                 deleteRule={deleteRule} deleteFolder={deleteFolder}
                 exportingId={exportingId} onExport={handleExportFolder}
@@ -293,7 +343,7 @@ export default function CollectionRulesPage() {
             ))}
             {tree.rootRules.map((rule) => (
               <RuleRow key={`rule-${rule.id}`} rule={rule} depth={0} t={t}
-                onEdit={() => openEditRule(rule)} onToggle={() => toggleRule(rule)}
+                onEdit={() => openEditRule(rule)} onToggle={() => toggleRule(rule)} onDuplicate={() => duplicateRule(rule)}
                 deleteConfirm={deleteConfirm?.type === "rule" && deleteConfirm.id === rule.id}
                 onDelete={() => setDeleteConfirm({ type: "rule", id: rule.id })}
                 onDeleteConfirm={() => deleteRule(rule.id)}
@@ -438,14 +488,17 @@ function countRules(folder: Folder): number {
 }
 
 // --- Folder node ---
-function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, openEditRule, toggleRule, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteRule, deleteFolder, exportingId, onExport, onImport }: {
+function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, openEditRule, toggleRule, duplicateRule, openCreateFolder, openEditFolder, onToggleFolder, isFolderAllEnabled, deleteConfirm, setDeleteConfirm, deleteRule, deleteFolder, exportingId, onExport, onImport }: {
   folder: Folder; depth: number; t: (k: string) => string;
   expanded: Set<number>; toggle: (id: number) => void;
   openCreateRule: (folderId: number | null) => void;
   openEditRule: (rule: Rule) => void;
   toggleRule: (rule: Rule) => void;
+  duplicateRule: (rule: Rule) => void;
   openCreateFolder: (parentId: number | null) => void;
   openEditFolder: (folder: Folder) => void;
+  onToggleFolder: (folder: Folder) => void;
+  isFolderAllEnabled: (folder: Folder) => boolean;
   deleteConfirm: { type: string; id: number } | null;
   setDeleteConfirm: (v: { type: "rule" | "folder"; id: number } | null) => void;
   deleteRule: (id: number) => void;
@@ -457,6 +510,8 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
   const isExpanded = expanded.has(folder.id);
   const pl = depth === 0 ? "pl-4" : depth === 1 ? "pl-10" : depth === 2 ? "pl-16" : "pl-22";
   const folderColor = folder.type === "manufacturer" ? "text-amber-500" : folder.type === "model" ? "text-blue-500" : "text-slate-400 dark:text-slate-500";
+  const folderEnabled = isFolderAllEnabled(folder);
+  const hasRules = countRules(folder) > 0;
 
   return (
     <>
@@ -473,6 +528,11 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
           <span className="text-xs text-slate-400 dark:text-slate-500">{countRules(folder)} {t("collection_rules.rule")}{countRules(folder) !== 1 ? "s" : ""}</span>
         </button>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {hasRules && (
+            <button onClick={() => onToggleFolder(folder)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors" title={folderEnabled ? t("collection_rules.disableAll") : t("collection_rules.enableAll")}>
+              {folderEnabled ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}
+            </button>
+          )}
           <button onClick={() => openCreateRule(folder.id)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors" title={t("collection_rules.addRule")}>
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -510,8 +570,9 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
           {folder.children.map((child) => (
             <RuleFolderNode key={`folder-${child.id}`} folder={child} depth={depth + 1} t={t}
               expanded={expanded} toggle={toggle}
-              openCreateRule={openCreateRule} openEditRule={openEditRule} toggleRule={toggleRule}
+              openCreateRule={openCreateRule} openEditRule={openEditRule} toggleRule={toggleRule} duplicateRule={duplicateRule}
               openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
+              onToggleFolder={onToggleFolder} isFolderAllEnabled={isFolderAllEnabled}
               deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
               deleteRule={deleteRule} deleteFolder={deleteFolder}
               exportingId={exportingId} onExport={onExport} onImport={onImport}
@@ -519,7 +580,7 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
           ))}
           {folder.rules.map((rule) => (
             <RuleRow key={`rule-${rule.id}`} rule={rule} depth={depth + 1} t={t}
-              onEdit={() => openEditRule(rule)} onToggle={() => toggleRule(rule)}
+              onEdit={() => openEditRule(rule)} onToggle={() => toggleRule(rule)} onDuplicate={() => duplicateRule(rule)}
               deleteConfirm={deleteConfirm?.type === "rule" && deleteConfirm.id === rule.id}
               onDelete={() => setDeleteConfirm({ type: "rule", id: rule.id })}
               onDeleteConfirm={() => deleteRule(rule.id)}
@@ -533,9 +594,9 @@ function RuleFolderNode({ folder, depth, t, expanded, toggle, openCreateRule, op
 }
 
 // --- Rule row ---
-function RuleRow({ rule, depth, t, onEdit, onToggle, deleteConfirm, onDelete, onDeleteConfirm, onDeleteCancel }: {
+function RuleRow({ rule, depth, t, onEdit, onToggle, onDuplicate, deleteConfirm, onDelete, onDeleteConfirm, onDeleteCancel }: {
   rule: Rule; depth: number; t: (k: string) => string;
-  onEdit: () => void; onToggle: () => void;
+  onEdit: () => void; onToggle: () => void; onDuplicate: () => void;
   deleteConfirm: boolean; onDelete: () => void; onDeleteConfirm: () => void; onDeleteCancel: () => void;
 }) {
   const pl = depth === 0 ? "pl-4" : depth === 1 ? "pl-14" : depth === 2 ? "pl-20" : "pl-26";
@@ -577,6 +638,9 @@ function RuleRow({ rule, depth, t, onEdit, onToggle, deleteConfirm, onDelete, on
         </button>
         <button onClick={onEdit} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors">
           <Pencil className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={onDuplicate} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors" title={t("collection_rules.duplicate")}>
+          <Copy className="h-3.5 w-3.5" />
         </button>
         {deleteConfirm ? (
           <div className="flex items-center gap-1">

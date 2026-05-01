@@ -17,6 +17,8 @@ import {
   X,
   ChevronRight,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ToggleLeft,
   ToggleRight,
   Download,
@@ -97,6 +99,41 @@ export default function CollectionCommandsPage() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const collectFolderIds = (folders: Folder[]): number[] => {
+    const ids: number[] = [];
+    const walk = (list: Folder[]) => {
+      for (const f of list) {
+        ids.push(f.id);
+        walk(f.children);
+      }
+    };
+    walk(folders);
+    return ids;
+  };
+
+  const expandAll = () => setExpanded(new Set(collectFolderIds(tree.folders)));
+  const collapseAll = () => setExpanded(new Set());
+
+  const allCommandsInFolder = (folder: Folder): Command[] => [
+    ...folder.commands,
+    ...folder.children.flatMap(allCommandsInFolder),
+  ];
+
+  const isFolderAllEnabled = (folder: Folder): boolean => {
+    const cmds = allCommandsInFolder(folder);
+    return cmds.length > 0 && cmds.every((c) => c.enabled);
+  };
+
+  const toggleFolder = async (folder: Folder) => {
+    const enabled = !isFolderAllEnabled(folder);
+    await fetch(`/api/collection-folders/${folder.id}/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    await load();
   };
 
   // Command CRUD
@@ -255,6 +292,12 @@ export default function CollectionCommandsPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("collection_commands.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={expandAll} title={t("collection_commands.expandAll")} className="flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <ChevronsUpDown className="h-4 w-4" />
+          </button>
+          <button onClick={collapseAll} title={t("collection_commands.collapseAll")} className="flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 p-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <ChevronsDownUp className="h-4 w-4" />
+          </button>
           <button onClick={() => { setImportTargetId(null); importInputRef.current?.click(); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
             <Upload className="h-4 w-4" />
             {t("collection_commands.importFolder")}
@@ -284,6 +327,7 @@ export default function CollectionCommandsPage() {
                 expanded={expanded} toggle={toggle}
                 openCreateCmd={openCreateCmd} openEditCmd={openEditCmd} toggleCmd={toggleCmd}
                 openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
+                onToggleFolder={toggleFolder} isFolderAllEnabled={isFolderAllEnabled}
                 deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
                 deleteCmd={deleteCmd} deleteFolder={deleteFolder}
                 exportingId={exportingId} onExport={handleExportFolder}
@@ -422,7 +466,7 @@ function countCommands(folder: Folder): number {
 }
 
 // --- Folder node ---
-function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEditCmd, toggleCmd, openCreateFolder, openEditFolder, deleteConfirm, setDeleteConfirm, deleteCmd, deleteFolder, exportingId, onExport, onImport }: {
+function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEditCmd, toggleCmd, openCreateFolder, openEditFolder, onToggleFolder, isFolderAllEnabled, deleteConfirm, setDeleteConfirm, deleteCmd, deleteFolder, exportingId, onExport, onImport }: {
   folder: Folder; depth: number; t: (k: string) => string;
   expanded: Set<number>; toggle: (id: number) => void;
   openCreateCmd: (folderId: number | null) => void;
@@ -430,6 +474,8 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
   toggleCmd: (cmd: Command) => void;
   openCreateFolder: (parentId: number | null) => void;
   openEditFolder: (folder: Folder) => void;
+  onToggleFolder: (folder: Folder) => void;
+  isFolderAllEnabled: (folder: Folder) => boolean;
   deleteConfirm: { type: string; id: number } | null;
   setDeleteConfirm: (v: { type: "cmd" | "folder"; id: number } | null) => void;
   deleteCmd: (id: number) => void;
@@ -441,7 +487,8 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
   const isExpanded = expanded.has(folder.id);
   const pl = depth === 0 ? "pl-4" : depth === 1 ? "pl-10" : depth === 2 ? "pl-16" : "pl-22";
   const folderColor = folder.type === "manufacturer" ? "text-amber-500" : folder.type === "model" ? "text-blue-500" : "text-slate-400 dark:text-slate-500";
-  const totalItems = folder.commands.length + folder.children.reduce((s, c) => s + c.commands.length + c.children.length, 0) + folder.children.length;
+  const folderEnabled = isFolderAllEnabled(folder);
+  const hasCommands = countCommands(folder) > 0;
 
   return (
     <>
@@ -458,6 +505,11 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
           <span className="text-xs text-slate-400 dark:text-slate-500">{countCommands(folder)} cmd{countCommands(folder) !== 1 ? "s" : ""}</span>
         </button>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {hasCommands && (
+            <button onClick={() => onToggleFolder(folder)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors" title={folderEnabled ? t("collection_commands.disableAll") : t("collection_commands.enableAll")}>
+              {folderEnabled ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}
+            </button>
+          )}
           <button onClick={() => openCreateCmd(folder.id)} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors" title={t("collection_commands.addCommand")}>
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -497,6 +549,7 @@ function FolderNode({ folder, depth, t, expanded, toggle, openCreateCmd, openEdi
               expanded={expanded} toggle={toggle}
               openCreateCmd={openCreateCmd} openEditCmd={openEditCmd} toggleCmd={toggleCmd}
               openCreateFolder={openCreateFolder} openEditFolder={openEditFolder}
+              onToggleFolder={onToggleFolder} isFolderAllEnabled={isFolderAllEnabled}
               deleteConfirm={deleteConfirm} setDeleteConfirm={setDeleteConfirm}
               deleteCmd={deleteCmd} deleteFolder={deleteFolder}
               exportingId={exportingId} onExport={onExport} onImport={onImport}

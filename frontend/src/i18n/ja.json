@@ -574,7 +574,11 @@
     "importPreviewTitle": "インポートプレビュー",
     "importCountCommands": "コマンド",
     "importCountFolders": "サブフォルダ",
-    "importConfirm": "インポート"
+    "importConfirm": "インポート",
+    "expandAll": "すべて展開",
+    "collapseAll": "すべて折りたたむ",
+    "enableAll": "すべて有効化",
+    "disableAll": "すべて無効化"
   },
   "collection_rules": {
     "title": "収集ルール",
@@ -605,6 +609,11 @@
     "importNew": "新規",
     "importExists": "既存",
     "importConfirm": "インポート",
+    "expandAll": "すべて展開",
+    "collapseAll": "すべて折りたたむ",
+    "enableAll": "すべて有効化",
+    "disableAll": "すべて無効化",
+    "duplicate": "複製",
     "tabEdit": "編集",
     "tabCollect": "収集",
     "saved": "保存しました",

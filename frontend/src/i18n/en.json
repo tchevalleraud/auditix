@@ -715,7 +715,11 @@
     "importPreviewTitle": "Import preview",
     "importCountCommands": "commands",
     "importCountFolders": "sub-folders",
-    "importConfirm": "Import"
+    "importConfirm": "Import",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "enableAll": "Enable all",
+    "disableAll": "Disable all"
   },
   "collection_rules": {
     "title": "Collection rules",
@@ -746,6 +750,11 @@
     "importNew": "New",
     "importExists": "Exists",
     "importConfirm": "Import",
+    "expandAll": "Expand all",
+    "collapseAll": "Collapse all",
+    "enableAll": "Enable all",
+    "disableAll": "Disable all",
+    "duplicate": "Duplicate",
     "tabEdit": "Edit",
     "tabCollect": "Collect",
     "saved": "Saved",

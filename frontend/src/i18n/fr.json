@@ -687,7 +687,11 @@
     "importPreviewTitle": "Aperçu de l'import",
     "importCountCommands": "commandes",
     "importCountFolders": "sous-dossiers",
-    "importConfirm": "Importer"
+    "importConfirm": "Importer",
+    "expandAll": "Tout déplier",
+    "collapseAll": "Tout replier",
+    "enableAll": "Tout activer",
+    "disableAll": "Tout désactiver"
   },
   "collection_rules": {
     "title": "Regles de collecte",
@@ -718,6 +722,11 @@
     "importNew": "Nouveau",
     "importExists": "Existe",
     "importConfirm": "Importer",
+    "expandAll": "Tout déplier",
+    "collapseAll": "Tout replier",
+    "enableAll": "Tout activer",
+    "disableAll": "Tout désactiver",
+    "duplicate": "Dupliquer",
     "tabEdit": "Edition",
     "tabCollect": "Collecte",
     "saved": "Enregistre",
