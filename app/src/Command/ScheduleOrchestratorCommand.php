@@ -4,12 +4,14 @@ namespace App\Command;
 
 use App\Entity\Collection;
 use App\Entity\CompliancePolicy;
+use App\Entity\MailReport;
 use App\Entity\Node;
 use App\Entity\Report;
 use App\Entity\Schedule;
 use App\Message\CollectNodeMessage;
 use App\Message\EvaluateComplianceMessage;
 use App\Message\GenerateReportMessage;
+use App\Message\SendMailReportMessage;
 use App\Repository\ScheduleRepository;
 use Cron\CronExpression;
 use Doctrine\ORM\EntityManagerInterface;
@@ -80,7 +82,7 @@ class ScheduleOrchestratorCommand extends Command
     private function processActiveSchedules(\DateTimeImmutable $now, OutputInterface $output): void
     {
         $schedules = $this->em->getRepository(Schedule::class)->findBy([
-            'currentPhase' => [Schedule::PHASE_COLLECTION, Schedule::PHASE_CLEANUP, Schedule::PHASE_COMPLIANCE, Schedule::PHASE_REPORT],
+            'currentPhase' => [Schedule::PHASE_COLLECTION, Schedule::PHASE_CLEANUP, Schedule::PHASE_COMPLIANCE, Schedule::PHASE_REPORT, Schedule::PHASE_MAIL],
         ]);
 
         foreach ($schedules as $schedule) {
@@ -115,6 +117,9 @@ class ScheduleOrchestratorCommand extends Command
                 break;
             case Schedule::PHASE_REPORT:
                 $this->dispatchReport($schedule, $output);
+                break;
+            case Schedule::PHASE_MAIL:
+                $this->dispatchMail($schedule, $output);
                 break;
         }
     }
@@ -263,6 +268,27 @@ class ScheduleOrchestratorCommand extends Command
         $output->writeln(sprintf('  Dispatched %d report generation(s)', $dispatched));
     }
 
+    private function dispatchMail(Schedule $schedule, OutputInterface $output): void
+    {
+        $mailReportIds = $schedule->getMailReportIds() ?? [];
+        $reports = $this->em->getRepository(MailReport::class)->findBy(['id' => $mailReportIds]);
+        $dispatched = 0;
+
+        foreach ($reports as $report) {
+            if ($report->getMailServer() === null) {
+                continue;
+            }
+            $report->setSendingStatus(MailReport::STATUS_PENDING);
+            $this->bus->dispatch(new SendMailReportMessage($report->getId()));
+            $dispatched++;
+        }
+
+        $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
+        $this->em->flush();
+
+        $output->writeln(sprintf('  Dispatched %d mail report(s)', $dispatched));
+    }
+
     private function checkPhaseCompletion(Schedule $schedule, OutputInterface $output): void
     {
         $phase = $schedule->getCurrentPhase();
@@ -277,6 +303,9 @@ class ScheduleOrchestratorCommand extends Command
                 break;
             case Schedule::PHASE_REPORT:
                 $allDone = $this->isReportDone($schedule);
+                break;
+            case Schedule::PHASE_MAIL:
+                $allDone = $this->isMailDone($schedule);
                 break;
         }
 
@@ -328,6 +357,22 @@ class ScheduleOrchestratorCommand extends Command
         $reports = $this->em->getRepository(Report::class)->findBy(['id' => $reportIds]);
         foreach ($reports as $report) {
             if ($report->getGeneratingStatus() !== null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private function isMailDone(Schedule $schedule): bool
+    {
+        $mailReportIds = $schedule->getMailReportIds();
+        if (empty($mailReportIds)) {
+            return true;
+        }
+        $reports = $this->em->getRepository(MailReport::class)->findBy(['id' => $mailReportIds]);
+        foreach ($reports as $report) {
+            $status = $report->getSendingStatus();
+            if ($status !== null && $status !== MailReport::STATUS_SENT && $status !== MailReport::STATUS_FAILED) {
                 return false;
             }
         }

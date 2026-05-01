@@ -97,6 +97,7 @@ framework:
 
             App\Message\EvaluateComplianceMessage: compliance
             App\Message\GenerateReportMessage: generator
+            App\Message\SendMailReportMessage: generator
 
             App\Message\SyncCveMessage: vulnerability
             App\Message\RecalculateNodeScoreMessage: vulnerability

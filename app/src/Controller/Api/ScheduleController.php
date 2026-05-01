@@ -31,6 +31,7 @@ class ScheduleController extends AbstractController
             'cleanupEnabled' => $s->isCleanupEnabled(),
             'complianceNodeIds' => $s->getComplianceNodeIds(),
             'reportIds' => $s->getReportIds(),
+            'mailReportIds' => $s->getMailReportIds(),
             'createdAt' => $s->getCreatedAt()->format('c'),
             'updatedAt' => $s->getUpdatedAt()?->format('c'),
         ];
@@ -110,6 +111,9 @@ class ScheduleController extends AbstractController
         if (array_key_exists('reportIds', $data)) {
             $schedule->setReportIds(!empty($data['reportIds']) ? $data['reportIds'] : null);
         }
+        if (array_key_exists('mailReportIds', $data)) {
+            $schedule->setMailReportIds(!empty($data['mailReportIds']) ? $data['mailReportIds'] : null);
+        }
 
         $this->computeNextRun($schedule);
 
@@ -153,6 +157,9 @@ class ScheduleController extends AbstractController
         }
         if (array_key_exists('reportIds', $data)) {
             $schedule->setReportIds(!empty($data['reportIds']) ? $data['reportIds'] : null);
+        }
+        if (array_key_exists('mailReportIds', $data)) {
+            $schedule->setMailReportIds(!empty($data['mailReportIds']) ? $data['mailReportIds'] : null);
         }
 
         $this->computeNextRun($schedule);

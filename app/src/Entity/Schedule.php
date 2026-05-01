@@ -12,6 +12,7 @@ class Schedule
     public const PHASE_CLEANUP = 'cleanup';
     public const PHASE_COMPLIANCE = 'compliance';
     public const PHASE_REPORT = 'report';
+    public const PHASE_MAIL = 'mail';
 
     public const STATUS_DISPATCHING = 'dispatching';
     public const STATUS_RUNNING = 'running';
@@ -58,6 +59,9 @@ class Schedule
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $reportIds = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $mailReportIds = null;
+
     #[ORM\Column]
     private bool $cleanupEnabled = false;
 
@@ -100,6 +104,8 @@ class Schedule
     public function setComplianceNodeIds(?array $v): static { $this->complianceNodeIds = $v; return $this; }
     public function getReportIds(): ?array { return $this->reportIds; }
     public function setReportIds(?array $v): static { $this->reportIds = $v; return $this; }
+    public function getMailReportIds(): ?array { return $this->mailReportIds; }
+    public function setMailReportIds(?array $v): static { $this->mailReportIds = $v; return $this; }
     public function isCleanupEnabled(): bool { return $this->cleanupEnabled; }
     public function setCleanupEnabled(bool $v): static { $this->cleanupEnabled = $v; return $this; }
     public function getCollectionIds(): ?array { return $this->collectionIds; }
@@ -119,6 +125,7 @@ class Schedule
         if ($this->cleanupEnabled) return self::PHASE_CLEANUP;
         if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
         if (!empty($this->reportIds)) return self::PHASE_REPORT;
+        if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
         return null;
     }
 
@@ -128,13 +135,19 @@ class Schedule
             if ($this->cleanupEnabled) return self::PHASE_CLEANUP;
             if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
             if (!empty($this->reportIds)) return self::PHASE_REPORT;
+            if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
         }
         if ($completedPhase === self::PHASE_CLEANUP) {
             if (!empty($this->complianceNodeIds)) return self::PHASE_COMPLIANCE;
             if (!empty($this->reportIds)) return self::PHASE_REPORT;
+            if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
         }
         if ($completedPhase === self::PHASE_COMPLIANCE) {
             if (!empty($this->reportIds)) return self::PHASE_REPORT;
+            if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
+        }
+        if ($completedPhase === self::PHASE_REPORT) {
+            if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
         }
         return null;
     }

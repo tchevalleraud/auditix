@@ -100,6 +100,7 @@ const contextNav: NavCategory[] = [
     label: "sidebar.catReports",
     items: [
       { key: "sidebar.reports", href: "/reports/list", icon: FileBarChart },
+      { key: "sidebar.mailReports", href: "/reports/mail", icon: Mail },
       { key: "sidebar.reportThemes", href: "/reports/themes", icon: Palette },
     ],
   },

@@ -16,6 +16,7 @@ import {
   ToggleRight,
   Server,
   FileBarChart,
+  Mail,
   ShieldCheck,
   Database,
   Clock,
@@ -40,6 +41,7 @@ interface ScheduleDetail {
   cleanupEnabled: boolean;
   complianceNodeIds: number[] | null;
   reportIds: number[] | null;
+  mailReportIds: number[] | null;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -54,6 +56,12 @@ interface ContextNode {
 interface ContextReport {
   id: number;
   name: string;
+}
+
+interface ContextMailReport {
+  id: number;
+  name: string;
+  mailServer: { id: number; name: string } | null;
 }
 
 export default function ScheduleDetailPage() {
@@ -76,16 +84,19 @@ export default function ScheduleDetailPage() {
   const [collectionEnabled, setCollectionEnabled] = useState(false);
   const [complianceEnabled, setComplianceEnabled] = useState(false);
   const [reportEnabled, setReportEnabled] = useState(false);
+  const [mailEnabled, setMailEnabled] = useState(false);
 
   // Phase selections
   const [collectionNodeIds, setCollectionNodeIds] = useState<number[]>([]);
   const [cleanupEnabled, setCleanupEnabled] = useState(false);
   const [complianceNodeIds, setComplianceNodeIds] = useState<number[]>([]);
   const [reportIds, setReportIds] = useState<number[]>([]);
+  const [mailReportIds, setMailReportIds] = useState<number[]>([]);
 
   // Context data
   const [contextNodes, setContextNodes] = useState<ContextNode[]>([]);
   const [contextReports, setContextReports] = useState<ContextReport[]>([]);
+  const [contextMailReports, setContextMailReports] = useState<ContextMailReport[]>([]);
 
   // Delete
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -118,9 +129,11 @@ export default function ScheduleDetailPage() {
     setCleanupEnabled(data.cleanupEnabled ?? false);
     setComplianceEnabled(data.complianceNodeIds !== null);
     setReportEnabled(data.reportIds !== null);
+    setMailEnabled(data.mailReportIds !== null);
     setCollectionNodeIds(data.collectionNodeIds || []);
     setComplianceNodeIds(data.complianceNodeIds || []);
     setReportIds(data.reportIds || []);
+    setMailReportIds(data.mailReportIds || []);
     setLoading(false);
   }, [scheduleId, router]);
 
@@ -154,11 +167,27 @@ export default function ScheduleDetailPage() {
     }
   }, [current]);
 
+  const loadContextMailReports = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/mail-reports?context=${current.id}`);
+    if (res.ok) {
+      const data = await res.json();
+      setContextMailReports(
+        data.map((r: ContextMailReport) => ({
+          id: r.id,
+          name: r.name,
+          mailServer: r.mailServer,
+        }))
+      );
+    }
+  }, [current]);
+
   useEffect(() => {
     loadSchedule();
     loadContextNodes();
     loadContextReports();
-  }, [loadSchedule, loadContextNodes, loadContextReports]);
+    loadContextMailReports();
+  }, [loadSchedule, loadContextNodes, loadContextReports, loadContextMailReports]);
 
   // Auto-refresh when running
   useEffect(() => {
@@ -191,6 +220,7 @@ export default function ScheduleDetailPage() {
           cleanupEnabled,
           complianceNodeIds: complianceEnabled ? complianceNodeIds : null,
           reportIds: reportEnabled ? reportIds : null,
+          mailReportIds: mailEnabled ? mailReportIds : null,
         }),
       });
       if (res.ok) {
@@ -243,9 +273,10 @@ export default function ScheduleDetailPage() {
     { key: "cleanup", label: t("schedules.phaseCleanup"), icon: Trash2 },
     { key: "compliance", label: t("schedules.phaseCompliance"), icon: ShieldCheck },
     { key: "report", label: t("schedules.phaseReport"), icon: FileBarChart },
+    { key: "mail", label: t("schedules.phaseMail"), icon: Mail },
   ];
 
-  const phaseOrder = ["collection", "cleanup", "compliance", "report"];
+  const phaseOrder = ["collection", "cleanup", "compliance", "report", "mail"];
   const currentPhaseIndex = schedule.currentPhase
     ? phaseOrder.indexOf(schedule.currentPhase)
     : -1;
@@ -569,6 +600,79 @@ export default function ScheduleDetailPage() {
                 )}
                 <p className="text-xs text-slate-400 dark:text-slate-500">
                   {t("schedules.reportCount", { count: String(reportIds.length) })}
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Mail Phase card */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Mail className="h-4 w-4 text-slate-400" />
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {t("schedules.phaseMail")}
+                </h2>
+              </div>
+              <button type="button" onClick={() => setMailEnabled(!mailEnabled)}>
+                {mailEnabled ? (
+                  <ToggleRight className="h-6 w-6 text-emerald-500" />
+                ) : (
+                  <ToggleLeft className="h-6 w-6 text-slate-400" />
+                )}
+              </button>
+            </div>
+            {mailEnabled && (
+              <>
+                {contextMailReports.length === 0 ? (
+                  <p className="text-sm text-slate-400 dark:text-slate-500 py-4 text-center">
+                    {t("schedules.noMailReports")}
+                  </p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {contextMailReports.map((report) => {
+                      const isSelected = mailReportIds.includes(report.id);
+                      const disabled = !report.mailServer;
+                      return (
+                        <label
+                          key={report.id}
+                          className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition-colors ${disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer"} ${
+                            isSelected
+                              ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                              : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={disabled}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setMailReportIds([...mailReportIds, report.id]);
+                              } else {
+                                setMailReportIds(mailReportIds.filter((rid) => rid !== report.id));
+                              }
+                            }}
+                            className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-500"
+                          />
+                          <Mail className="h-4 w-4 text-slate-400" />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm font-medium text-slate-900 dark:text-slate-100 block truncate">
+                              {report.name}
+                            </span>
+                            {!report.mailServer && (
+                              <span className="text-xs text-amber-600 dark:text-amber-400">
+                                {t("schedules.mailReportNoServer")}
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-xs text-slate-400 dark:text-slate-500">
+                  {t("schedules.mailReportCount", { count: String(mailReportIds.length) })}
                 </p>
               </>
             )}

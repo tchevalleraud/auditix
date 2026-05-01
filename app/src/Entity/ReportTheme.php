@@ -98,6 +98,39 @@ class ReportTheme
             'background' => '#ffffff',
             'elements' => [],
         ],
+        'mail' => [
+            'bodyBg' => '#f4f6f8',
+            'containerBg' => '#ffffff',
+            'containerWidth' => 600,
+            'fontFamily' => "Arial, Helvetica, sans-serif",
+            'fontSize' => 14,
+            'textColor' => '#1e293b',
+            'mutedColor' => '#64748b',
+            'linkColor' => '#3b82f6',
+            'dividerColor' => '#e2e8f0',
+            'button' => [
+                'bg' => '#3b82f6',
+                'color' => '#ffffff',
+                'radius' => 6,
+                'paddingY' => 12,
+                'paddingX' => 24,
+            ],
+            'card' => [
+                'bg' => '#f8fafc',
+                'borderColor' => '#e2e8f0',
+                'radius' => 8,
+            ],
+            'footer' => [
+                'bg' => '#f1f5f9',
+                'color' => '#64748b',
+                'fontSize' => 12,
+            ],
+            'compliance' => [
+                'goodColor' => '#16a34a',
+                'warnColor' => '#f59e0b',
+                'badColor' => '#dc2626',
+            ],
+        ],
     ];
 
     #[ORM\Id]
