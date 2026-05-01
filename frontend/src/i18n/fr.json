@@ -1261,7 +1261,9 @@
     "sortBy": "Trier par",
     "sortByKey": "Cle (par defaut)",
     "sortAsc": "Croissant",
-    "sortDesc": "Decroissant"
+    "sortDesc": "Decroissant",
+    "deleteSelected": "Supprimer ({count})",
+    "confirmBulkDelete": "Supprimer {count} categorie(s) selectionnee(s) ? Cette action est irreversible."
   },
   "compliance_rules": {
     "title": "Regles de conformite",

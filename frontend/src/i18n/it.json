@@ -948,7 +948,9 @@
     "sortBy": "Ordina per",
     "sortByKey": "Chiave (predefinito)",
     "sortAsc": "Crescente",
-    "sortDesc": "Decrescente"
+    "sortDesc": "Decrescente",
+    "deleteSelected": "Elimina ({count})",
+    "confirmBulkDelete": "Eliminare {count} categoria(e) selezionata(e)? Questa azione non puo essere annullata."
   },
   "compliance_rules": {
     "title": "Regole di conformita",

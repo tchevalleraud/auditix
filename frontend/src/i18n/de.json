@@ -948,7 +948,9 @@
     "sortBy": "Sortieren nach",
     "sortByKey": "Schlussel (Standard)",
     "sortAsc": "Aufsteigend",
-    "sortDesc": "Absteigend"
+    "sortDesc": "Absteigend",
+    "deleteSelected": "Loschen ({count})",
+    "confirmBulkDelete": "{count} ausgewahlte Kategorie(n) loschen? Diese Aktion kann nicht ruckgangig gemacht werden."
   },
   "compliance_rules": {
     "title": "Konformitatsregeln",

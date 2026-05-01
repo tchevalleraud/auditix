@@ -48,6 +48,9 @@ export default function InventoryCategoriesPage() {
   const [keyLabel, setKeyLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<InventoryCategoryItem | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const [columnsModal, setColumnsModal] = useState<InventoryCategoryItem | null>(null);
   const [columnsConfig, setColumnsConfig] = useState<ColumnConfigItem[]>([]);
@@ -72,6 +75,45 @@ export default function InventoryCategoriesPage() {
     const q = search.toLowerCase();
     return c.name.toLowerCase().includes(q) || (c.keyLabel ?? "").toLowerCase().includes(q);
   });
+
+  const filteredIds = filtered.map((c) => c.id);
+  const allFilteredSelected = filtered.length > 0 && filteredIds.every((id) => selected.has(id));
+
+  const toggleSelect = (id: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allFilteredSelected) {
+        filteredIds.forEach((id) => next.delete(id));
+      } else {
+        filteredIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0) return;
+    setBulkDeleting(true);
+    try {
+      for (const id of selected) {
+        await fetch(`/api/inventory-categories/${id}`, { method: "DELETE" });
+      }
+      setSelected(new Set());
+      setBulkDeleteConfirm(false);
+      load();
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -191,13 +233,24 @@ export default function InventoryCategoriesPage() {
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t("inventory_categories.title")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("inventory_categories.subtitle")}</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          {t("inventory_categories.newCategory")}
-        </button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button
+              onClick={() => setBulkDeleteConfirm(true)}
+              className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              {t("inventory_categories.deleteSelected", { count: String(selected.size) })}
+            </button>
+          )}
+          <button
+            onClick={openCreate}
+            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            {t("inventory_categories.newCategory")}
+          </button>
+        </div>
       </div>
 
       <div className="relative max-w-md">
@@ -216,6 +269,14 @@ export default function InventoryCategoriesPage() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
+                <th className="px-4 py-3 text-center w-10">
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    onChange={toggleAll}
+                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
+                  />
+                </th>
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                   {t("inventory_categories.colName")}
                 </th>
@@ -236,7 +297,7 @@ export default function InventoryCategoriesPage() {
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center">
+                  <td colSpan={6} className="px-5 py-12 text-center">
                     <FolderTree className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
                     <p className="text-sm text-slate-400 dark:text-slate-500">
                       {search ? t("inventory_categories.noResult") : t("inventory_categories.noCategories")}
@@ -245,7 +306,15 @@ export default function InventoryCategoriesPage() {
                 </tr>
               ) : (
                 filtered.map((cat) => (
-                  <tr key={cat.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
+                  <tr key={cat.id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${selected.has(cat.id) ? "bg-slate-50 dark:bg-slate-800/30" : ""}`}>
+                    <td className="px-4 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(cat.id)}
+                        onChange={() => toggleSelect(cat.id)}
+                        className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
+                      />
+                    </td>
                     <td className="px-5 py-3">
                       <button
                         onClick={() => openEdit(cat)}
@@ -484,6 +553,29 @@ export default function InventoryCategoriesPage() {
                 onClick={() => handleDelete(deleteConfirm)}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
               >
+                {t("common.delete")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {bulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 space-y-4">
+            <p className="text-sm text-slate-700 dark:text-slate-300">
+              {t("inventory_categories.confirmBulkDelete", { count: String(selected.size) })}
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setBulkDeleteConfirm(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                {t("common.cancel")}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 transition-colors"
+              >
+                {bulkDeleting && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t("common.delete")}
               </button>
             </div>

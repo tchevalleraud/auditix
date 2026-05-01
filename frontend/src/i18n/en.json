@@ -1289,7 +1289,9 @@
     "sortBy": "Sort by",
     "sortByKey": "Key (default)",
     "sortAsc": "Ascending",
-    "sortDesc": "Descending"
+    "sortDesc": "Descending",
+    "deleteSelected": "Delete ({count})",
+    "confirmBulkDelete": "Delete {count} selected category(ies)? This action cannot be undone."
   },
   "compliance_rules": {
     "title": "Compliance rules",

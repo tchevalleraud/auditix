@@ -182,7 +182,8 @@ class FolderExportController extends AbstractController
         try {
             $extractRefMap = [];
             $pendingKeyExtracts = [];
-            $this->importRuleFolderTree($data['folder'], $parent, $context, $em, $extractRefMap, $pendingKeyExtracts);
+            $categoryCache = [];
+            $this->importRuleFolderTree($data['folder'], $parent, $context, $em, $extractRefMap, $pendingKeyExtracts, $categoryCache);
 
             foreach ($pendingKeyExtracts as [$extract, $keyExtractRef]) {
                 if (isset($extractRefMap[$keyExtractRef])) {
@@ -305,6 +306,9 @@ class FolderExportController extends AbstractController
                     'categoryKeyLabel' => $extract->getCategory()?->getKeyLabel(),
                     'nodeField' => $extract->getNodeField(),
                     'nodeFieldGroup' => $extract->getNodeFieldGroup(),
+                    'extractMode' => $extract->getExtractMode(),
+                    'blockSeparator' => $extract->getBlockSeparator(),
+                    'blockKeyGroup' => $extract->getBlockKeyGroup(),
                     'position' => $extract->getPosition(),
                 ];
             }
@@ -316,6 +320,8 @@ class FolderExportController extends AbstractController
                 'source' => $rule->getSource(),
                 'command' => $rule->getCommand(),
                 'tag' => $rule->getTag(),
+                'translations' => $rule->getTranslations(),
+                'conditionTree' => $rule->getConditionTree(),
                 'extracts' => $extracts,
             ];
         }
@@ -347,7 +353,7 @@ class FolderExportController extends AbstractController
         }
     }
 
-    private function importRuleFolderTree(array $data, ?CollectionRuleFolder $parent, Context $context, EntityManagerInterface $em, array &$extractRefMap, array &$pendingKeyExtracts): void
+    private function importRuleFolderTree(array $data, ?CollectionRuleFolder $parent, Context $context, EntityManagerInterface $em, array &$extractRefMap, array &$pendingKeyExtracts, array &$categoryCache): void
     {
         $folder = new CollectionRuleFolder();
         $folder->setName($data['name']);
@@ -364,6 +370,8 @@ class FolderExportController extends AbstractController
             $rule->setSource($ruleData['source'] ?? CollectionRule::SOURCE_LOCAL);
             $rule->setCommand($ruleData['command'] ?? null);
             $rule->setTag($ruleData['tag'] ?? null);
+            $rule->setTranslations($ruleData['translations'] ?? null);
+            $rule->setConditionTree($ruleData['conditionTree'] ?? null);
             $rule->setFolder($folder);
             $rule->setContext($context);
             $em->persist($rule);
@@ -381,20 +389,29 @@ class FolderExportController extends AbstractController
                 $extract->setValueMap($extData['valueMap'] ?? null);
                 $extract->setNodeField($extData['nodeField'] ?? null);
                 $extract->setNodeFieldGroup($extData['nodeFieldGroup'] ?? null);
+                $extract->setExtractMode($extData['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE);
+                $extract->setBlockSeparator($extData['blockSeparator'] ?? null);
+                $extract->setBlockKeyGroup($extData['blockKeyGroup'] ?? null);
                 $extract->setPosition($extData['position'] ?? 0);
                 $extract->setRule($rule);
 
                 if (!empty($extData['categoryName'])) {
-                    $category = $em->getRepository(InventoryCategory::class)->findOneBy([
-                        'name' => $extData['categoryName'],
-                        'context' => $context,
-                    ]);
-                    if (!$category) {
-                        $category = new InventoryCategory();
-                        $category->setName($extData['categoryName']);
-                        $category->setKeyLabel($extData['categoryKeyLabel'] ?? null);
-                        $category->setContext($context);
-                        $em->persist($category);
+                    $name = $extData['categoryName'];
+                    if (isset($categoryCache[$name])) {
+                        $category = $categoryCache[$name];
+                    } else {
+                        $category = $em->getRepository(InventoryCategory::class)->findOneBy([
+                            'name' => $name,
+                            'context' => $context,
+                        ]);
+                        if (!$category) {
+                            $category = new InventoryCategory();
+                            $category->setName($name);
+                            $category->setKeyLabel($extData['categoryKeyLabel'] ?? null);
+                            $category->setContext($context);
+                            $em->persist($category);
+                        }
+                        $categoryCache[$name] = $category;
                     }
                     $extract->setCategory($category);
                 }
@@ -409,7 +426,7 @@ class FolderExportController extends AbstractController
         }
 
         foreach ($data['children'] ?? [] as $childData) {
-            $this->importRuleFolderTree($childData, $folder, $context, $em, $extractRefMap, $pendingKeyExtracts);
+            $this->importRuleFolderTree($childData, $folder, $context, $em, $extractRefMap, $pendingKeyExtracts, $categoryCache);
         }
     }
 

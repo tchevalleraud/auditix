@@ -948,7 +948,9 @@
     "sortBy": "並び替え",
     "sortByKey": "キー（デフォルト）",
     "sortAsc": "昇順",
-    "sortDesc": "降順"
+    "sortDesc": "降順",
+    "deleteSelected": "削除 ({count})",
+    "confirmBulkDelete": "選択した{count}件のカテゴリを削除しますか？この操作は取り消せません。"
   },
   "compliance_rules": {
     "title": "コンプライアンスルール",

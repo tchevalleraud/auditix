@@ -948,7 +948,9 @@
     "sortBy": "Ordenar por",
     "sortByKey": "Clave (predeterminado)",
     "sortAsc": "Ascendente",
-    "sortDesc": "Descendente"
+    "sortDesc": "Descendente",
+    "deleteSelected": "Eliminar ({count})",
+    "confirmBulkDelete": "Eliminar {count} categoria(s) seleccionada(s)? Esta accion no se puede deshacer."
   },
   "compliance_rules": {
     "title": "Reglas de conformidad",

@@ -471,22 +471,23 @@ class ManufacturerExportController extends AbstractController
             $ruleRefMap = [];
             $extractRefMap = [];
             $pendingKeyExtracts = [];
+            $categoryCache = [];
             $ruleFolders = $data['ruleFolders'] ?? [];
 
             foreach ($ruleFolders['manufacturer']['rules'] ?? [] as $ruleData) {
-                $this->createRule($ruleData, $mfgRuleFolder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+                $this->createRule($ruleData, $mfgRuleFolder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
             }
 
             foreach ($ruleFolders['manufacturer']['children'] ?? [] as $childData) {
                 $folder = $modelRuleFolderMap[$childData['modelRef']] ?? null;
                 if (!$folder) continue;
                 foreach ($childData['rules'] ?? [] as $ruleData) {
-                    $this->createRule($ruleData, $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+                    $this->createRule($ruleData, $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
                 }
-                $this->importCustomRuleFolders($childData['custom'] ?? [], $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+                $this->importCustomRuleFolders($childData['custom'] ?? [], $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
             }
 
-            $this->importCustomRuleFolders($ruleFolders['custom'] ?? [], $mfgRuleFolder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+            $this->importCustomRuleFolders($ruleFolders['custom'] ?? [], $mfgRuleFolder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
 
             // ── Phase 5: Resolve extract self-references ──
             foreach ($pendingKeyExtracts as [$extract, $keyExtractRef]) {
@@ -563,6 +564,9 @@ class ManufacturerExportController extends AbstractController
                 'categoryKeyLabel' => $extract->getCategory()?->getKeyLabel(),
                 'nodeField' => $extract->getNodeField(),
                 'nodeFieldGroup' => $extract->getNodeFieldGroup(),
+                'extractMode' => $extract->getExtractMode(),
+                'blockSeparator' => $extract->getBlockSeparator(),
+                'blockKeyGroup' => $extract->getBlockKeyGroup(),
                 'position' => $extract->getPosition(),
             ];
         }
@@ -575,6 +579,8 @@ class ManufacturerExportController extends AbstractController
             'source' => $rule->getSource(),
             'command' => $rule->getCommand(),
             'tag' => $rule->getTag(),
+            'translations' => $rule->getTranslations(),
+            'conditionTree' => $rule->getConditionTree(),
             'extracts' => $extracts,
         ];
     }
@@ -693,7 +699,7 @@ class ManufacturerExportController extends AbstractController
         }
     }
 
-    private function createRule(array $data, CollectionRuleFolder $folder, Context $context, EntityManagerInterface $em, array &$ruleRefMap, array &$extractRefMap, array &$pendingKeyExtracts): void
+    private function createRule(array $data, CollectionRuleFolder $folder, Context $context, EntityManagerInterface $em, array &$ruleRefMap, array &$extractRefMap, array &$pendingKeyExtracts, array &$categoryCache): void
     {
         $rule = new CollectionRule();
         $rule->setName($data['name']);
@@ -702,6 +708,8 @@ class ManufacturerExportController extends AbstractController
         $rule->setSource($data['source'] ?? CollectionRule::SOURCE_LOCAL);
         $rule->setCommand($data['command'] ?? null);
         $rule->setTag($data['tag'] ?? null);
+        $rule->setTranslations($data['translations'] ?? null);
+        $rule->setConditionTree($data['conditionTree'] ?? null);
         $rule->setFolder($folder);
         $rule->setContext($context);
         $em->persist($rule);
@@ -721,22 +729,14 @@ class ManufacturerExportController extends AbstractController
             $extract->setValueMap($extData['valueMap'] ?? null);
             $extract->setNodeField($extData['nodeField'] ?? null);
             $extract->setNodeFieldGroup($extData['nodeFieldGroup'] ?? null);
+            $extract->setExtractMode($extData['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE);
+            $extract->setBlockSeparator($extData['blockSeparator'] ?? null);
+            $extract->setBlockKeyGroup($extData['blockKeyGroup'] ?? null);
             $extract->setPosition($extData['position'] ?? 0);
             $extract->setRule($rule);
 
             if (!empty($extData['categoryName'])) {
-                $category = $em->getRepository(InventoryCategory::class)->findOneBy([
-                    'name' => $extData['categoryName'],
-                    'context' => $context,
-                ]);
-                if (!$category) {
-                    $category = new InventoryCategory();
-                    $category->setName($extData['categoryName']);
-                    $category->setKeyLabel($extData['categoryKeyLabel'] ?? null);
-                    $category->setContext($context);
-                    $em->persist($category);
-                }
-                $extract->setCategory($category);
+                $extract->setCategory($this->resolveCategory($extData, $context, $em, $categoryCache));
             }
 
             $em->persist($extract);
@@ -748,7 +748,28 @@ class ManufacturerExportController extends AbstractController
         }
     }
 
-    private function importCustomRuleFolders(array $folders, CollectionRuleFolder $parent, Context $context, EntityManagerInterface $em, array &$ruleRefMap, array &$extractRefMap, array &$pendingKeyExtracts): void
+    private function resolveCategory(array $extData, Context $context, EntityManagerInterface $em, array &$categoryCache): InventoryCategory
+    {
+        $name = $extData['categoryName'];
+        if (isset($categoryCache[$name])) {
+            return $categoryCache[$name];
+        }
+        $category = $em->getRepository(InventoryCategory::class)->findOneBy([
+            'name' => $name,
+            'context' => $context,
+        ]);
+        if (!$category) {
+            $category = new InventoryCategory();
+            $category->setName($name);
+            $category->setKeyLabel($extData['categoryKeyLabel'] ?? null);
+            $category->setContext($context);
+            $em->persist($category);
+        }
+        $categoryCache[$name] = $category;
+        return $category;
+    }
+
+    private function importCustomRuleFolders(array $folders, CollectionRuleFolder $parent, Context $context, EntityManagerInterface $em, array &$ruleRefMap, array &$extractRefMap, array &$pendingKeyExtracts, array &$categoryCache): void
     {
         foreach ($folders as $folderData) {
             $folder = new CollectionRuleFolder();
@@ -759,10 +780,10 @@ class ManufacturerExportController extends AbstractController
             $em->persist($folder);
 
             foreach ($folderData['rules'] ?? [] as $ruleData) {
-                $this->createRule($ruleData, $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+                $this->createRule($ruleData, $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
             }
 
-            $this->importCustomRuleFolders($folderData['children'] ?? [], $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts);
+            $this->importCustomRuleFolders($folderData['children'] ?? [], $folder, $context, $em, $ruleRefMap, $extractRefMap, $pendingKeyExtracts, $categoryCache);
         }
     }
 }
