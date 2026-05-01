@@ -135,7 +135,7 @@ class CollectionController extends AbstractController
         $em->flush();
 
         foreach ($collections as $collection) {
-            $this->bus->dispatch(new CollectNodeMessage($collection->getId()));
+            $this->bus->dispatch(new CollectNodeMessage($collection->getId(), chainCompliance: true));
         }
 
         return $this->json([
@@ -165,7 +165,7 @@ class CollectionController extends AbstractController
             );
 
             if ($row) {
-                $this->bus->dispatch(new ProcessInventoryMessage((int) $row['id']));
+                $this->bus->dispatch(new ProcessInventoryMessage((int) $row['id'], chainCompliance: true));
                 $dispatched++;
             }
         }

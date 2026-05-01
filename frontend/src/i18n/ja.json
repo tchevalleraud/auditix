@@ -441,6 +441,8 @@
     "collectSelected": "収集 ({count})",
     "evaluateSelected": "コンプライアンス ({count})",
     "collect": "収集",
+    "ping": "Ping",
+    "extract": "抽出",
     "collectTitle": "収集を開始",
     "collectDescription": "このノードのモデルに関連する全ての収集コマンドを実行し、結果を保存します。",
     "collectTagLabel": "タグ（任意）",

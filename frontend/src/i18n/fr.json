@@ -542,6 +542,8 @@
     "extractSelected": "Extraction ({count})",
     "evaluateSelected": "Conformité ({count})",
     "collect": "Collecter",
+    "ping": "Ping",
+    "extract": "Extraction",
     "collectTitle": "Lancer une collecte",
     "collectDescription": "Executer toutes les commandes de collecte associees au modele de ce noeud et stocker les resultats.",
     "collectTagLabel": "Tag (optionnel)",

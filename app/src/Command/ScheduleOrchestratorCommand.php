@@ -14,6 +14,7 @@ use App\Message\GenerateReportMessage;
 use App\Message\ProcessInventoryMessage;
 use App\Message\SendMailReportMessage;
 use App\Repository\ScheduleRepository;
+use App\Service\PolicyAutoAssigner;
 use App\Service\ScheduleEventPublisher;
 use Cron\CronExpression;
 use Doctrine\ORM\EntityManagerInterface;
@@ -39,6 +40,7 @@ class ScheduleOrchestratorCommand extends Command
         private readonly MessageBusInterface $bus,
         private readonly ScheduleEventPublisher $events,
         private readonly HubInterface $hub,
+        private readonly PolicyAutoAssigner $policyAutoAssigner,
     ) {
         parent::__construct();
     }
@@ -299,9 +301,7 @@ class ScheduleOrchestratorCommand extends Command
         $dispatched = 0;
 
         foreach ($nodes as $node) {
-            $policies = $this->em->createQuery(
-                'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
-            )->setParameter('node', $node)->getResult();
+            $policies = $this->policyAutoAssigner->autoAssign($node);
 
             if (empty($policies)) {
                 continue;

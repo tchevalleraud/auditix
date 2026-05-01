@@ -441,6 +441,8 @@
     "collectSelected": "Raccogli ({count})",
     "evaluateSelected": "Conformità ({count})",
     "collect": "Raccogli",
+    "ping": "Ping",
+    "extract": "Estrazione",
     "collectTitle": "Avvia raccolta",
     "collectDescription": "Esegui tutti i comandi di raccolta associati al modello di questo nodo e archivia i risultati.",
     "collectTagLabel": "Tag (opzionale)",

@@ -13,13 +13,17 @@ use App\Entity\Node;
 use App\Entity\NodeDynamicTag;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\NodeTag;
+use App\Message\EvaluateComplianceMessage;
+use App\Message\RecalculateNodeScoreMessage;
 use App\Service\ConditionTreeEvaluator;
+use App\Service\PolicyAutoAssigner;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
+use Symfony\Component\Messenger\MessageBusInterface;
 use App\Message\CollectNodeMessage;
 
 #[AsMessageHandler]
@@ -36,6 +40,8 @@ class CollectNodeMessageHandler
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
         private readonly ConditionTreeEvaluator $conditionTree,
+        private readonly MessageBusInterface $bus,
+        private readonly PolicyAutoAssigner $policyAutoAssigner,
     ) {}
 
     public function __invoke(CollectNodeMessage $message): void
@@ -168,6 +174,7 @@ class CollectNodeMessageHandler
             $this->publishUpdate($collection);
 
             // Apply collection rules and extract inventory data
+            $extractOk = false;
             if (!$hasError) {
                 $collection->setExtractStatus(Collection::EXTRACT_STATUS_RUNNING);
                 $this->em->flush();
@@ -175,11 +182,20 @@ class CollectNodeMessageHandler
                     $this->processInventoryRules($collection, $node, $baseDir);
                     $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
                     $collection->setLastExtractedAt(new \DateTimeImmutable());
+                    $extractOk = true;
                 } catch (\Throwable $e) {
                     $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
                     $collection->setExtractError($e->getMessage());
                 }
                 $this->em->flush();
+
+                if ($extractOk) {
+                    $this->publishNodeUpdated($node);
+                }
+            }
+
+            if ($extractOk && $message->shouldChainCompliance()) {
+                $this->dispatchComplianceForNode($node);
             }
 
         } catch (\Throwable $e) {
@@ -362,6 +378,63 @@ class CollectNodeMessageHandler
                 ],
             ]),
         ));
+    }
+
+    public function publishNodeUpdated(Node $node): void
+    {
+        $context = $node->getContext();
+        if (!$context) {
+            return;
+        }
+
+        $tags = [];
+        foreach ($node->getTags() as $t) {
+            $tags[] = ['id' => $t->getId(), 'name' => $t->getName(), 'color' => $t->getColor()];
+        }
+
+        $dynamicTags = [];
+        $dynRows = $this->em->getRepository(NodeDynamicTag::class)->findBy(['node' => $node]);
+        foreach ($dynRows as $d) {
+            $dynamicTags[] = [
+                'id' => $d->getTag()->getId(),
+                'name' => $d->getTag()->getName(),
+                'color' => $d->getTag()->getColor(),
+                'ruleId' => $d->getRule()?->getId(),
+                'ruleName' => $d->getRule()?->getName(),
+            ];
+        }
+
+        $this->hub->publish(new Update(
+            'nodes/context/' . $context->getId(),
+            json_encode([
+                'event' => 'node.updated',
+                'nodeId' => $node->getId(),
+                'hostname' => $node->getHostname(),
+                'discoveredModel' => $node->getDiscoveredModel(),
+                'discoveredVersion' => $node->getDiscoveredVersion(),
+                'productModel' => $node->getProductModel(),
+                'tags' => $tags,
+                'dynamicTags' => $dynamicTags,
+            ]),
+        ));
+    }
+
+    public function dispatchComplianceForNode(Node $node): void
+    {
+        $policies = $this->policyAutoAssigner->autoAssign($node);
+
+        if (empty($policies)) {
+            $this->bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
+            return;
+        }
+
+        $node->setScore(null);
+        $node->setComplianceEvaluating('pending');
+        $this->em->flush();
+
+        foreach ($policies as $policy) {
+            $this->bus->dispatch(new EvaluateComplianceMessage($policy->getId(), $node->getId()));
+        }
     }
 
     public function processInventoryRules(Collection $collection, Node $node, string $baseDir): void

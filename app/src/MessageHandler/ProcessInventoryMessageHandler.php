@@ -49,6 +49,11 @@ class ProcessInventoryMessageHandler
             $collection->setLastExtractedAt(new \DateTimeImmutable());
             $this->em->flush();
             $this->publishExtractionEvent($nodeId, 'completed');
+            $this->collectHandler->publishNodeUpdated($node);
+
+            if ($message->shouldChainCompliance()) {
+                $this->collectHandler->dispatchComplianceForNode($node);
+            }
         } catch (\Throwable $e) {
             $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
             $collection->setExtractError($e->getMessage());

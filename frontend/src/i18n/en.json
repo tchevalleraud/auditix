@@ -570,6 +570,8 @@
     "extractSelected": "Extraction ({count})",
     "evaluateSelected": "Compliance ({count})",
     "collect": "Collect",
+    "ping": "Ping",
+    "extract": "Extraction",
     "collectTitle": "Start collection",
     "collectDescription": "Execute all collection commands associated with this node's model and store the results.",
     "collectTagLabel": "Tag (optional)",

@@ -243,6 +243,25 @@ export default function NodesPage() {
           )
         );
       }
+      if (data.event === "node.updated") {
+        const nodeId = Number(data.nodeId ?? 0);
+        if (!nodeId) return;
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === nodeId
+              ? {
+                  ...n,
+                  hostname: data.hostname ?? n.hostname,
+                  discoveredModel: data.discoveredModel ?? n.discoveredModel,
+                  discoveredVersion: data.discoveredVersion ?? n.discoveredVersion,
+                  productModel: data.productModel ?? n.productModel,
+                  tags: Array.isArray(data.tags) ? data.tags : n.tags,
+                  dynamicTags: Array.isArray(data.dynamicTags) ? data.dynamicTags : n.dynamicTags,
+                }
+              : n
+          )
+        );
+      }
       if (data.event === "collection.updated" && data.collection) {
         const col = data.collection;
         const nodeId = Number(data.collection.nodeId ?? 0);
@@ -758,10 +777,12 @@ export default function NodesPage() {
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setActionMenuOpen(false)} />
                     <div className="absolute right-0 top-full mt-1 z-20 w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
-                      <button onClick={() => { handlePing(); setActionMenuOpen(false); }} disabled={pinging} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50">
-                        {pinging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4 text-blue-500" />}
-                        {t("nodes.pingSelected", { count: String(selected.size) })}
-                      </button>
+                      {current?.monitoringEnabled && (
+                        <button onClick={() => { handlePing(); setActionMenuOpen(false); }} disabled={pinging} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50">
+                          {pinging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4 text-blue-500" />}
+                          {t("nodes.pingSelected", { count: String(selected.size) })}
+                        </button>
+                      )}
                       <button onClick={() => { setCollectTags([]); setCollectTagInput(""); setCollectModal(true); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                         <Play className="h-4 w-4 text-emerald-500" />
                         {t("nodes.collectSelected", { count: String(selected.size) })}

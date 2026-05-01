@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -179,6 +179,8 @@ export default function NodeDetailPage() {
   const [vulnData, setVulnData] = useState<{ vulnerabilityScore: string | null; cves: any[]; stats: { total: number; bySeverity: Record<string, number> } } | null>(null);
   const [vulnLoading, setVulnLoading] = useState(false);
   const [complianceEvaluating, setComplianceEvaluating] = useState(false);
+  const [pinging, setPinging] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
   const [scoreCalcOpen, setScoreCalcOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -359,6 +361,17 @@ export default function NodeDetailPage() {
       if (data.type === "ping" && data.nodeId === Number(nodeId)) {
         setNode((prev) => prev ? { ...prev, isReachable: data.isReachable, lastPingAt: data.lastPingAt } : prev);
       }
+      if (data.event === "node.updated" && data.nodeId === Number(nodeId)) {
+        setNode((prev) => prev ? {
+          ...prev,
+          hostname: data.hostname ?? prev.hostname,
+          discoveredModel: data.discoveredModel ?? prev.discoveredModel,
+          discoveredVersion: data.discoveredVersion ?? prev.discoveredVersion,
+          productModel: data.productModel ?? prev.productModel,
+          tags: Array.isArray(data.tags) ? data.tags : prev.tags,
+          dynamicTags: Array.isArray(data.dynamicTags) ? data.dynamicTags : prev.dynamicTags,
+        } : prev);
+      }
       if (data.event === "collection.updated" && data.collection) {
         const col = data.collection;
         setCollections((prev) => {
@@ -463,6 +476,45 @@ export default function NodeDetailPage() {
       else setTab("collections");
     } finally {
       setCollecting(false);
+    }
+  };
+
+  const handlePing = async () => {
+    setPinging(true);
+    setNode((prev) => prev ? { ...prev, isReachable: null } : prev);
+    try {
+      await fetch("/api/nodes/ping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodeIds: [Number(nodeId)] }),
+      });
+    } finally {
+      setPinging(false);
+    }
+  };
+
+  const handleExtract = async () => {
+    setExtracting(true);
+    try {
+      await fetch("/api/collections/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ nodeIds: [Number(nodeId)] }),
+      });
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handleEvaluateCompliance = async () => {
+    const res = await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.dispatched > 0) {
+        setComplianceEvaluating(true);
+        setNode((prev) => prev ? { ...prev, score: null } : prev);
+      }
     }
   };
 
@@ -699,35 +751,43 @@ export default function NodeDetailPage() {
               </button>
               {actionsOpen && (
                 <div className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 z-50">
+                  {current?.monitoringEnabled && (
+                    <button
+                      onClick={() => { setActionsOpen(false); handlePing(); }}
+                      disabled={pinging}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition-colors"
+                    >
+                      {pinging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4 text-blue-500" />}
+                      {t("nodes.ping")}
+                    </button>
+                  )}
+                  {node.model && (
+                    <button
+                      onClick={() => { setActionsOpen(false); setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
+                    >
+                      <Play className="h-4 w-4 text-emerald-500" />
+                      {t("nodes.collect")}
+                    </button>
+                  )}
+                  {node.model && (
+                    <button
+                      onClick={() => { setActionsOpen(false); handleExtract(); }}
+                      disabled={extracting}
+                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition-colors"
+                    >
+                      {extracting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch className="h-4 w-4 text-amber-500" />}
+                      {t("nodes.extract")}
+                    </button>
+                  )}
                   <button
-                    onClick={async () => {
-                      setActionsOpen(false);
-                      const res = await fetch(`/api/nodes/${nodeId}/evaluate-compliance`, { method: "POST" });
-                      if (res.ok) {
-                        const data = await res.json();
-                        if (data.dispatched > 0) {
-                          setComplianceEvaluating(true);
-                          setNode((prev) => prev ? { ...prev, score: null } : prev);
-                        }
-                      }
-                    }}
+                    onClick={() => { setActionsOpen(false); handleEvaluateCompliance(); }}
                     disabled={complianceEvaluating}
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 transition-colors"
                   >
-                    {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                    {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 text-violet-500" />}
                     {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
                   </button>
-                  {node.model && (
-                    <>
-                      <button
-                        onClick={() => { setActionsOpen(false); setCollectTags([]); setCollectTagInput(""); setCollectModal(true); }}
-                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
-                      >
-                        <Play className="h-4 w-4" />
-                        {t("nodes.collect")}
-                      </button>
-                    </>
-                  )}
                 </div>
               )}
             </div>

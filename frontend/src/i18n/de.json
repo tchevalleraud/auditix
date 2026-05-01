@@ -441,6 +441,8 @@
     "collectSelected": "Sammeln ({count})",
     "evaluateSelected": "Konformität ({count})",
     "collect": "Sammeln",
+    "ping": "Ping",
+    "extract": "Extraktion",
     "collectTitle": "Sammlung starten",
     "collectDescription": "Alle Sammelbefehle des Modells dieses Knotens ausfuhren und die Ergebnisse speichern.",
     "collectTagLabel": "Tag (optional)",

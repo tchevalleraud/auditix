@@ -16,6 +16,7 @@ use App\Entity\Profile;
 use App\Entity\Cve;
 use App\Entity\CveDeviceModel;
 use App\Service\InventoryNodeRuleEvaluator;
+use App\Service\PolicyAutoAssigner;
 use App\Service\SystemUpdateScoreCalculator;
 use App\Service\VulnerabilityScoreCalculator;
 use App\Message\EvaluateComplianceMessage;
@@ -379,7 +380,7 @@ class NodeController extends AbstractController
     }
 
     #[Route('/evaluate-compliance', methods: ['POST'])]
-    public function evaluateComplianceBulk(Request $request, EntityManagerInterface $em): JsonResponse
+    public function evaluateComplianceBulk(Request $request, EntityManagerInterface $em, PolicyAutoAssigner $autoAssigner): JsonResponse
     {
         $data = json_decode($request->getContent(), true);
         $nodeIds = $data['nodeIds'] ?? [];
@@ -392,9 +393,7 @@ class NodeController extends AbstractController
         $dispatched = 0;
 
         foreach ($nodes as $node) {
-            $policies = $em->createQuery(
-                'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
-            )->setParameter('node', $node)->getResult();
+            $policies = $autoAssigner->autoAssign($node);
 
             if (empty($policies)) {
                 // No compliance policies — still recalculate vulnerability score only
@@ -417,11 +416,9 @@ class NodeController extends AbstractController
     }
 
     #[Route('/{id}/evaluate-compliance', methods: ['POST'])]
-    public function evaluateCompliance(Node $node, EntityManagerInterface $em): JsonResponse
+    public function evaluateCompliance(Node $node, EntityManagerInterface $em, PolicyAutoAssigner $autoAssigner): JsonResponse
     {
-        $policies = $em->createQuery(
-            'SELECT p FROM App\Entity\CompliancePolicy p JOIN p.nodes n WHERE n = :node AND p.enabled = true'
-        )->setParameter('node', $node)->getResult();
+        $policies = $autoAssigner->autoAssign($node);
 
         $dispatched = 0;
         foreach ($policies as $policy) {
