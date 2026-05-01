@@ -17,6 +17,7 @@ interface MailServer {
   fromEmail: string;
   fromName: string | null;
   enabled: boolean;
+  addressingMode: "to" | "bcc" | "mail_merge";
 }
 
 const SECRET_PLACEHOLDER = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
@@ -73,6 +74,7 @@ export default function EditMailServerPage() {
       fromEmail: server.fromEmail,
       fromName: server.fromName,
       enabled: server.enabled,
+      addressingMode: server.addressingMode,
     };
     if (passwordInput !== null) {
       body.password = passwordInput;
@@ -254,6 +256,24 @@ export default function EditMailServerPage() {
               />
             </label>
           </div>
+
+          <label className="block">
+            <span className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">{t("admin_mail.addressingMode")}</span>
+            <select
+              value={server.addressingMode}
+              onChange={(e) => update({ addressingMode: e.target.value as MailServer["addressingMode"] })}
+              className={inputClass}
+            >
+              <option value="to">{t("admin_mail.addressingTo")}</option>
+              <option value="bcc">{t("admin_mail.addressingBcc")}</option>
+              <option value="mail_merge">{t("admin_mail.addressingMailMerge")}</option>
+            </select>
+            <span className="block mt-1 text-xs text-slate-500 dark:text-slate-400">
+              {server.addressingMode === "to" && t("admin_mail.addressingToHint")}
+              {server.addressingMode === "bcc" && t("admin_mail.addressingBccHint")}
+              {server.addressingMode === "mail_merge" && t("admin_mail.addressingMailMergeHint")}
+            </span>
+          </label>
 
           {error && (
             <p className="flex items-center gap-1 text-sm text-red-600 dark:text-red-400">

@@ -1979,7 +1979,14 @@
     "testRecipient": "宛先",
     "testSend": "テスト送信",
     "testSuccess": "テストメールを送信しました。",
-    "testError": "送信に失敗しました"
+    "testError": "送信に失敗しました",
+    "addressingMode": "送信モード",
+    "addressingTo": "1通のメール — 全受信者をTOに",
+    "addressingBcc": "1通のメール — 全受信者をBCCに",
+    "addressingMailMerge": "差し込み — 受信者ごとに1通",
+    "addressingToHint": "TOフィールドで受信者がお互いを確認できます。",
+    "addressingBccHint": "受信者はお互いに非表示。FROMアドレスが可視のTOとして使用されます。",
+    "addressingMailMergeHint": "受信者ごとに別のメールを送信します(他の受信者は非表示)。"
   },
   "mail_reports": {
     "title": "メールレポート",

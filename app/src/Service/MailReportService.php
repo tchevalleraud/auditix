@@ -127,18 +127,37 @@ HTML;
 
         $html = $this->renderHtml($report);
         $textFallback = strip_tags(preg_replace('/<style[\s\S]*?<\/style>/i', '', $html) ?? '');
+        $subject = $report->getSubject() !== '' ? $report->getSubject() : $report->getName();
+        $mode = $server->getAddressingMode();
 
-        $email = (new Email())
-            ->from($from)
-            ->subject($report->getSubject() !== '' ? $report->getSubject() : $report->getName())
-            ->html($html)
-            ->text($textFallback);
+        $build = function () use ($from, $subject, $html, $textFallback): Email {
+            return (new Email())
+                ->from($from)
+                ->subject($subject)
+                ->html($html)
+                ->text($textFallback);
+        };
 
-        foreach ($recipients as $rcpt) {
-            $email->addTo($rcpt);
+        if ($mode === MailServer::ADDRESSING_MAIL_MERGE) {
+            foreach ($recipients as $rcpt) {
+                $email = $build();
+                $email->addTo($rcpt);
+                $mailer->send($email);
+            }
+        } elseif ($mode === MailServer::ADDRESSING_BCC) {
+            $email = $build();
+            $email->to($from);
+            foreach ($recipients as $rcpt) {
+                $email->addBcc($rcpt);
+            }
+            $mailer->send($email);
+        } else {
+            $email = $build();
+            foreach ($recipients as $rcpt) {
+                $email->addTo($rcpt);
+            }
+            $mailer->send($email);
         }
-
-        $mailer->send($email);
 
         $now = new \DateTimeImmutable();
         $history = $report->getSendHistory() ?? [];
@@ -147,6 +166,7 @@ HTML;
             'recipients' => $recipients,
             'count' => count($recipients),
             'status' => 'sent',
+            'mode' => $mode,
         ];
         if (count($history) > 50) {
             $history = array_slice($history, -50);

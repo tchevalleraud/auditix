@@ -169,6 +169,7 @@ class MailServerController extends AbstractController
             'fromEmail' => $s->getFromEmail(),
             'fromName' => $s->getFromName(),
             'enabled' => $s->isEnabled(),
+            'addressingMode' => $s->getAddressingMode(),
             'updatedAt' => $s->getUpdatedAt()->format(\DateTimeInterface::ATOM),
         ];
     }
@@ -194,6 +195,9 @@ class MailServerController extends AbstractController
         }
         if (array_key_exists('enabled', $data)) {
             $server->setEnabled((bool) $data['enabled']);
+        }
+        if (array_key_exists('addressingMode', $data)) {
+            $server->setAddressingMode((string) $data['addressingMode']);
         }
     }
 }

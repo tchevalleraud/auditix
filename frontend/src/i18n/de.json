@@ -1979,7 +1979,14 @@
     "testRecipient": "Empfänger",
     "testSend": "Test senden",
     "testSuccess": "Test-E-Mail erfolgreich gesendet.",
-    "testError": "Versand fehlgeschlagen"
+    "testError": "Versand fehlgeschlagen",
+    "addressingMode": "Versandmodus",
+    "addressingTo": "Eine E-Mail — alle Empfänger in TO",
+    "addressingBcc": "Eine E-Mail — alle Empfänger in BCC",
+    "addressingMailMerge": "Serienmail — eine E-Mail pro Empfänger",
+    "addressingToHint": "Empfänger sehen einander im TO-Feld.",
+    "addressingBccHint": "Empfänger sind voreinander verborgen; die FROM-Adresse wird als sichtbare TO verwendet.",
+    "addressingMailMergeHint": "Sendet eine separate E-Mail pro Empfänger (kein anderer Empfänger sichtbar)."
   },
   "mail_reports": {
     "title": "E-Mail-Berichte",

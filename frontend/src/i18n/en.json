@@ -2554,7 +2554,14 @@
     "testRecipient": "Recipient",
     "testSend": "Send test",
     "testSuccess": "Test email sent successfully.",
-    "testError": "Failed to send"
+    "testError": "Failed to send",
+    "addressingMode": "Addressing mode",
+    "addressingTo": "Single email — all recipients in TO",
+    "addressingBcc": "Single email — all recipients in BCC",
+    "addressingMailMerge": "Mail merge — one email per recipient",
+    "addressingToHint": "Recipients see each other in the TO header.",
+    "addressingBccHint": "Recipients are hidden from each other; the FROM address is used as visible TO.",
+    "addressingMailMergeHint": "Sends one separate email per recipient (no other recipient visible)."
   },
   "mail_reports": {
     "title": "Mail reports",

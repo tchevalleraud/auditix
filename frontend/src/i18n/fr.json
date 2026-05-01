@@ -2526,7 +2526,14 @@
     "testRecipient": "Destinataire",
     "testSend": "Envoyer le test",
     "testSuccess": "Email de test envoyé avec succès.",
-    "testError": "Erreur lors de l'envoi"
+    "testError": "Erreur lors de l'envoi",
+    "addressingMode": "Mode d'envoi",
+    "addressingTo": "Un seul email — tous les destinataires en TO",
+    "addressingBcc": "Un seul email — tous les destinataires en CCI",
+    "addressingMailMerge": "Publipostage — un email par destinataire",
+    "addressingToHint": "Les destinataires se voient les uns les autres dans le champ TO.",
+    "addressingBccHint": "Les destinataires sont masqués entre eux ; l'adresse FROM est utilisée comme TO visible.",
+    "addressingMailMergeHint": "Envoie un email séparé par destinataire (aucun autre destinataire visible)."
   },
   "mail_reports": {
     "title": "Rapports mail",

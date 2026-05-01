@@ -1979,7 +1979,14 @@
     "testRecipient": "Destinatario",
     "testSend": "Enviar prueba",
     "testSuccess": "Correo de prueba enviado con éxito.",
-    "testError": "Error al enviar"
+    "testError": "Error al enviar",
+    "addressingMode": "Modo de envío",
+    "addressingTo": "Un solo correo — todos los destinatarios en TO",
+    "addressingBcc": "Un solo correo — todos los destinatarios en CCO",
+    "addressingMailMerge": "Combinación de correspondencia — un correo por destinatario",
+    "addressingToHint": "Los destinatarios se ven entre sí en el campo TO.",
+    "addressingBccHint": "Los destinatarios están ocultos entre sí; la dirección FROM se usa como TO visible.",
+    "addressingMailMergeHint": "Envía un correo separado por destinatario (ningún otro destinatario visible)."
   },
   "mail_reports": {
     "title": "Informes por correo",

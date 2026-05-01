@@ -13,6 +13,10 @@ class MailServer
     public const ENCRYPTION_TLS = 'tls';
     public const ENCRYPTION_SSL = 'ssl';
 
+    public const ADDRESSING_TO = 'to';
+    public const ADDRESSING_BCC = 'bcc';
+    public const ADDRESSING_MAIL_MERGE = 'mail_merge';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column]
@@ -44,6 +48,9 @@ class MailServer
 
     #[ORM\Column(options: ['default' => true])]
     private bool $enabled = true;
+
+    #[ORM\Column(length: 20, options: ['default' => 'to'])]
+    private string $addressingMode = self::ADDRESSING_TO;
 
     #[ORM\Column(options: ['default' => 'CURRENT_TIMESTAMP'])]
     private \DateTimeImmutable $createdAt;
@@ -91,6 +98,15 @@ class MailServer
 
     public function isEnabled(): bool { return $this->enabled; }
     public function setEnabled(bool $v): static { $this->enabled = $v; return $this; }
+
+    public function getAddressingMode(): string { return $this->addressingMode; }
+    public function setAddressingMode(string $v): static
+    {
+        $this->addressingMode = in_array($v, [self::ADDRESSING_TO, self::ADDRESSING_BCC, self::ADDRESSING_MAIL_MERGE], true)
+            ? $v
+            : self::ADDRESSING_TO;
+        return $this;
+    }
 
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
     public function getUpdatedAt(): \DateTimeImmutable { return $this->updatedAt; }
