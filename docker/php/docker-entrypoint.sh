@@ -58,6 +58,14 @@ if [ -f /var/www/bin/console ]; then
     chown -R www-data:www-data /var/www/var 2>/dev/null || true
 fi
 
+# NGINX management: ensure www-data can write generated config and certificate files
+for d in /var/nginx-config /var/nginx-certs; do
+    if [ -d "$d" ]; then
+        chown -R www-data:www-data "$d" 2>/dev/null || true
+        chmod -R u+rwX "$d" 2>/dev/null || true
+    fi
+done
+
 # Allow www-data to access Docker socket for health checks
 if [ -S /var/run/docker.sock ]; then
     DOCKER_GID=$(stat -c '%g' /var/run/docker.sock 2>/dev/null || stat -f '%g' /var/run/docker.sock 2>/dev/null)
