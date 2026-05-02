@@ -11,6 +11,7 @@ use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
 use App\Service\ComplianceEvaluator;
 use App\Service\InventoryNodeRuleEvaluator;
+use App\Service\SystemUpdateScoreCalculator;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mercure\HubInterface;
@@ -26,6 +27,7 @@ class GenerateReportMessageHandler
         private readonly HubInterface $hub,
         private readonly InventoryNodeRuleEvaluator $inventoryRuleEvaluator,
         private readonly ComplianceEvaluator $complianceEvaluator,
+        private readonly SystemUpdateScoreCalculator $lifecycleCalculator,
         private readonly LoggerInterface $logger,
     ) {}
 
@@ -3258,7 +3260,1611 @@ class GenerateReportMessageHandler
                 }
 
                 $prevType = 'rule_recommendation';
+
+            } elseif ($type === 'chart_static') {
+                $chKind = (string) ($block['chartKind'] ?? 'bar');
+                $chTitle = (string) ($block['title'] ?? '');
+                [$chW, $chH] = $this->resolveChartDimensions($pdf, $block, $mLeft, $mRight, $mTop, $mBottom);
+                $chShowLegend = !empty($block['showLegend']);
+                $chShowValues = !empty($block['showValues']);
+                $chShowAxes = !empty($block['showAxes']);
+                $chLabels = array_values(array_map(fn($v) => (string) $v, $block['labels'] ?? []));
+                $chSeries = $block['series'] ?? [];
+
+                // Pie / Treemap: each label is a slice. Transform [N labels, 1 series with N data]
+                // into [['Total'], N series each with 1 data point], using the per-slice color.
+                if (($chKind === 'pie' || $chKind === 'treemap') && count($chSeries) === 1 && count($chLabels) > 0) {
+                    $chPalette = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#84cc16', '#f97316', '#ec4899', '#14b8a6'];
+                    $chSliceColors = $block['sliceColors'] ?? [];
+                    $chSourceData = $chSeries[0]['data'] ?? [];
+                    $chPieSeries = [];
+                    foreach ($chLabels as $chPi => $chLbl) {
+                        $chPieSeries[] = [
+                            'name' => $chLbl,
+                            'color' => $chSliceColors[$chPi] ?? $chPalette[$chPi % count($chPalette)],
+                            'data' => [(float) ($chSourceData[$chPi] ?? 0)],
+                        ];
+                    }
+                    $chLabels = ['Total'];
+                    $chSeries = $chPieSeries;
+                }
+
+                if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $chOrientation = ($block['orientation'] ?? 'vertical') === 'horizontal' ? 'horizontal' : 'vertical';
+                $chColorRules = $block['colorRules'] ?? [];
+                $chSort = $block['sort'] ?? null;
+                $this->applyChartSort($chLabels, $chSeries, $chSort);
+                $this->renderChartArea(
+                    $pdf, $chKind, $chTitle, $chLabels, $chSeries,
+                    $chW, $chH, $chShowLegend, $chShowValues, $chShowAxes,
+                    $mLeft, $mRight, $mBottom, $bodyFont, $bodyRgb, $chOrientation, $chColorRules
+                );
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'chart_static';
+
+            } elseif ($type === 'chart_inventory') {
+                $chKind = (string) ($block['chartKind'] ?? 'pie');
+                $chTitle = (string) ($block['title'] ?? '');
+                [$chW, $chH] = $this->resolveChartDimensions($pdf, $block, $mLeft, $mRight, $mTop, $mBottom);
+                $chShowLegend = !empty($block['showLegend']);
+                $chShowValues = !empty($block['showValues']);
+                $chShowAxes = !empty($block['showAxes']);
+                $chPrimary = $block['primary'] ?? null;
+                $chSecondary = $block['secondary'] ?? null;
+
+                $chNodes = $this->resolveChartNodes($block, $forNode, $report);
+                if (empty($chNodes) || !$chPrimary) {
+                    continue;
+                }
+
+                [$chLabels, $chSeries] = $this->aggregateChartData($chNodes, $chPrimary, $chSecondary, $chKind, $block['metric'] ?? null);
+                if (empty($chLabels) || empty($chSeries)) {
+                    continue;
+                }
+
+                if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $chOrientation = ($block['orientation'] ?? 'vertical') === 'horizontal' ? 'horizontal' : 'vertical';
+                $chColorRules = $block['colorRules'] ?? [];
+                $chSort = $block['sort'] ?? null;
+                $this->applyChartSort($chLabels, $chSeries, $chSort);
+                $this->renderChartArea(
+                    $pdf, $chKind, $chTitle, $chLabels, $chSeries,
+                    $chW, $chH, $chShowLegend, $chShowValues, $chShowAxes,
+                    $mLeft, $mRight, $mBottom, $bodyFont, $bodyRgb, $chOrientation, $chColorRules
+                );
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'chart_inventory';
+
+            } elseif ($type === 'timeline') {
+                $tlMode = ($block['mode'] ?? 'product_range') === 'node' ? 'node' : 'product_range';
+                $tlShowRelease = !empty($block['showRelease']);
+                $tlShowEoS = !empty($block['showEndOfSale']);
+                $tlShowEoSp = !empty($block['showEndOfSupport']);
+                $tlShowEoL = !empty($block['showEndOfLife']);
+                $tlShowNow = !empty($block['showNow']);
+                $tlShowLegend = !empty($block['showLegend']);
+                $tlBarH = (float) ($block['height'] ?? 6);
+                $tlRowSpacing = (float) ($block['rowSpacing'] ?? 24);
+
+                $tlEntries = [];
+                if ($tlMode === 'node') {
+                    $tlNodes = [];
+                    if ($forNode) {
+                        $tlNodes = [$forNode];
+                    } else {
+                        $tlNodeIds = $block['nodeIds'] ?? [];
+                        foreach ($tlNodeIds as $tlNid) {
+                            $tlN = $this->em->getRepository(Node::class)->find((int) $tlNid);
+                            if ($tlN) $tlNodes[] = $tlN;
+                        }
+                    }
+                    foreach ($tlNodes as $tlN) {
+                        $tlPr = $this->lifecycleCalculator->findProductRange($tlN);
+                        if ($tlPr) {
+                            $tlLabel = $tlN->getHostname() ?: $tlN->getName() ?: $tlN->getIpAddress();
+                            $tlEntries[] = ['label' => $tlLabel, 'subLabel' => $tlPr->getName(), 'range' => $tlPr];
+                        }
+                    }
+                } else {
+                    $tlAllRanges = !empty($block['allProductRanges']);
+                    $tlPrList = [];
+                    if ($tlAllRanges) {
+                        $tlCtx = $report?->getContext();
+                        if ($tlCtx) {
+                            // Collect product ranges actually in use by nodes of the context.
+                            // The ProductRange table is shared per-context but may include
+                            // entries no node references — those would clutter the timeline.
+                            $tlNodesCtx = $this->em->getRepository(Node::class)->findBy(['context' => $tlCtx]);
+                            $tlSeen = [];
+                            foreach ($tlNodesCtx as $tlNc) {
+                                $tlPr = $this->lifecycleCalculator->findProductRange($tlNc);
+                                if ($tlPr && !isset($tlSeen[$tlPr->getId()])) {
+                                    $tlSeen[$tlPr->getId()] = $tlPr;
+                                }
+                            }
+                            $tlPrList = array_values($tlSeen);
+                            usort($tlPrList, fn($a, $b) => strcasecmp((string) $a->getName(), (string) $b->getName()));
+                        }
+                    } else {
+                        foreach (($block['productRangeIds'] ?? []) as $tlPid) {
+                            $tlPr = $this->em->getRepository(\App\Entity\ProductRange::class)->find((int) $tlPid);
+                            if ($tlPr) $tlPrList[] = $tlPr;
+                        }
+                    }
+                    foreach ($tlPrList as $tlPr) {
+                        $tlEntries[] = ['label' => $tlPr->getName(), 'subLabel' => $tlPr->getManufacturer()?->getName() ?? '', 'range' => $tlPr];
+                    }
+                }
+
+                if (empty($tlEntries)) {
+                    continue;
+                }
+
+                if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $this->renderTimelineArea(
+                    $pdf, $tlEntries,
+                    $tlShowRelease, $tlShowEoS, $tlShowEoSp, $tlShowEoL, $tlShowNow, $tlShowLegend,
+                    $tlBarH, $tlRowSpacing,
+                    $mLeft, $mRight, $mBottom, $bodyFont, $bodyRgb
+                );
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'timeline';
             }
+        }
+    }
+
+    /**
+     * Resolve the set of nodes for chart_inventory blocks. Supports three modes:
+     *   - all     : every node of the report's context
+     *   - tag     : nodes carrying any of the selected tags (block['tagIds'])
+     *   - device  : nodes explicitly listed in block['nodeIds']
+     * Defaults to "all" when no mode is set so an empty selection still renders.
+     * For node-type reports, $forNode short-circuits everything.
+     */
+    private function resolveChartNodes(array $block, ?Node $forNode, ?Report $report): array
+    {
+        if ($forNode) {
+            return [$forNode];
+        }
+        $context = $report?->getContext();
+        if (!$context) return [];
+
+        $mode = (string) ($block['deviceSelectionMode'] ?? 'all');
+        if (!in_array($mode, ['all', 'tag', 'device'], true)) $mode = 'all';
+
+        if ($mode === 'device') {
+            $explicit = [];
+            foreach (($block['nodeIds'] ?? []) as $nid) {
+                $n = $this->em->getRepository(Node::class)->find((int) $nid);
+                if ($n && $n->getContext() === $context) {
+                    $explicit[$n->getId()] = $n;
+                }
+            }
+            return array_values($explicit);
+        }
+
+        if ($mode === 'tag') {
+            $tagIds = array_map('intval', (array) ($block['tagIds'] ?? []));
+            if (empty($tagIds)) return [];
+            $candidates = $this->em->getRepository(Node::class)->findBy(['context' => $context]);
+            $matched = [];
+            foreach ($candidates as $n) {
+                foreach ($n->getTags() as $tg) {
+                    if (in_array((int) $tg->getId(), $tagIds, true)) {
+                        $matched[$n->getId()] = $n;
+                        break;
+                    }
+                }
+            }
+            return array_values($matched);
+        }
+
+        // mode = all
+        return $this->em->getRepository(Node::class)->findBy(['context' => $context]);
+    }
+
+    /**
+     * Compute (labels, series) from nodes + dimensions for chart_inventory.
+     * Returns [array<string>, array<{name,color,data:array<float>}>].
+     *
+     * @param array|null $metric { kind: count|value, category, entryKey?, colLabel, aggregation?: sum|avg|min|max }
+     */
+    private function aggregateChartData(array $nodes, array $primary, ?array $secondary, string $kind, ?array $metric = null): array
+    {
+        $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
+
+        $resolveDim = function (Node $n, array $dim) use ($invRepo): array {
+            $kindD = (string) ($dim['kind'] ?? '');
+            switch ($kindD) {
+                case 'device':
+                    return [(string) ($n->getHostname() ?? $n->getName() ?? $n->getIpAddress() ?? '—')];
+                case 'discoveredVersion':
+                    return [(string) ($n->getDiscoveredVersion() ?? '—')];
+                case 'productModel':
+                    return [(string) ($n->getProductModel() ?? '—')];
+                case 'manufacturer':
+                    return [(string) ($n->getManufacturer()?->getName() ?? '—')];
+                case 'model':
+                    return [(string) ($n->getModel()?->getName() ?? '—')];
+                case 'productRange': {
+                    $pr = $this->lifecycleCalculator->findProductRange($n);
+                    return [$pr ? (string) $pr->getName() : '—'];
+                }
+                case 'tag': {
+                    $names = [];
+                    foreach ($n->getTags() as $tg) {
+                        $names[] = (string) $tg->getName();
+                    }
+                    return empty($names) ? ['—'] : $names;
+                }
+                case 'inventory': {
+                    $cat = (string) ($dim['category'] ?? '');
+                    $col = (string) ($dim['colLabel'] ?? '');
+                    $entry = (string) ($dim['entryKey'] ?? '');
+                    if ($cat === '' || $col === '') return ['—'];
+                    $qb = $invRepo->createQueryBuilder('e')
+                        ->select('e.value AS val')
+                        ->where('e.node = :n')
+                        ->andWhere('e.categoryName = :cat')
+                        ->andWhere('e.colLabel = :col')
+                        ->setParameter('n', $n)
+                        ->setParameter('cat', $cat)
+                        ->setParameter('col', $col);
+                    if ($entry !== '') {
+                        $qb->andWhere('e.entryKey = :entry')->setParameter('entry', $entry);
+                    }
+                    $rows = $qb->getQuery()->getArrayResult();
+                    $vals = [];
+                    foreach ($rows as $r) {
+                        $v = trim((string) ($r['val'] ?? ''));
+                        if ($v !== '') $vals[] = $v;
+                    }
+                    return empty($vals) ? ['—'] : $vals;
+                }
+                default:
+                    return ['—'];
+            }
+        };
+
+        // Resolve a numeric value for $n from the metric configuration. Returns
+        // null when no value is available (entry missing, non-parsable). The
+        // raw inventory string is parsed for its first numeric token, so values
+        // like "35.5°C" or "55%" become 35.5 / 55.
+        $metricKind = (string) ($metric['kind'] ?? 'count');
+        $metricCat = (string) ($metric['category'] ?? '');
+        $metricCol = (string) ($metric['colLabel'] ?? '');
+        $metricEntry = (string) ($metric['entryKey'] ?? '');
+        $resolveValue = function (Node $n) use ($invRepo, $metricCat, $metricCol, $metricEntry): ?array {
+            if ($metricCat === '' || $metricCol === '') return null;
+            $qb = $invRepo->createQueryBuilder('e')
+                ->select('e.value AS val')
+                ->where('e.node = :n')
+                ->andWhere('e.categoryName = :cat')
+                ->andWhere('e.colLabel = :col')
+                ->setParameter('n', $n)
+                ->setParameter('cat', $metricCat)
+                ->setParameter('col', $metricCol);
+            if ($metricEntry !== '') {
+                $qb->andWhere('e.entryKey = :entry')->setParameter('entry', $metricEntry);
+            }
+            $rows = $qb->getQuery()->getArrayResult();
+            $vals = [];
+            foreach ($rows as $r) {
+                $raw = (string) ($r['val'] ?? '');
+                if (preg_match('/-?\d+(?:[.,]\d+)?/', $raw, $m)) {
+                    $vals[] = (float) str_replace(',', '.', $m[0]);
+                }
+            }
+            return empty($vals) ? null : $vals;
+        };
+
+        // Aggregator: sum/avg/min/max applied to the bucket. We accumulate raw
+        // numeric values per bucket then reduce at the end.
+        $useValue = ($metricKind === 'value');
+        $agg = (string) ($metric['aggregation'] ?? 'sum');
+        if (!in_array($agg, ['sum', 'avg', 'min', 'max'], true)) $agg = 'sum';
+
+        $bucketsRaw = [];   // pv => svKey => float[]  (raw values, mode value)
+        $counts = [];       // pv => svKey => float    (mode count, or reduced result)
+        $primaryOrder = [];
+        $secondaryOrder = [];
+        foreach ($nodes as $n) {
+            $primVals = $resolveDim($n, $primary);
+            $secVals = $secondary ? $resolveDim($n, $secondary) : [null];
+            $nodeNumericValues = $useValue ? ($resolveValue($n) ?? null) : null;
+            foreach ($primVals as $pv) {
+                if (!isset($counts[$pv])) {
+                    $counts[$pv] = [];
+                    $bucketsRaw[$pv] = [];
+                    $primaryOrder[] = $pv;
+                }
+                foreach ($secVals as $sv) {
+                    $svKey = $sv === null ? '__total__' : $sv;
+                    if (!isset($counts[$pv][$svKey])) {
+                        $counts[$pv][$svKey] = 0;
+                        $bucketsRaw[$pv][$svKey] = [];
+                        if ($sv !== null && !in_array($sv, $secondaryOrder, true)) {
+                            $secondaryOrder[] = $sv;
+                        }
+                    }
+                    if ($useValue) {
+                        if ($nodeNumericValues !== null) {
+                            foreach ($nodeNumericValues as $nv) {
+                                $bucketsRaw[$pv][$svKey][] = $nv;
+                            }
+                        }
+                    } else {
+                        $counts[$pv][$svKey]++;
+                    }
+                }
+            }
+        }
+
+        // Reduce raw numeric values according to aggregation when in value mode.
+        if ($useValue) {
+            foreach ($bucketsRaw as $pv => $svBuckets) {
+                foreach ($svBuckets as $svKey => $vals) {
+                    if (empty($vals)) {
+                        $counts[$pv][$svKey] = 0;
+                        continue;
+                    }
+                    $counts[$pv][$svKey] = match ($agg) {
+                        'avg' => array_sum($vals) / count($vals),
+                        'min' => min($vals),
+                        'max' => max($vals),
+                        default => array_sum($vals),
+                    };
+                }
+            }
+        }
+
+        // Sort labels alphabetically for stability
+        sort($primaryOrder);
+        sort($secondaryOrder);
+
+        $palette = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#84cc16', '#f97316', '#ec4899', '#14b8a6'];
+
+        if (!$secondary) {
+            // Single series — use primary palette per label for pie/treemap, single series for others
+            $data = [];
+            foreach ($primaryOrder as $pv) {
+                $data[] = (float) ($counts[$pv]['__total__'] ?? 0);
+            }
+            $isPieLike = ($kind === 'pie' || $kind === 'treemap');
+            if ($isPieLike) {
+                $series = [];
+                foreach ($primaryOrder as $idxP => $pv) {
+                    $series[] = [
+                        'name' => $pv,
+                        'color' => $palette[$idxP % count($palette)],
+                        'data' => [$data[$idxP]],
+                    ];
+                }
+                return [['Total'], $series];
+            }
+            return [$primaryOrder, [[
+                'name' => 'Total',
+                'color' => $palette[0],
+                'data' => $data,
+            ]]];
+        }
+
+        // With secondary: each secondary value becomes a series
+        $series = [];
+        foreach ($secondaryOrder as $idxS => $sv) {
+            $row = [];
+            foreach ($primaryOrder as $pv) {
+                $row[] = (float) ($counts[$pv][$sv] ?? 0);
+            }
+            $series[] = [
+                'name' => $sv,
+                'color' => $palette[$idxS % count($palette)],
+                'data' => $row,
+            ];
+        }
+        return [$primaryOrder, $series];
+    }
+
+    /**
+     * Compute the [width, height] in mm for a chart block, respecting the
+     * widthAuto/heightAuto flags. Auto width fills the page content width;
+     * auto height fills the remaining vertical space on the current page.
+     * Triggers a page break when auto-height would otherwise be < 50mm so
+     * an "auto" chart still gets a usable canvas instead of squeezing into
+     * a few mm at the bottom of a page.
+     */
+    private function resolveChartDimensions(TCPDF $pdf, array $block, float $mLeft, float $mRight, float $mTop, float $mBottom): array
+    {
+        $contentW = $pdf->getPageWidth() - $mLeft - $mRight;
+        $w = !empty($block['widthAuto']) ? $contentW : (float) ($block['width'] ?? 160);
+        $w = min($w, $contentW);
+
+        if (!empty($block['heightAuto'])) {
+            $remaining = $pdf->getPageHeight() - $mBottom - max($pdf->GetY(), $mTop);
+            // Title (≈6) + legend (≈6) + buffer (4) ≈ 16mm overhead
+            $available = $remaining - 16;
+            if ($available < 50) {
+                // Not enough room — start fresh on next page
+                $pdf->AddPage();
+                $available = $pdf->getPageHeight() - $mBottom - $pdf->GetY() - 16;
+            }
+            $h = max(50.0, $available);
+        } else {
+            $h = (float) ($block['height'] ?? 80);
+        }
+        return [$w, $h];
+    }
+
+    /**
+     * Reorder labels (and the parallel series.data arrays) according to a sort
+     * configuration. `$sort = ['by' => 'label'|'value', 'direction' => 'asc'|'desc']`.
+     * For 'value', sorts by total of all series at each label position.
+     * Mutates $labels and $series in place.
+     */
+    private function applyChartSort(array &$labels, array &$series, ?array $sort): void
+    {
+        if (!$sort) return;
+        $by = (string) ($sort['by'] ?? 'label');
+        $dirSign = (($sort['direction'] ?? 'asc') === 'desc') ? -1 : 1;
+        $n = count($labels);
+        if ($n <= 1) return;
+        $indices = range(0, $n - 1);
+        if ($by === 'label') {
+            usort($indices, fn($a, $b) => strcmp((string) $labels[$a], (string) $labels[$b]) * $dirSign);
+        } elseif ($by === 'value') {
+            usort($indices, function ($a, $b) use ($series, $dirSign) {
+                $sumA = 0.0; $sumB = 0.0;
+                foreach ($series as $s) {
+                    $sumA += (float) (($s['data'] ?? [])[$a] ?? 0);
+                    $sumB += (float) (($s['data'] ?? [])[$b] ?? 0);
+                }
+                return ($sumA <=> $sumB) * $dirSign;
+            });
+        } else {
+            return;
+        }
+        $labels = array_values(array_map(fn($i) => $labels[$i], $indices));
+        $series = array_map(function ($s) use ($indices) {
+            $newData = [];
+            foreach ($indices as $i) {
+                $newData[] = ($s['data'] ?? [])[$i] ?? 0;
+            }
+            $s['data'] = $newData;
+            return $s;
+        }, $series);
+    }
+
+    /**
+     * Apply a color rule against (label, seriesName, value); first match wins.
+     * Returns the rule color or $default when no rule matches.
+     */
+    private function pickRuleColor(array $rules, string $label, string $seriesName, ?float $value, string $default): string
+    {
+        foreach ($rules as $r) {
+            $kind = (string) ($r['kind'] ?? 'label');
+            $color = (string) ($r['color'] ?? $default);
+            if ($kind === 'value') {
+                if ($value === null) continue;
+                $op = (string) ($r['valueOp'] ?? 'eq');
+                $a = (float) ($r['valueA'] ?? 0);
+                $b = (float) ($r['valueB'] ?? 0);
+                $match = match ($op) {
+                    'lt' => $value < $a,
+                    'lte' => $value <= $a,
+                    'gt' => $value > $a,
+                    'gte' => $value >= $a,
+                    'eq' => abs($value - $a) < 1e-9,
+                    'between' => $value >= min($a, $b) && $value <= max($a, $b),
+                    default => false,
+                };
+                if ($match) return $color;
+            } else {
+                $haystack = $kind === 'series' ? $seriesName : $label;
+                $op = (string) ($r['textOp'] ?? 'eq');
+                $needle = (string) ($r['text'] ?? '');
+                $match = match ($op) {
+                    'eq' => $haystack === $needle,
+                    'neq' => $haystack !== $needle,
+                    'contains' => $needle !== '' && stripos($haystack, $needle) !== false,
+                    'starts_with' => $needle !== '' && stripos($haystack, $needle) === 0,
+                    default => false,
+                };
+                if ($match) return $color;
+            }
+        }
+        return $default;
+    }
+
+    /**
+     * Generic chart renderer dispatching on $kind. All loop variables prefixed with `$ch*`
+     * to avoid collisions with the outer renderBlocks() loop.
+     */
+    private function renderChartArea(
+        TCPDF $pdf,
+        string $kind,
+        string $title,
+        array $labels,
+        array $series,
+        float $w,
+        float $h,
+        bool $showLegend,
+        bool $showValues,
+        bool $showAxes,
+        float $mLeft,
+        float $mRight,
+        float $mBottom,
+        string $bodyFont,
+        array $bodyRgb,
+        string $orientation = 'vertical',
+        array $colorRules = [],
+    ): void {
+        // Apply series-level rules first: if a rule matches the series name,
+        // override series.color so kinds that draw per-series (line, area, radar)
+        // pick up the override automatically. Per-cell overrides for bars are
+        // re-evaluated inside renderBarChart with full (label, series, value).
+        if (!empty($colorRules)) {
+            $series = array_map(function ($s) use ($colorRules) {
+                $name = (string) ($s['name'] ?? '');
+                $orig = (string) ($s['color'] ?? '#6366f1');
+                $s['color'] = $this->pickRuleColor($colorRules, '', $name, null, $orig);
+                return $s;
+            }, $series);
+        }
+        $chPageW = $pdf->getPageWidth();
+        $chContentW = $chPageW - $mLeft - $mRight;
+        $chW = min($w, $chContentW);
+
+        // Title
+        $chTitleH = 0;
+        if ($title !== '') {
+            $chTitleH = 6;
+        }
+
+        // Legend layout
+        $chLegendH = 0;
+        if ($showLegend) {
+            $chLegendH = 6;
+        }
+
+        $chTotalH = $chTitleH + $h + $chLegendH;
+        $chYStart = $pdf->GetY();
+        if ($chYStart + $chTotalH > $pdf->getPageHeight() - $mBottom) {
+            $pdf->AddPage();
+            $chYStart = $pdf->GetY();
+        }
+
+        $chX = $mLeft;
+        $chY = $chYStart;
+
+        if ($title !== '') {
+            $pdf->SetFont($bodyFont, 'B', 11);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            $pdf->SetXY($chX, $chY);
+            $pdf->Cell($chW, $chTitleH, $title, 0, 0, 'L');
+            $chY += $chTitleH;
+        }
+
+        $chPlotX = $chX;
+        $chPlotY = $chY;
+        $chPlotW = $chW;
+        $chPlotH = $h;
+
+        switch ($kind) {
+            case 'pie':
+                $this->renderPieChart($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, $showValues, $bodyFont, $bodyRgb, $colorRules);
+                break;
+            case 'treemap':
+                $this->renderTreemap($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, $showValues, $bodyFont, $bodyRgb, $colorRules);
+                break;
+            case 'radar':
+                $this->renderRadar($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, $showValues, $bodyFont, $bodyRgb);
+                break;
+            case 'line':
+                $this->renderLineChart($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, false, $showValues, $showAxes, $bodyFont, $bodyRgb);
+                break;
+            case 'area':
+                $this->renderLineChart($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, true, $showValues, $showAxes, $bodyFont, $bodyRgb);
+                break;
+            case 'stacked_bar':
+                $this->renderBarChart($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, $showValues, $showAxes, $bodyFont, $bodyRgb, 'stacked', $orientation, $colorRules);
+                break;
+            case 'bar':
+            // Legacy 'histogram' blocks (saved before removal) fall through to grouped bars.
+            case 'histogram':
+            default:
+                $this->renderBarChart($pdf, $chPlotX, $chPlotY, $chPlotW, $chPlotH, $labels, $series, $showValues, $showAxes, $bodyFont, $bodyRgb, 'grouped', $orientation, $colorRules);
+                break;
+        }
+
+        $chY += $chPlotH;
+
+        if ($showLegend) {
+            $this->renderChartLegend($pdf, $chX, $chY, $chW, $chLegendH, $kind, $labels, $series, $bodyFont, $bodyRgb);
+            $chY += $chLegendH;
+        }
+
+        $pdf->SetXY($mLeft, $chYStart + $chTotalH);
+    }
+
+    private function renderChartLegend(TCPDF $pdf, float $x, float $y, float $w, float $h, string $kind, array $labels, array $series, string $bodyFont, array $bodyRgb): void
+    {
+        $pdf->SetFont($bodyFont, '', 8);
+        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+        $clItems = [];
+        if ($kind === 'pie' || $kind === 'treemap') {
+            foreach ($series as $clIdx => $s) {
+                $clItems[] = ['name' => (string) ($s['name'] ?? "#$clIdx"), 'color' => (string) ($s['color'] ?? '#6366f1')];
+            }
+        } else {
+            foreach ($series as $clIdx => $s) {
+                $clItems[] = ['name' => (string) ($s['name'] ?? "#$clIdx"), 'color' => (string) ($s['color'] ?? '#6366f1')];
+            }
+        }
+        if (empty($clItems)) return;
+        $clX = $x;
+        $clY = $y + 1;
+        foreach ($clItems as $clItem) {
+            $clRgb = $this->hexToRgb($clItem['color']);
+            $pdf->SetFillColor($clRgb[0], $clRgb[1], $clRgb[2]);
+            $pdf->Rect($clX, $clY + 0.8, 3, 3, 'F');
+            $clTxt = ' ' . $clItem['name'];
+            $clTxtW = $pdf->GetStringWidth($clTxt) + 4;
+            $pdf->SetXY($clX + 3, $clY);
+            $pdf->Cell($clTxtW, 4, $clTxt, 0, 0, 'L');
+            $clX += 3 + $clTxtW + 3;
+            if ($clX > $x + $w - 20) {
+                $clX = $x;
+                $clY += 4;
+            }
+        }
+    }
+
+    /**
+     * Render a bar/histogram/stacked-bar chart.
+     * @param string $variant 'grouped' (default), 'stacked', or 'histogram'
+     */
+    private function renderBarChart(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $showValues, bool $showAxes, string $bodyFont, array $bodyRgb, string $variant = 'grouped', string $orientation = 'vertical', array $colorRules = []): void
+    {
+        if ($orientation === 'horizontal') {
+            $this->renderBarChartHorizontal($pdf, $x, $y, $w, $h, $labels, $series, $showValues, $showAxes, $bodyFont, $bodyRgb, $variant, $colorRules);
+            return;
+        }
+        $bcLabelCount = max(1, count($labels));
+        $bcSeriesCount = max(1, count($series));
+        $bcAxisLeft = $showAxes ? 14 : 2;
+        $bcAxisBottom = $showAxes ? 9 : 2;
+        $bcPlotX = $x + $bcAxisLeft;
+        $bcPlotY = $y + 3;
+        $bcPlotW = $w - $bcAxisLeft - 2;
+        $bcPlotH = $h - $bcAxisBottom - 3;
+
+        // Compute Y max — for stacked bars, the max is the per-category sum
+        $bcMax = 0.0;
+        if ($variant === 'stacked') {
+            for ($bcLi = 0; $bcLi < $bcLabelCount; $bcLi++) {
+                $bcSum = 0.0;
+                foreach ($series as $bcS) {
+                    $bcSum += max(0.0, (float) (($bcS['data'] ?? [])[$bcLi] ?? 0));
+                }
+                $bcMax = max($bcMax, $bcSum);
+            }
+        } else {
+            foreach ($series as $bcS) {
+                foreach (($bcS['data'] ?? []) as $bcV) {
+                    $bcMax = max($bcMax, (float) $bcV);
+                }
+            }
+        }
+        if ($bcMax <= 0) $bcMax = 1.0;
+        $bcNiceMax = $this->niceCeil($bcMax);
+
+        // Horizontal grid lines first (under bars)
+        $bcTicks = 4;
+        $pdf->SetDrawColor(226, 232, 240);
+        $pdf->SetLineWidth(0.1);
+        for ($bcTick = 0; $bcTick <= $bcTicks; $bcTick++) {
+            $bcTickY = $bcPlotY + $bcPlotH - ($bcPlotH * $bcTick / $bcTicks);
+            $pdf->Line($bcPlotX, $bcTickY, $bcPlotX + $bcPlotW, $bcTickY);
+        }
+
+        if ($showAxes) {
+            $pdf->SetDrawColor(148, 163, 184);
+            $pdf->SetLineWidth(0.2);
+            $pdf->Line($bcPlotX, $bcPlotY, $bcPlotX, $bcPlotY + $bcPlotH);
+            $pdf->Line($bcPlotX, $bcPlotY + $bcPlotH, $bcPlotX + $bcPlotW, $bcPlotY + $bcPlotH);
+            $pdf->SetFont($bodyFont, '', 6.5);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            for ($bcTick = 0; $bcTick <= $bcTicks; $bcTick++) {
+                $bcTickV = $bcNiceMax * ($bcTick / $bcTicks);
+                $bcTickY = $bcPlotY + $bcPlotH - ($bcPlotH * $bcTick / $bcTicks);
+                $pdf->Line($bcPlotX - 0.8, $bcTickY, $bcPlotX, $bcTickY);
+                $bcTickStr = (string) round($bcTickV, 1);
+                $pdf->Text($bcPlotX - 1 - $pdf->GetStringWidth($bcTickStr), $bcTickY - 1.2, $bcTickStr);
+            }
+        }
+
+        // Group geometry differs per variant:
+        //  - histogram : no gap between bars (continuous distribution)
+        //  - grouped   : 30% gap if 1 series else 20%, series side-by-side
+        //  - stacked   : same gap as grouped but a single bar per category
+        $bcGroupW = $bcPlotW / $bcLabelCount;
+        $bcGroupGap = $bcGroupW * (($variant === 'stacked' || $bcSeriesCount === 1) ? 0.30 : 0.20);
+        $bcBarsW = $bcGroupW - $bcGroupGap;
+        if ($variant === 'stacked') {
+            $bcBarW = $bcBarsW;
+        } else {
+            $bcInterBar = $bcSeriesCount > 1 ? 0.5 : 0;
+            $bcBarW = ($bcBarsW - $bcInterBar * ($bcSeriesCount - 1)) / $bcSeriesCount;
+        }
+
+        // Vertical-center offset used by Text() to place the *visual* center of a
+        // glyph at the requested Y. TCPDF's Text() renders a Cell(h=0), so the
+        // visual cap-center sits at `y + FontSize × cell_height_ratio / 2`.
+        // For our font (cell_height_ratio = 1.25): offset = FontSize_mm × 0.625.
+        $bcCenterOffset6 = 6 * 0.3528 * 0.625;   // ≈ 1.32mm
+        $bcCenterOffset65 = 6.5 * 0.3528 * 0.625; // ≈ 1.43mm
+
+        if ($variant === 'stacked') {
+            // One bar per category; iterate labels first, stack series from bottom up.
+            foreach ($labels as $bcLi => $bcLabel) {
+                $bcBx = $bcPlotX + $bcLi * $bcGroupW + $bcGroupGap / 2;
+                $bcCurY = $bcPlotY + $bcPlotH;
+                $bcStackTotal = 0.0;
+                foreach ($series as $bcSi => $bcS) {
+                    $bcVal = max(0.0, (float) (($bcS['data'] ?? [])[$bcLi] ?? 0));
+                    if ($bcVal <= 0) continue;
+                    $bcSegH = $bcPlotH * ($bcVal / $bcNiceMax);
+                    $bcDefaultHex = (string) ($bcS['color'] ?? '#6366f1');
+                    $bcCellHex = $this->pickRuleColor($colorRules, (string) $bcLabel, (string) ($bcS['name'] ?? ''), $bcVal, $bcDefaultHex);
+                    $bcColor = $this->hexToRgb($bcCellHex);
+                    $pdf->SetFillColor($bcColor[0], $bcColor[1], $bcColor[2]);
+                    $pdf->SetDrawColor(max(0, $bcColor[0] - 30), max(0, $bcColor[1] - 30), max(0, $bcColor[2] - 30));
+                    $pdf->SetLineWidth(0.15);
+                    $pdf->Rect($bcBx, $bcCurY - $bcSegH, $bcBarW, $bcSegH, 'FD');
+                    if ($showValues && $bcSegH > 4) {
+                        $pdf->SetFont($bodyFont, 'B', 6);
+                        $pdf->SetTextColor(255, 255, 255);
+                        $bcValStr = (string) (int) round($bcVal);
+                        $bcSegCenter = $bcCurY - $bcSegH / 2;
+                        $pdf->Text(
+                            $bcBx + ($bcBarW - $pdf->GetStringWidth($bcValStr)) / 2,
+                            $bcSegCenter - $bcCenterOffset6,
+                            $bcValStr
+                        );
+                    }
+                    $bcCurY -= $bcSegH;
+                    $bcStackTotal += $bcVal;
+                }
+                // Total above the stack — only stacked + histogram show a total
+                if ($showValues && $bcStackTotal > 0) {
+                    $pdf->SetFont($bodyFont, 'B', 6.5);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $bcTotStr = (string) (int) round($bcStackTotal);
+                    // Visual cap-bottom 0.5mm above bar top: Text(y) places visual
+                    // center at y + 1.43; we want center at bcCurY - 1.5.
+                    $pdf->Text(
+                        $bcBx + ($bcBarW - $pdf->GetStringWidth($bcTotStr)) / 2,
+                        $bcCurY - 1.5 - $bcCenterOffset65,
+                        $bcTotStr
+                    );
+                }
+            }
+        } else {
+            // grouped: single bar per series per category, side-by-side.
+            foreach ($series as $bcSi => $bcS) {
+                $bcDefaultHex = (string) ($bcS['color'] ?? '#6366f1');
+                foreach ($labels as $bcLi => $bcLabel) {
+                    $bcVal = (float) (($bcS['data'] ?? [])[$bcLi] ?? 0);
+                    $bcBarH = $bcPlotH * ($bcVal / $bcNiceMax);
+                    if ($bcBarH < 0) $bcBarH = 0;
+                    $bcInterBar = $bcSeriesCount > 1 ? 0.5 : 0;
+                    $bcBx = $bcPlotX + $bcLi * $bcGroupW + $bcGroupGap / 2 + $bcSi * ($bcBarW + $bcInterBar);
+                    $bcBy = $bcPlotY + $bcPlotH - $bcBarH;
+                    $bcCellHex = $this->pickRuleColor($colorRules, (string) $bcLabel, (string) ($bcS['name'] ?? ''), $bcVal, $bcDefaultHex);
+                    $bcColor = $this->hexToRgb($bcCellHex);
+                    $pdf->SetFillColor($bcColor[0], $bcColor[1], $bcColor[2]);
+                    $pdf->SetDrawColor(max(0, $bcColor[0] - 30), max(0, $bcColor[1] - 30), max(0, $bcColor[2] - 30));
+                    $pdf->SetLineWidth(0.15);
+                    if ($bcBarH > 0.1) {
+                        $pdf->Rect($bcBx, $bcBy, $bcBarW, $bcBarH, 'FD');
+                    }
+                    if ($showValues && $bcVal > 0) {
+                        $bcValStr = (string) (int) round($bcVal);
+                        $bcStrW = $pdf->GetStringWidth($bcValStr);
+                        $bcCx = $bcBx + ($bcBarW - $bcStrW) / 2;
+                        // Value INSIDE the bar (centered) when there's room
+                        if ($bcBarH >= 4) {
+                            $pdf->SetFont($bodyFont, 'B', 6);
+                            $pdf->SetTextColor(255, 255, 255);
+                            $bcBarCenter = $bcBy + $bcBarH / 2;
+                            $pdf->Text($bcCx, $bcBarCenter - $bcCenterOffset6, $bcValStr);
+                        } else {
+                            // Bar too small — show value above instead, body color
+                            $pdf->SetFont($bodyFont, 'B', 6);
+                            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                            $pdf->Text($bcCx, $bcBy - 1.5 - $bcCenterOffset6, $bcValStr);
+                        }
+                    }
+                }
+            }
+        }
+
+        // X labels
+        if ($showAxes) {
+            $pdf->SetFont($bodyFont, '', 6.5);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            foreach ($labels as $bcLi => $bcLabel) {
+                $bcLx = $bcPlotX + $bcLi * $bcGroupW + $bcGroupW / 2;
+                $bcDisplay = (string) $bcLabel;
+                $bcLabelW = $pdf->GetStringWidth($bcDisplay);
+                if ($bcLabelW > $bcGroupW - 1) {
+                    while ($bcLabelW > $bcGroupW - 1 && strlen($bcDisplay) > 3) {
+                        $bcDisplay = substr($bcDisplay, 0, -1);
+                        $bcLabelW = $pdf->GetStringWidth($bcDisplay . '…');
+                    }
+                    $bcDisplay .= '…';
+                }
+                $pdf->Text($bcLx - $pdf->GetStringWidth($bcDisplay) / 2, $bcPlotY + $bcPlotH + 2, $bcDisplay);
+            }
+        }
+    }
+
+    /**
+     * Horizontal bar variant: categories on Y axis, values on X axis.
+     * Variables prefixed `$hb*` for clarity (h = horizontal).
+     */
+    private function renderBarChartHorizontal(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $showValues, bool $showAxes, string $bodyFont, array $bodyRgb, string $variant = 'grouped', array $colorRules = []): void
+    {
+        $hbLabelCount = max(1, count($labels));
+        $hbSeriesCount = max(1, count($series));
+
+        // Reserve a left strip for category labels — width adapts to longest label.
+        $pdf->SetFont($bodyFont, '', 6.5);
+        $hbCatW = 0.0;
+        foreach ($labels as $hbLbl) {
+            $hbCatW = max($hbCatW, $pdf->GetStringWidth((string) $hbLbl));
+        }
+        $hbCatW = min(max(20, $hbCatW + 3), $w * 0.45);
+        $hbAxisBottom = $showAxes ? 8 : 2;
+        $hbPlotX = $x + $hbCatW;
+        $hbPlotY = $y + 2;
+        $hbPlotW = $w - $hbCatW - 4;
+        $hbPlotH = $h - $hbAxisBottom - 2;
+
+        // Compute X max (was Y max in vertical mode)
+        $hbMax = 0.0;
+        if ($variant === 'stacked') {
+            for ($hbLi = 0; $hbLi < $hbLabelCount; $hbLi++) {
+                $hbSum = 0.0;
+                foreach ($series as $hbS) {
+                    $hbSum += max(0.0, (float) (($hbS['data'] ?? [])[$hbLi] ?? 0));
+                }
+                $hbMax = max($hbMax, $hbSum);
+            }
+        } else {
+            foreach ($series as $hbS) {
+                foreach (($hbS['data'] ?? []) as $hbV) {
+                    $hbMax = max($hbMax, (float) $hbV);
+                }
+            }
+        }
+        if ($hbMax <= 0) $hbMax = 1.0;
+        $hbNiceMax = $this->niceCeil($hbMax);
+
+        // Vertical grid lines
+        $hbTicks = 4;
+        $pdf->SetDrawColor(226, 232, 240);
+        $pdf->SetLineWidth(0.1);
+        for ($hbTick = 0; $hbTick <= $hbTicks; $hbTick++) {
+            $hbTickX = $hbPlotX + $hbPlotW * $hbTick / $hbTicks;
+            $pdf->Line($hbTickX, $hbPlotY, $hbTickX, $hbPlotY + $hbPlotH);
+        }
+
+        if ($showAxes) {
+            $pdf->SetDrawColor(148, 163, 184);
+            $pdf->SetLineWidth(0.2);
+            $pdf->Line($hbPlotX, $hbPlotY, $hbPlotX, $hbPlotY + $hbPlotH);
+            $pdf->Line($hbPlotX, $hbPlotY + $hbPlotH, $hbPlotX + $hbPlotW, $hbPlotY + $hbPlotH);
+            $pdf->SetFont($bodyFont, '', 6.5);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            for ($hbTick = 0; $hbTick <= $hbTicks; $hbTick++) {
+                $hbTickV = $hbNiceMax * ($hbTick / $hbTicks);
+                $hbTickX = $hbPlotX + $hbPlotW * $hbTick / $hbTicks;
+                $pdf->Line($hbTickX, $hbPlotY + $hbPlotH, $hbTickX, $hbPlotY + $hbPlotH + 0.8);
+                $hbTickStr = (string) round($hbTickV, 1);
+                $pdf->Text($hbTickX - $pdf->GetStringWidth($hbTickStr) / 2, $hbPlotY + $hbPlotH + 1.5, $hbTickStr);
+            }
+        }
+
+        $hbGroupH = $hbPlotH / $hbLabelCount;
+        $hbGroupGap = $hbGroupH * (($variant === 'stacked' || $hbSeriesCount === 1) ? 0.30 : 0.20);
+        $hbBarsH = $hbGroupH - $hbGroupGap;
+        if ($variant === 'stacked') {
+            $hbBarH = $hbBarsH;
+        } else {
+            $hbInterBar = $hbSeriesCount > 1 ? 0.5 : 0;
+            $hbBarH = ($hbBarsH - $hbInterBar * ($hbSeriesCount - 1)) / $hbSeriesCount;
+        }
+
+        // Centering offsets (text size in mm × 0.625)
+        $hbCenterOffset6 = 6 * 0.3528 * 0.625;
+        $hbCenterOffset65 = 6.5 * 0.3528 * 0.625;
+
+        // Category labels (left strip). Use a Cell with valign='M' centered on
+        // the bar's row — this aligns label baseline-correctly regardless of
+        // TCPDF's cell_height_ratio, avoiding manual baseline math.
+        $pdf->SetFont($bodyFont, '', 6.5);
+        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+        // Save & zero cell padding so the label cell hugs the row geometry.
+        $hbSavedPadding = $pdf->getCellPaddings();
+        $pdf->SetCellPaddings(0, 0, 0, 0);
+        foreach ($labels as $hbLi => $hbLbl) {
+            // Center the bar block (height $hbBarsH) on the row's middle.
+            $hbBarBlockTop = $hbPlotY + $hbLi * $hbGroupH + $hbGroupGap / 2;
+            $hbDisplay = (string) $hbLbl;
+            // Truncate to fit the left strip
+            while ($pdf->GetStringWidth($hbDisplay) > $hbCatW - 1.5 && strlen($hbDisplay) > 3) {
+                $hbDisplay = substr($hbDisplay, 0, -1);
+            }
+            if ($hbDisplay !== (string) $hbLbl) $hbDisplay .= '…';
+            $pdf->SetXY($x, $hbBarBlockTop);
+            $pdf->Cell($hbCatW - 1.5, $hbBarsH, $hbDisplay, 0, 0, 'R', false, '', 0, false, 'T', 'M');
+        }
+        $pdf->SetCellPaddings($hbSavedPadding['L'], $hbSavedPadding['T'], $hbSavedPadding['R'], $hbSavedPadding['B']);
+
+        if ($variant === 'stacked') {
+            foreach ($labels as $hbLi => $hbLbl) {
+                $hbBy = $hbPlotY + $hbLi * $hbGroupH + $hbGroupGap / 2;
+                $hbCurX = $hbPlotX;
+                $hbStackTotal = 0.0;
+                foreach ($series as $hbS) {
+                    $hbVal = max(0.0, (float) (($hbS['data'] ?? [])[$hbLi] ?? 0));
+                    if ($hbVal <= 0) continue;
+                    $hbSegW = $hbPlotW * ($hbVal / $hbNiceMax);
+                    $hbDefaultHex = (string) ($hbS['color'] ?? '#6366f1');
+                    $hbCellHex = $this->pickRuleColor($colorRules, (string) $hbLbl, (string) ($hbS['name'] ?? ''), $hbVal, $hbDefaultHex);
+                    $hbColor = $this->hexToRgb($hbCellHex);
+                    $pdf->SetFillColor($hbColor[0], $hbColor[1], $hbColor[2]);
+                    $pdf->SetDrawColor(max(0, $hbColor[0] - 30), max(0, $hbColor[1] - 30), max(0, $hbColor[2] - 30));
+                    $pdf->SetLineWidth(0.15);
+                    $pdf->Rect($hbCurX, $hbBy, $hbSegW, $hbBarH, 'FD');
+                    if ($showValues && $hbSegW > 6) {
+                        $pdf->SetFont($bodyFont, 'B', 6);
+                        $pdf->SetTextColor(255, 255, 255);
+                        $hbValStr = (string) (int) round($hbVal);
+                        $hbStrW2 = $pdf->GetStringWidth($hbValStr);
+                        $pdf->Text(
+                            $hbCurX + ($hbSegW - $hbStrW2) / 2,
+                            $hbBy + $hbBarH / 2 - $hbCenterOffset6,
+                            $hbValStr
+                        );
+                    }
+                    $hbCurX += $hbSegW;
+                    $hbStackTotal += $hbVal;
+                }
+                if ($showValues && $hbStackTotal > 0) {
+                    $pdf->SetFont($bodyFont, 'B', 6.5);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $hbTotStr = (string) (int) round($hbStackTotal);
+                    $pdf->Text(
+                        $hbCurX + 1.0,
+                        $hbBy + $hbBarH / 2 - $hbCenterOffset65,
+                        $hbTotStr
+                    );
+                }
+            }
+        } else {
+            foreach ($series as $hbSi => $hbS) {
+                $hbDefaultHex = (string) ($hbS['color'] ?? '#6366f1');
+                foreach ($labels as $hbLi => $hbLbl) {
+                    $hbVal = (float) (($hbS['data'] ?? [])[$hbLi] ?? 0);
+                    $hbBarW = $hbPlotW * ($hbVal / $hbNiceMax);
+                    if ($hbBarW < 0) $hbBarW = 0;
+                    $hbInterBar = $hbSeriesCount > 1 ? 0.5 : 0;
+                    $hbBy = $hbPlotY + $hbLi * $hbGroupH + $hbGroupGap / 2 + $hbSi * ($hbBarH + $hbInterBar);
+                    $hbCellHex = $this->pickRuleColor($colorRules, (string) $hbLbl, (string) ($hbS['name'] ?? ''), $hbVal, $hbDefaultHex);
+                    $hbColor = $this->hexToRgb($hbCellHex);
+                    $pdf->SetFillColor($hbColor[0], $hbColor[1], $hbColor[2]);
+                    $pdf->SetDrawColor(max(0, $hbColor[0] - 30), max(0, $hbColor[1] - 30), max(0, $hbColor[2] - 30));
+                    $pdf->SetLineWidth(0.15);
+                    if ($hbBarW > 0.1) {
+                        $pdf->Rect($hbPlotX, $hbBy, $hbBarW, $hbBarH, 'FD');
+                    }
+                    if ($showValues && $hbVal > 0) {
+                        $hbValStr = (string) (int) round($hbVal);
+                        $pdf->SetFont($bodyFont, 'B', 6);
+                        $hbStrW2 = $pdf->GetStringWidth($hbValStr);
+                        if ($hbBarW >= $hbStrW2 + 2) {
+                            $pdf->SetTextColor(255, 255, 255);
+                            $pdf->Text(
+                                $hbPlotX + $hbBarW - $hbStrW2 - 1,
+                                $hbBy + $hbBarH / 2 - $hbCenterOffset6,
+                                $hbValStr
+                            );
+                        } else {
+                            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                            $pdf->Text(
+                                $hbPlotX + $hbBarW + 1,
+                                $hbBy + $hbBarH / 2 - $hbCenterOffset6,
+                                $hbValStr
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Round a positive number up to a "nice" value (1, 2, 5 × 10^k) for chart Y axes.
+     */
+    private function niceCeil(float $v): float
+    {
+        if ($v <= 0) return 1.0;
+        $exp = (int) floor(log10($v));
+        $base = pow(10, $exp);
+        $frac = $v / $base;
+        if ($frac <= 1) return 1 * $base;
+        if ($frac <= 2) return 2 * $base;
+        if ($frac <= 5) return 5 * $base;
+        return 10 * $base;
+    }
+
+    private function renderLineChart(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $area, bool $showValues, bool $showAxes, string $bodyFont, array $bodyRgb): void
+    {
+        $lcLabelCount = max(1, count($labels));
+        $lcAxisLeft = $showAxes ? 12 : 2;
+        $lcAxisBottom = $showAxes ? 8 : 2;
+        $lcPlotX = $x + $lcAxisLeft;
+        $lcPlotY = $y + 2;
+        $lcPlotW = $w - $lcAxisLeft - 2;
+        $lcPlotH = $h - $lcAxisBottom - 2;
+
+        $lcMax = 0.0;
+        foreach ($series as $lcS) {
+            foreach (($lcS['data'] ?? []) as $lcV) {
+                $lcMax = max($lcMax, (float) $lcV);
+            }
+        }
+        if ($lcMax <= 0) $lcMax = 1.0;
+
+        if ($showAxes) {
+            $pdf->SetDrawColor(180, 180, 180);
+            $pdf->SetLineWidth(0.15);
+            $pdf->Line($lcPlotX, $lcPlotY, $lcPlotX, $lcPlotY + $lcPlotH);
+            $pdf->Line($lcPlotX, $lcPlotY + $lcPlotH, $lcPlotX + $lcPlotW, $lcPlotY + $lcPlotH);
+            $pdf->SetFont($bodyFont, '', 6.5);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            for ($lcTick = 0; $lcTick <= 4; $lcTick++) {
+                $lcTickY = $lcPlotY + $lcPlotH - ($lcPlotH * $lcTick / 4);
+                $pdf->Line($lcPlotX - 0.8, $lcTickY, $lcPlotX, $lcTickY);
+                $pdf->Text($x + 1, $lcTickY - 1.2, (string) round($lcMax * $lcTick / 4, 1));
+            }
+        }
+
+        $lcStepX = $lcLabelCount > 1 ? $lcPlotW / ($lcLabelCount - 1) : $lcPlotW;
+
+        foreach ($series as $lcS) {
+            $lcColor = $this->hexToRgb((string) ($lcS['color'] ?? '#6366f1'));
+            $lcData = $lcS['data'] ?? [];
+            $lcPoints = [];
+            foreach ($labels as $lcLi => $lcLabel) {
+                $lcVal = (float) ($lcData[$lcLi] ?? 0);
+                $lcPx = $lcPlotX + ($lcLabelCount > 1 ? $lcLi * $lcStepX : $lcPlotW / 2);
+                $lcPy = $lcPlotY + $lcPlotH - $lcPlotH * ($lcVal / $lcMax);
+                $lcPoints[] = [$lcPx, $lcPy, $lcVal];
+            }
+
+            if ($area && count($lcPoints) >= 2) {
+                $lcPoly = [];
+                foreach ($lcPoints as $lcPt) {
+                    $lcPoly[] = $lcPt[0];
+                    $lcPoly[] = $lcPt[1];
+                }
+                $lcLast = end($lcPoints);
+                $lcFirst = $lcPoints[0];
+                $lcPoly[] = $lcLast[0];
+                $lcPoly[] = $lcPlotY + $lcPlotH;
+                $lcPoly[] = $lcFirst[0];
+                $lcPoly[] = $lcPlotY + $lcPlotH;
+                $pdf->SetFillColor($lcColor[0], $lcColor[1], $lcColor[2]);
+                $pdf->SetAlpha(0.3);
+                $pdf->Polygon($lcPoly, 'F');
+                $pdf->SetAlpha(1.0);
+            }
+
+            $pdf->SetDrawColor($lcColor[0], $lcColor[1], $lcColor[2]);
+            $pdf->SetLineWidth(0.5);
+            for ($lcK = 1; $lcK < count($lcPoints); $lcK++) {
+                $pdf->Line($lcPoints[$lcK - 1][0], $lcPoints[$lcK - 1][1], $lcPoints[$lcK][0], $lcPoints[$lcK][1]);
+            }
+            $pdf->SetFillColor($lcColor[0], $lcColor[1], $lcColor[2]);
+            foreach ($lcPoints as $lcPt) {
+                $pdf->Circle($lcPt[0], $lcPt[1], 0.8, 0, 360, 'F');
+                if ($showValues && $lcPt[2] > 0) {
+                    $pdf->SetFont($bodyFont, '', 6);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->Text($lcPt[0] + 1, $lcPt[1] - 2.5, (string) (int) round($lcPt[2]));
+                }
+            }
+        }
+
+        if ($showAxes) {
+            $pdf->SetFont($bodyFont, '', 6.5);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            foreach ($labels as $lcLi => $lcLabel) {
+                $lcLx = $lcPlotX + ($lcLabelCount > 1 ? $lcLi * $lcStepX : $lcPlotW / 2);
+                $lcDisplay = (string) $lcLabel;
+                $pdf->Text($lcLx - $pdf->GetStringWidth($lcDisplay) / 2, $lcPlotY + $lcPlotH + 1.5, $lcDisplay);
+            }
+        }
+    }
+
+    private function renderPieChart(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $showValues, string $bodyFont, array $bodyRgb, array $colorRules = []): void
+    {
+        $pcCx = $x + $w / 2;
+        $pcCy = $y + $h / 2;
+        $pcR = min($w, $h) / 2 - 2;
+
+        $pcTotal = 0.0;
+        foreach ($series as $pcS) {
+            $pcTotal += (float) ($pcS['data'][0] ?? 0);
+        }
+        if ($pcTotal <= 0) return;
+
+        $pcAngle = 0.0;
+        foreach ($series as $pcS) {
+            $pcVal = (float) ($pcS['data'][0] ?? 0);
+            if ($pcVal <= 0) continue;
+            $pcSweep = ($pcVal / $pcTotal) * 360.0;
+            $pcDefaultColor = (string) ($pcS['color'] ?? '#6366f1');
+            // Each pie series corresponds to one slice; rules apply at series-name OR value level.
+            $pcSliceLabel = (string) ($pcS['name'] ?? '');
+            $pcFinalColor = $this->pickRuleColor($colorRules, $pcSliceLabel, $pcSliceLabel, $pcVal, $pcDefaultColor);
+            $pcRgb = $this->hexToRgb($pcFinalColor);
+            $pcS['color'] = $pcFinalColor;
+            $pdf->SetFillColor($pcRgb[0], $pcRgb[1], $pcRgb[2]);
+            $pdf->SetDrawColor(255, 255, 255);
+            $pdf->SetLineWidth(0.3);
+            $pdf->PieSector($pcCx, $pcCy, $pcR, $pcAngle, $pcAngle + $pcSweep, 'FD');
+            // Skip values for tiny slices (< 8°) — they wouldn't fit visually
+            if ($showValues && $pcSweep >= 8.0) {
+                // Slice centroid radius: (2/3) R sin(θ/2) / (θ/2). For wide slices
+                // we still cap at 0.62R so the label stays well inside the slice.
+                $pcSweepRad = deg2rad($pcSweep);
+                $pcCentroidR = $pcR * (2.0 / 3.0) * (sin($pcSweepRad / 2) / max(0.0001, $pcSweepRad / 2));
+                $pcCentroidR = min($pcCentroidR, $pcR * 0.62);
+                // TCPDF PieSector measures angles CLOCKWISE from 12 o'clock.
+                // Convert to screen coords (y grows down):
+                //   x = cx + sin(θ) × r      (θ=0 → top, θ=90° → right)
+                //   y = cy − cos(θ) × r
+                $pcMidRad = deg2rad($pcAngle + $pcSweep / 2);
+                $pcLx = $pcCx + sin($pcMidRad) * $pcCentroidR;
+                $pcLy = $pcCy - cos($pcMidRad) * $pcCentroidR;
+                $pcFontSz = 7;
+                $pdf->SetFont($bodyFont, 'B', $pcFontSz);
+                $pdf->SetTextColor(255, 255, 255);
+                $pcLabel = (string) (int) round($pcVal);
+                $pcLblW = $pdf->GetStringWidth($pcLabel);
+                // TCPDF Text(x, y, ...) draws via Cell(h=0) which uses cell height
+                // = FontSize × cell_height_ratio (1.25). With valign='M', the visual
+                // glyph center sits at y + FontSize_mm × 0.625. Subtract that to
+                // place the visual center exactly on (pcLx, pcLy).
+                $pcCenterOffset = $pcFontSz * 0.3528 * 0.625; // ≈ 1.54mm
+                $pdf->Text(
+                    $pcLx - $pcLblW / 2,
+                    $pcLy - $pcCenterOffset,
+                    $pcLabel
+                );
+            }
+            $pcAngle += $pcSweep;
+        }
+    }
+
+    private function renderRadar(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $showValues, string $bodyFont, array $bodyRgb): void
+    {
+        $rdAxes = count($labels);
+        if ($rdAxes < 3) {
+            $this->renderBarChart($pdf, $x, $y, $w, $h, $labels, $series, $showValues, true, $bodyFont, $bodyRgb);
+            return;
+        }
+        // Reserve outer margin for axis labels
+        $rdLblMargin = 12;
+        $rdCx = $x + $w / 2;
+        $rdCy = $y + $h / 2;
+        $rdR = max(8.0, min($w, $h) / 2 - $rdLblMargin);
+
+        $rdMax = 0.0;
+        foreach ($series as $rdS) {
+            foreach (($rdS['data'] ?? []) as $rdV) {
+                $rdMax = max($rdMax, (float) $rdV);
+            }
+        }
+        if ($rdMax <= 0) $rdMax = 1.0;
+
+        // Concentric grid (filled background for first ring, then outline rings)
+        $rdRings = 4;
+        $pdf->SetFillColor(248, 250, 252);
+        $pdf->SetDrawColor(203, 213, 225);
+        $pdf->SetLineWidth(0.15);
+        $rdOuter = [];
+        for ($rdAi = 0; $rdAi < $rdAxes; $rdAi++) {
+            $rdAng = -M_PI / 2 + (2 * M_PI * $rdAi / $rdAxes);
+            $rdOuter[] = $rdCx + cos($rdAng) * $rdR;
+            $rdOuter[] = $rdCy + sin($rdAng) * $rdR;
+        }
+        $pdf->Polygon($rdOuter, 'F');
+        for ($rdRing = 1; $rdRing <= $rdRings; $rdRing++) {
+            $rdRingR = $rdR * $rdRing / $rdRings;
+            $rdPoly = [];
+            for ($rdAi = 0; $rdAi < $rdAxes; $rdAi++) {
+                $rdAng = -M_PI / 2 + (2 * M_PI * $rdAi / $rdAxes);
+                $rdPoly[] = $rdCx + cos($rdAng) * $rdRingR;
+                $rdPoly[] = $rdCy + sin($rdAng) * $rdRingR;
+            }
+            $pdf->Polygon($rdPoly, 'D');
+        }
+        // Radial spokes + axis labels
+        for ($rdAi = 0; $rdAi < $rdAxes; $rdAi++) {
+            $rdAng = -M_PI / 2 + (2 * M_PI * $rdAi / $rdAxes);
+            $rdEx = $rdCx + cos($rdAng) * $rdR;
+            $rdEy = $rdCy + sin($rdAng) * $rdR;
+            $pdf->SetDrawColor(203, 213, 225);
+            $pdf->SetLineWidth(0.15);
+            $pdf->Line($rdCx, $rdCy, $rdEx, $rdEy);
+
+            $pdf->SetFont($bodyFont, '', 7);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            $rdLbl = (string) ($labels[$rdAi] ?? '');
+            $rdLblW = $pdf->GetStringWidth($rdLbl);
+            // Position label radially outside the ring, anchor based on direction
+            $rdLblR = $rdR + 3.5;
+            $rdLx = $rdCx + cos($rdAng) * $rdLblR;
+            $rdLy = $rdCy + sin($rdAng) * $rdLblR;
+            // Horizontal anchor: shift by half-width times -cos (right side: shift 0, left: shift -W)
+            $rdTx = $rdLx - $rdLblW * (0.5 - cos($rdAng) * 0.5);
+            $rdTy = $rdLy + (sin($rdAng) > 0 ? 2.2 : -0.5);
+            $pdf->Text($rdTx, $rdTy, $rdLbl);
+        }
+
+        // Series polygons (fill first under, then strong outline on top)
+        foreach ($series as $rdS) {
+            $rdRgb = $this->hexToRgb((string) ($rdS['color'] ?? '#6366f1'));
+            $rdPoly = [];
+            $rdData = $rdS['data'] ?? [];
+            $rdVerts = [];
+            for ($rdAi = 0; $rdAi < $rdAxes; $rdAi++) {
+                $rdVal = (float) ($rdData[$rdAi] ?? 0);
+                $rdAng = -M_PI / 2 + (2 * M_PI * $rdAi / $rdAxes);
+                $rdRr = $rdR * ($rdVal / $rdMax);
+                $rdPx = $rdCx + cos($rdAng) * $rdRr;
+                $rdPy = $rdCy + sin($rdAng) * $rdRr;
+                $rdPoly[] = $rdPx;
+                $rdPoly[] = $rdPy;
+                $rdVerts[] = ['x' => $rdPx, 'y' => $rdPy, 'v' => $rdVal];
+            }
+            $pdf->SetFillColor($rdRgb[0], $rdRgb[1], $rdRgb[2]);
+            $pdf->SetDrawColor($rdRgb[0], $rdRgb[1], $rdRgb[2]);
+            $pdf->SetAlpha(0.30);
+            $pdf->Polygon($rdPoly, 'F');
+            $pdf->SetAlpha(1.0);
+            $pdf->SetLineWidth(0.6);
+            $pdf->Polygon($rdPoly, 'D');
+            // Vertex dots and value labels
+            foreach ($rdVerts as $rdVx) {
+                $pdf->SetFillColor($rdRgb[0], $rdRgb[1], $rdRgb[2]);
+                $pdf->Circle($rdVx['x'], $rdVx['y'], 0.9, 0, 360, 'F');
+                if ($showValues && $rdVx['v'] > 0) {
+                    $pdf->SetFont($bodyFont, 'B', 6);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $rdValStr = (string) (int) round($rdVx['v']);
+                    $pdf->Text($rdVx['x'] - $pdf->GetStringWidth($rdValStr) / 2, $rdVx['y'] - 2.5, $rdValStr);
+                }
+            }
+        }
+    }
+
+    private function renderTreemap(TCPDF $pdf, float $x, float $y, float $w, float $h, array $labels, array $series, bool $showValues, string $bodyFont, array $bodyRgb, array $colorRules = []): void
+    {
+        // Each series has data[0] = value, plus name + color (single-series semantic from chart_inventory)
+        $tmItems = [];
+        foreach ($series as $tmS) {
+            $tmVal = (float) ($tmS['data'][0] ?? 0);
+            if ($tmVal <= 0) continue;
+            $tmName = (string) ($tmS['name'] ?? '');
+            $tmDefault = (string) ($tmS['color'] ?? '#6366f1');
+            $tmItems[] = [
+                'name' => $tmName,
+                'value' => $tmVal,
+                'color' => $this->pickRuleColor($colorRules, $tmName, $tmName, $tmVal, $tmDefault),
+            ];
+        }
+        if (empty($tmItems)) return;
+
+        usort($tmItems, fn($a, $b) => $b['value'] <=> $a['value']);
+        $tmTotal = array_sum(array_column($tmItems, 'value'));
+        if ($tmTotal <= 0) return;
+
+        // Simple slice-and-dice layout: alternate horizontal/vertical splits
+        $tmRect = ['x' => $x, 'y' => $y, 'w' => $w, 'h' => $h];
+        $this->treemapLayout($pdf, $tmItems, $tmRect, $tmTotal, true, $showValues, $bodyFont);
+    }
+
+    private function treemapLayout(TCPDF $pdf, array $items, array $rect, float $total, bool $horizontal, bool $showValues, string $bodyFont): void
+    {
+        if (empty($items) || $total <= 0) return;
+        if (count($items) === 1) {
+            $tlIt = $items[0];
+            $tlRgb = $this->hexToRgb($tlIt['color']);
+            $pdf->SetFillColor($tlRgb[0], $tlRgb[1], $tlRgb[2]);
+            $pdf->SetDrawColor(255, 255, 255);
+            $pdf->SetLineWidth(0.3);
+            $pdf->Rect($rect['x'], $rect['y'], $rect['w'], $rect['h'], 'FD');
+            if ($showValues && $rect['w'] > 12 && $rect['h'] > 8) {
+                $pdf->SetFont($bodyFont, 'B', 7);
+                $pdf->SetTextColor(255, 255, 255);
+                $tlText = $tlIt['name'] . ' (' . (int) round($tlIt['value']) . ')';
+                $pdf->SetXY($rect['x'] + 1, $rect['y'] + 1);
+                $pdf->Cell($rect['w'] - 2, 4, $tlText, 0, 0, 'L');
+            }
+            return;
+        }
+        // Split items in half by value
+        $tlAcc = 0;
+        $tlSplit = 0;
+        $tlHalf = $total / 2;
+        for ($tlK = 0; $tlK < count($items); $tlK++) {
+            $tlAcc += $items[$tlK]['value'];
+            if ($tlAcc >= $tlHalf) {
+                $tlSplit = $tlK + 1;
+                break;
+            }
+        }
+        if ($tlSplit <= 0) $tlSplit = 1;
+        if ($tlSplit >= count($items)) $tlSplit = count($items) - 1;
+
+        $tlA = array_slice($items, 0, $tlSplit);
+        $tlB = array_slice($items, $tlSplit);
+        $tlASum = array_sum(array_column($tlA, 'value'));
+        $tlBSum = $total - $tlASum;
+        if ($horizontal) {
+            $tlAW = $rect['w'] * ($tlASum / $total);
+            $tlRectA = ['x' => $rect['x'], 'y' => $rect['y'], 'w' => $tlAW, 'h' => $rect['h']];
+            $tlRectB = ['x' => $rect['x'] + $tlAW, 'y' => $rect['y'], 'w' => $rect['w'] - $tlAW, 'h' => $rect['h']];
+        } else {
+            $tlAH = $rect['h'] * ($tlASum / $total);
+            $tlRectA = ['x' => $rect['x'], 'y' => $rect['y'], 'w' => $rect['w'], 'h' => $tlAH];
+            $tlRectB = ['x' => $rect['x'], 'y' => $rect['y'] + $tlAH, 'w' => $rect['w'], 'h' => $rect['h'] - $tlAH];
+        }
+        $this->treemapLayout($pdf, $tlA, $tlRectA, $tlASum, !$horizontal, $showValues, $bodyFont);
+        $this->treemapLayout($pdf, $tlB, $tlRectB, $tlBSum, !$horizontal, $showValues, $bodyFont);
+    }
+
+    /**
+     * Render the timeline block. All loop variables prefixed `$tl*` to avoid
+     * collisions with the outer renderBlocks() $i counter.
+     */
+    private function renderTimelineArea(
+        TCPDF $pdf,
+        array $entries,
+        bool $showRelease,
+        bool $showEoS,
+        bool $showEoSp,
+        bool $showEoL,
+        bool $showNow,
+        bool $showLegend,
+        float $barH,
+        float $rowSpacing,
+        float $mLeft,
+        float $mRight,
+        float $mBottom,
+        string $bodyFont,
+        array $bodyRgb,
+    ): void {
+        $tlPageW = $pdf->getPageWidth();
+        $tlContentW = $tlPageW - $mLeft - $mRight;
+        $tlNowMs = (new \DateTimeImmutable())->getTimestamp();
+
+        $tlMilestoneDefs = [
+            'release' => ['label' => 'Release', 'color' => '#10b981', 'show' => $showRelease, 'getter' => 'getReleaseDate'],
+            'eos' => ['label' => 'EoS', 'color' => '#eab308', 'show' => $showEoS, 'getter' => 'getEndOfSaleDate'],
+            'eosp' => ['label' => 'EoSp', 'color' => '#f97316', 'show' => $showEoSp, 'getter' => 'getEndOfSupportDate'],
+            'eol' => ['label' => 'EoL', 'color' => '#dc2626', 'show' => $showEoL, 'getter' => 'getEndOfLifeDate'],
+        ];
+
+        if ($showLegend) {
+            $tlYLeg = $pdf->GetY();
+            $tlLegX = $mLeft;
+            $pdf->SetFont($bodyFont, '', 7);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            foreach ($tlMilestoneDefs as $tlMs) {
+                if (!$tlMs['show']) continue;
+                $tlLegRgb = $this->hexToRgb($tlMs['color']);
+                $pdf->SetFillColor($tlLegRgb[0], $tlLegRgb[1], $tlLegRgb[2]);
+                $pdf->Rect($tlLegX, $tlYLeg + 0.5, 2.5, 2.5, 'F');
+                $tlLegTxt = ' ' . $tlMs['label'];
+                $tlLegW = $pdf->GetStringWidth($tlLegTxt) + 4;
+                $pdf->SetXY($tlLegX + 2.5, $tlYLeg);
+                $pdf->Cell($tlLegW, 4, $tlLegTxt, 0, 0, 'L');
+                $tlLegX += 2.5 + $tlLegW + 3;
+            }
+            if ($showNow) {
+                $pdf->SetDrawColor(15, 23, 42);
+                $pdf->SetLineWidth(0.35);
+                $pdf->Line($tlLegX, $tlYLeg + 0.5, $tlLegX, $tlYLeg + 3);
+                $pdf->SetXY($tlLegX + 1, $tlYLeg);
+                $pdf->Cell(20, 4, ' Today', 0, 0, 'L');
+            }
+            $pdf->Ln(5);
+        }
+
+        foreach ($entries as $tlEntry) {
+            $tlPr = $tlEntry['range'];
+            $tlLabel = (string) ($tlEntry['label'] ?? '');
+            $tlSub = (string) ($tlEntry['subLabel'] ?? '');
+
+            $tlMilestones = [];
+            foreach ($tlMilestoneDefs as $tlKey => $tlMs) {
+                if (!$tlMs['show']) continue;
+                $tlGetter = $tlMs['getter'];
+                $tlDate = $tlPr->{$tlGetter}();
+                if ($tlDate instanceof \DateTimeInterface) {
+                    $tlMilestones[] = [
+                        'key' => $tlKey,
+                        'label' => $tlMs['label'],
+                        'color' => $tlMs['color'],
+                        't' => $tlDate->getTimestamp(),
+                    ];
+                }
+            }
+            usort($tlMilestones, fn($a, $b) => $a['t'] <=> $b['t']);
+
+            $tlYStart = $pdf->GetY();
+            if ($tlYStart + $rowSpacing > $pdf->getPageHeight() - $mBottom) {
+                $pdf->AddPage();
+                $tlYStart = $pdf->GetY();
+            }
+
+            // Header label
+            $pdf->SetFont($bodyFont, 'B', 9);
+            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+            $pdf->SetXY($mLeft, $tlYStart);
+            $pdf->Cell($tlContentW * 0.6, 4, $tlLabel, 0, 0, 'L');
+            if ($tlSub !== '') {
+                $pdf->SetFont($bodyFont, '', 7.5);
+                $pdf->SetTextColor(120, 120, 120);
+                $pdf->SetXY($mLeft + $tlContentW * 0.6, $tlYStart);
+                $pdf->Cell($tlContentW * 0.4, 4, $tlSub, 0, 0, 'R');
+            }
+
+            $tlBarY = $tlYStart + 8;
+            $tlBarX = $mLeft;
+            $tlBarW = $tlContentW;
+
+            // No lifecycle data: draw an empty bar with a "no data" notice and skip markers
+            if (empty($tlMilestones)) {
+                $tlGrayEmpty = $this->hexToRgb('#e2e8f0');
+                $pdf->SetFillColor($tlGrayEmpty[0], $tlGrayEmpty[1], $tlGrayEmpty[2]);
+                $pdf->SetDrawColor(255, 255, 255);
+                $pdf->SetLineWidth(0);
+                $pdf->Rect($tlBarX, $tlBarY, $tlBarW, $barH, 'F');
+                $pdf->SetFont($bodyFont, 'I', 7);
+                $pdf->SetTextColor(120, 120, 120);
+                $tlNoData = 'No lifecycle data available';
+                $pdf->Text($tlBarX + ($tlBarW - $pdf->GetStringWidth($tlNoData)) / 2, $tlBarY + $barH + 1.5, $tlNoData);
+                $pdf->SetY($tlYStart + $rowSpacing);
+                continue;
+            }
+
+            $tlAll = array_map(fn($m) => $m['t'], $tlMilestones);
+            $tlAll[] = $tlNowMs;
+            $tlMin = min($tlAll);
+            $tlMax = max($tlAll);
+            $tlSpan = max($tlMax - $tlMin, 1);
+            $tlPad = (int) ($tlSpan * 0.08);
+            $tlLo = $tlMin - $tlPad;
+            $tlHi = $tlMax + $tlPad;
+            $tlRange = max($tlHi - $tlLo, 1);
+
+            // Background segments: gray before first, then milestone color until next
+            $tlPrevX = $tlBarX;
+            $tlGray = $this->hexToRgb('#e2e8f0');
+            $pdf->SetDrawColor(255, 255, 255);
+            $pdf->SetLineWidth(0);
+            // Initial gray segment up to first milestone
+            $tlFirstX = $tlBarX + (($tlMilestones[0]['t'] - $tlLo) / $tlRange) * $tlBarW;
+            $pdf->SetFillColor($tlGray[0], $tlGray[1], $tlGray[2]);
+            if ($tlFirstX > $tlBarX) {
+                $pdf->Rect($tlBarX, $tlBarY, $tlFirstX - $tlBarX, $barH, 'F');
+            }
+            for ($tlMi = 0; $tlMi < count($tlMilestones); $tlMi++) {
+                $tlStartX = $tlBarX + (($tlMilestones[$tlMi]['t'] - $tlLo) / $tlRange) * $tlBarW;
+                $tlEndX = ($tlMi + 1 < count($tlMilestones))
+                    ? $tlBarX + (($tlMilestones[$tlMi + 1]['t'] - $tlLo) / $tlRange) * $tlBarW
+                    : $tlBarX + $tlBarW;
+                $tlSegRgb = $this->hexToRgb($tlMilestones[$tlMi]['color']);
+                $pdf->SetFillColor($tlSegRgb[0], $tlSegRgb[1], $tlSegRgb[2]);
+                if ($tlEndX > $tlStartX) {
+                    $pdf->Rect($tlStartX, $tlBarY, $tlEndX - $tlStartX, $barH, 'F');
+                }
+            }
+
+            // Milestone markers + labels
+            $pdf->SetDrawColor(255, 255, 255);
+            $pdf->SetLineWidth(0.2);
+            foreach ($tlMilestones as $tlM) {
+                $tlMx = $tlBarX + (($tlM['t'] - $tlLo) / $tlRange) * $tlBarW;
+                $tlRgb = $this->hexToRgb($tlM['color']);
+                $pdf->SetFillColor($tlRgb[0], $tlRgb[1], $tlRgb[2]);
+                $pdf->Circle($tlMx, $tlBarY + $barH / 2, 1.4, 0, 360, 'FD');
+
+                $pdf->SetFont($bodyFont, '', 6.5);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                $tlDateStr = (new \DateTimeImmutable('@' . $tlM['t']))->format('Y-m-d');
+                $tlW1 = $pdf->GetStringWidth($tlM['label']);
+                $tlW2 = $pdf->GetStringWidth($tlDateStr);
+                $pdf->Text($tlMx - $tlW1 / 2, $tlBarY + $barH + 1.5, $tlM['label']);
+                $pdf->Text($tlMx - $tlW2 / 2, $tlBarY + $barH + 4, $tlDateStr);
+            }
+
+            // Now marker
+            if ($showNow) {
+                $tlNowX = $tlBarX + (($tlNowMs - $tlLo) / $tlRange) * $tlBarW;
+                $tlNowX = max($tlBarX, min($tlBarX + $tlBarW, $tlNowX));
+                $tlNowLbl = 'NOW';
+                $tlNowFontSz = 6.5;
+                $tlNowLblH = 3.5;
+                $tlNowGap = 0.5;
+                $pdf->SetFont($bodyFont, 'B', $tlNowFontSz);
+                $tlNowLblW = $pdf->GetStringWidth($tlNowLbl) + 2.4;
+                $tlNowRectX = $tlNowX - $tlNowLblW / 2;
+                $tlNowRectY = $tlBarY - $tlNowLblH - $tlNowGap;
+                $pdf->SetDrawColor(15, 23, 42);
+                $pdf->SetLineWidth(0.45);
+                $pdf->Line($tlNowX, $tlNowRectY + $tlNowLblH, $tlNowX, $tlBarY + $barH + 1.5);
+                $pdf->SetFillColor(15, 23, 42);
+                $pdf->Rect($tlNowRectX, $tlNowRectY, $tlNowLblW, $tlNowLblH, 'F');
+                $pdf->SetTextColor(255, 255, 255);
+                $pdf->MultiCell(
+                    $tlNowLblW, $tlNowLblH, $tlNowLbl, 0, 'C', false, 0,
+                    $tlNowRectX, $tlNowRectY, true, 0, false, true, $tlNowLblH, 'M'
+                );
+            }
+
+            $pdf->SetY($tlYStart + $rowSpacing);
         }
     }
 

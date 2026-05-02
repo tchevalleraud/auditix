@@ -31,6 +31,7 @@ import {
   Server,
   Search,
   Pencil,
+  Copy,
   ListChecks,
   ClipboardList,
   TerminalSquare,
@@ -46,6 +47,11 @@ import {
   ShieldAlert,
   ShieldQuestion,
   Lightbulb,
+  BarChart3,
+  PieChart,
+  LineChart,
+  Activity,
+  CalendarClock,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -346,12 +352,137 @@ export interface RuleRecommendationBlock {
   fontSize?: number;
 }
 
+// === Charts ===
+export type ChartKind = "bar" | "stacked_bar" | "pie" | "radar" | "line" | "area" | "treemap";
+
+export interface ChartSortConfig {
+  by: "label" | "value";
+  direction: "asc" | "desc";
+}
+
+export type ChartColorRuleKind = "label" | "series" | "value";
+export type ChartColorTextOp = "eq" | "neq" | "contains" | "starts_with";
+export type ChartColorValueOp = "lt" | "lte" | "gt" | "gte" | "eq" | "between";
+
+export interface ChartColorRule {
+  id: string;
+  kind: ChartColorRuleKind;
+  textOp?: ChartColorTextOp;
+  text?: string;
+  valueOp?: ChartColorValueOp;
+  valueA?: number;
+  valueB?: number;
+  color: string;
+}
+
+export interface ChartSeries {
+  id: string;
+  name: string;
+  color?: string;
+  data: number[];
+}
+
+export interface ChartStaticBlock {
+  id: string;
+  type: "chart_static";
+  chartKind: ChartKind;
+  orientation?: ChartOrientation;
+  title?: string;
+  width: number;
+  height: number;
+  widthAuto?: boolean;
+  heightAuto?: boolean;
+  showLegend: boolean;
+  showValues: boolean;
+  showAxes: boolean;
+  labels: string[];
+  series: ChartSeries[];
+  sliceColors?: string[];
+  sort?: ChartSortConfig;
+  colorRules?: ChartColorRule[];
+  pageBreakBefore?: boolean;
+}
+
+export type ChartDimensionKind =
+  | "inventory"
+  | "discoveredVersion"
+  | "model"
+  | "manufacturer"
+  | "productModel"
+  | "productRange"
+  | "tag"
+  | "device";
+
+export type ChartOrientation = "vertical" | "horizontal";
+
+export interface ChartDimension {
+  kind: ChartDimensionKind;
+  category?: string;
+  entryKey?: string;
+  colLabel?: string;
+}
+
+export type ChartDeviceSelectionMode = "all" | "tag" | "device";
+
+export interface ChartInventoryMetric {
+  kind: "count" | "value";
+  category?: string;
+  entryKey?: string;
+  colLabel?: string;
+  aggregation?: "sum" | "avg" | "min" | "max";
+}
+
+export interface ChartInventoryBlock {
+  id: string;
+  type: "chart_inventory";
+  chartKind: ChartKind;
+  orientation?: ChartOrientation;
+  metric?: ChartInventoryMetric;
+  sort?: ChartSortConfig;
+  colorRules?: ChartColorRule[];
+  title?: string;
+  width: number;
+  height: number;
+  widthAuto?: boolean;
+  heightAuto?: boolean;
+  showLegend: boolean;
+  showValues: boolean;
+  showAxes: boolean;
+  primary: ChartDimension;
+  secondary?: ChartDimension | null;
+  deviceSelectionMode?: ChartDeviceSelectionMode;
+  nodeIds: number[];
+  tagIds?: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+  pageBreakBefore?: boolean;
+}
+
+// === Timeline ===
+export interface TimelineBlock {
+  id: string;
+  type: "timeline";
+  mode: "node" | "product_range";
+  nodeIds: number[];
+  productRangeIds: number[];
+  allProductRanges?: boolean;
+  showRelease: boolean;
+  showEndOfSale: boolean;
+  showEndOfSupport: boolean;
+  showEndOfLife: boolean;
+  showNow: boolean;
+  showLegend: boolean;
+  height: number;
+  rowSpacing: number;
+  pageBreakBefore?: boolean;
+}
+
 function normalizeCell(cell: string | TableCell): TableCell {
   if (typeof cell === "string") return { value: cell };
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -447,6 +578,60 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "rule_nodes_table", policyId: null, ruleId: null, showRuleDescription: true, showMessage: false, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
     } else if (type === "rule_recommendation") {
       block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", displayMode: "text", recommendation: "", showHeader: true, pageBreakBefore: false };
+    } else if (type === "chart_static") {
+      block = {
+        id,
+        type: "chart_static",
+        chartKind: "bar",
+        title: "",
+        width: 160,
+        height: 80,
+        showLegend: true,
+        showValues: true,
+        showAxes: true,
+        labels: ["A", "B", "C"],
+        series: [{ id: uid(), name: "Série 1", color: "#6366f1", data: [10, 20, 15] }],
+        pageBreakBefore: false,
+      };
+    } else if (type === "chart_inventory") {
+      block = {
+        id,
+        type: "chart_inventory",
+        chartKind: "pie",
+        metric: { kind: "count" },
+        title: "",
+        width: 160,
+        height: 80,
+        showLegend: true,
+        showValues: true,
+        showAxes: true,
+        primary: { kind: "discoveredVersion" },
+        secondary: null,
+        deviceSelectionMode: "all",
+        nodeIds: [],
+        tagIds: [],
+        nodeRules: [],
+        nodeRulesMatch: "any",
+        pageBreakBefore: false,
+      };
+    } else if (type === "timeline") {
+      block = {
+        id,
+        type: "timeline",
+        mode: "product_range",
+        nodeIds: [],
+        productRangeIds: [],
+        allProductRanges: false,
+        showRelease: true,
+        showEndOfSale: true,
+        showEndOfSupport: true,
+        showEndOfLife: true,
+        showNow: true,
+        showLegend: true,
+        height: 6,
+        rowSpacing: 24,
+        pageBreakBefore: false,
+      };
     } else {
       block = { id, type: "paragraph", content: "", align: "left" };
     }
@@ -464,10 +649,45 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
   const deleteBlock = (id: string) => {
     const block = blocks.find((b) => b.id === id);
     if (block?.type === "image" && block.filename) {
-      fetch(`/api/block-images/${block.filename}`, { method: "DELETE" }).catch(() => {});
+      // Only delete the underlying file if no other (duplicated) block still references it
+      const stillUsed = blocks.some(
+        (b) => b.id !== id && b.type === "image" && b.filename === block.filename,
+      );
+      if (!stillUsed) {
+        fetch(`/api/block-images/${block.filename}`, { method: "DELETE" }).catch(() => {});
+      }
     }
     onChange(blocks.filter((b) => b.id !== id));
     if (editingId === id) setEditingId(null);
+  };
+
+  // Recursively regenerate every `id` field found in a nested object/array
+  // tree. Used by duplicateBlock so cloned series/columns/rules don't collide
+  // with the source block's children.
+  const regenerateIds = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      node.forEach(regenerateIds);
+      return;
+    }
+    if (node && typeof node === "object") {
+      const obj = node as Record<string, unknown>;
+      if (typeof obj.id === "string") obj.id = uid();
+      Object.values(obj).forEach(regenerateIds);
+    }
+  };
+
+  const duplicateBlock = (idx: number) => {
+    const source = blocks[idx];
+    if (!source) return;
+    const cloned = JSON.parse(JSON.stringify(source)) as ReportBlock;
+    regenerateIds(cloned);
+    // Image blocks reference an uploaded filename — keep the same file rather
+    // than orphaning a copy; deleting the duplicate later won't touch the
+    // shared file because deleteBlock matches by block.id, not filename.
+    const arr = [...blocks];
+    arr.splice(idx + 1, 0, cloned);
+    onChange(arr);
+    setEditingId(cloned.id);
   };
 
   const moveBlock = (idx: number, dir: -1 | 1) => {
@@ -598,6 +818,28 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyRuleRecommendation")}</span>;
     }
+    if (block.type === "chart_static") {
+      const seriesCount = block.series.length;
+      const labelCount = block.labels.length;
+      return <span className="text-slate-500 text-xs">{t("structure.chartStatic")} — {block.chartKind} ({seriesCount} × {labelCount})</span>;
+    }
+    if (block.type === "chart_inventory") {
+      const dim = block.primary?.kind ?? "?";
+      const mode = block.deviceSelectionMode ?? "all";
+      const modeStr = mode === "all" ? "all" : mode === "tag" ? `${(block.tagIds ?? []).length} tags` : `${block.nodeIds.length} devices`;
+      return <span className="text-slate-500 text-xs">{t("structure.chartInventory")} — {block.chartKind} / {dim}{block.secondary ? ` × ${block.secondary.kind}` : ""} — {modeStr}</span>;
+    }
+    if (block.type === "timeline") {
+      if (block.mode === "node") {
+        const n = block.nodeIds.length;
+        return <span className="text-slate-500 text-xs">{t("structure.timelineBlock")} — {t("structure.timelineModeNode")} ({n})</span>;
+      }
+      if (block.allProductRanges) {
+        return <span className="text-slate-500 text-xs">{t("structure.timelineBlock")} — {t("structure.timelineModeRange")} ({t("structure.timelineAllRanges")})</span>;
+      }
+      const n = block.productRangeIds.length;
+      return <span className="text-slate-500 text-xs">{t("structure.timelineBlock")} — {t("structure.timelineModeRange")} ({n})</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -696,6 +938,27 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         </span>
       );
     }
+    if (block.type === "chart_static") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-600 dark:text-blue-400">
+          <BarChart3 className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "chart_inventory") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-fuchsia-100 dark:bg-fuchsia-500/15 px-2 py-0.5 text-[11px] font-bold text-fuchsia-600 dark:text-fuchsia-400">
+          <PieChart className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "timeline") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-orange-100 dark:bg-orange-500/15 px-2 py-0.5 text-[11px] font-bold text-orange-600 dark:text-orange-400">
+          <CalendarClock className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
         P
@@ -778,6 +1041,18 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                   <Lightbulb className="h-4 w-4 text-amber-500" />
                   {t("structure.addRuleRecommendation")}
                 </button>
+                <button onClick={() => { addBlock("chart_static"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <BarChart3 className="h-4 w-4 text-blue-500" />
+                  {t("structure.addChartStatic")}
+                </button>
+                <button onClick={() => { addBlock("chart_inventory"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <PieChart className="h-4 w-4 text-fuchsia-500" />
+                  {t("structure.addChartInventory")}
+                </button>
+                <button onClick={() => { addBlock("timeline"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <CalendarClock className="h-4 w-4 text-orange-500" />
+                  {t("structure.addTimeline")}
+                </button>
               </div>
             )}
           </div>
@@ -853,6 +1128,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                               title={t("structure.edit")}
                             >
                               <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => duplicateBlock(idx)}
+                              className="p-1 rounded-md text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+                              title={t("structure.duplicate")}
+                            >
+                              <Copy className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => moveBlock(idx, -1)}
@@ -962,6 +1244,15 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "rule_recommendation" && (
                 <RuleRecommendationProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "chart_static" && (
+                <ChartStaticProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "chart_inventory" && (
+                <ChartInventoryProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} />
+              )}
+              {editingBlock.type === "timeline" && (
+                <TimelineProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} />
               )}
             </div>
           </div>
@@ -6002,3 +6293,1075 @@ function RuleRecommendationProperties({
     </div>
   );
 }
+
+// =====================================================================
+// === Chart static properties =========================================
+// =====================================================================
+
+const CHART_KINDS: { value: ChartKind; labelKey: string }[] = [
+  { value: "bar", labelKey: "structure.chartKindBar" },
+  { value: "stacked_bar", labelKey: "structure.chartKindStackedBar" },
+  { value: "pie", labelKey: "structure.chartKindPie" },
+  { value: "radar", labelKey: "structure.chartKindRadar" },
+  { value: "line", labelKey: "structure.chartKindLine" },
+  { value: "area", labelKey: "structure.chartKindArea" },
+  { value: "treemap", labelKey: "structure.chartKindTreemap" },
+];
+
+const DEFAULT_SERIES_COLORS = [
+  "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#06b6d4",
+  "#a855f7", "#84cc16", "#f97316", "#ec4899", "#14b8a6",
+];
+
+function ChartStaticProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ChartStaticBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const setLabels = (labels: string[]) => updateBlock(block.id, { labels });
+  const setSeries = (series: ChartSeries[]) => updateBlock(block.id, { series });
+
+  const addLabel = () => {
+    const newLabels = [...block.labels, `L${block.labels.length + 1}`];
+    const newSeries = block.series.map((s) => ({ ...s, data: [...s.data, 0] }));
+    updateBlock(block.id, { labels: newLabels, series: newSeries });
+  };
+  const removeLabel = (idx: number) => {
+    const newLabels = block.labels.filter((_, k) => k !== idx);
+    const newSeries = block.series.map((s) => ({ ...s, data: s.data.filter((_, k) => k !== idx) }));
+    updateBlock(block.id, { labels: newLabels, series: newSeries });
+  };
+  const updateLabel = (idx: number, value: string) => {
+    const newLabels = [...block.labels];
+    newLabels[idx] = value;
+    setLabels(newLabels);
+  };
+
+  const addSeries = () => {
+    const color = DEFAULT_SERIES_COLORS[block.series.length % DEFAULT_SERIES_COLORS.length];
+    const series: ChartSeries = {
+      id: uid(),
+      name: `Série ${block.series.length + 1}`,
+      color,
+      data: block.labels.map(() => 0),
+    };
+    setSeries([...block.series, series]);
+  };
+  const removeSeries = (id: string) => setSeries(block.series.filter((s) => s.id !== id));
+  const updateSeries = (id: string, patch: Partial<ChartSeries>) =>
+    setSeries(block.series.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  const updateSeriesValue = (id: string, idx: number, value: number) => {
+    setSeries(
+      block.series.map((s) => {
+        if (s.id !== id) return s;
+        const data = [...s.data];
+        data[idx] = value;
+        return { ...s, data };
+      })
+    );
+  };
+
+  const isSliceMode = block.chartKind === "pie" || block.chartKind === "treemap";
+
+  // Slice helpers — for pie/treemap, edit { label, value, color } as a single row
+  const addSlice = () => {
+    const newLabels = [...block.labels, `Tranche ${block.labels.length + 1}`];
+    const data0 = (block.series[0]?.data ?? []).slice();
+    data0.push(0);
+    const newSeries = block.series.length > 0
+      ? [{ ...block.series[0], data: data0 }]
+      : [{ id: uid(), name: "Total", color: "#6366f1", data: data0 }];
+    const newColors = [...(block.sliceColors ?? []), DEFAULT_SERIES_COLORS[block.labels.length % DEFAULT_SERIES_COLORS.length]];
+    updateBlock(block.id, { labels: newLabels, series: newSeries, sliceColors: newColors });
+  };
+  const removeSlice = (idx: number) => {
+    const newLabels = block.labels.filter((_, k) => k !== idx);
+    const newSeries = block.series.map((s) => ({ ...s, data: s.data.filter((_, k) => k !== idx) }));
+    const newColors = (block.sliceColors ?? []).filter((_, k) => k !== idx);
+    updateBlock(block.id, { labels: newLabels, series: newSeries, sliceColors: newColors });
+  };
+  const setSliceLabel = (idx: number, value: string) => {
+    const arr = [...block.labels]; arr[idx] = value; updateBlock(block.id, { labels: arr });
+  };
+  const setSliceValue = (idx: number, value: number) => {
+    const s = block.series[0] ?? { id: uid(), name: "Total", color: "#6366f1", data: [] };
+    const data = [...s.data];
+    while (data.length < block.labels.length) data.push(0);
+    data[idx] = value;
+    updateBlock(block.id, { series: [{ ...s, data }] });
+  };
+  const setSliceColor = (idx: number, color: string) => {
+    const arr = [...(block.sliceColors ?? [])];
+    while (arr.length < block.labels.length) arr.push(DEFAULT_SERIES_COLORS[arr.length % DEFAULT_SERIES_COLORS.length]);
+    arr[idx] = color;
+    updateBlock(block.id, { sliceColors: arr });
+  };
+  const sliceColorAt = (idx: number) =>
+    (block.sliceColors ?? [])[idx] ?? DEFAULT_SERIES_COLORS[idx % DEFAULT_SERIES_COLORS.length];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartTitle")}</span>
+          <input
+            type="text"
+            value={block.title ?? ""}
+            onChange={(e) => updateBlock(block.id, { title: e.target.value })}
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartKind")}</span>
+          <select
+            value={block.chartKind}
+            onChange={(e) => updateBlock(block.id, { chartKind: e.target.value as ChartKind })}
+            className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm"
+          >
+            {CHART_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>{t(k.labelKey)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartWidth")} (mm)</span>
+          <div className="flex gap-1.5">
+            <input
+              type="number"
+              min={40}
+              max={250}
+              value={block.width}
+              disabled={!!block.widthAuto}
+              onChange={(e) => updateBlock(block.id, { width: Math.max(40, Number(e.target.value)) })}
+              className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => updateBlock(block.id, { widthAuto: !block.widthAuto })}
+              className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${block.widthAuto ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600"}`}
+              title={t("structure.chartSizeAuto")}
+            >
+              auto
+            </button>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartHeight")} (mm)</span>
+          <div className="flex gap-1.5">
+            <input
+              type="number"
+              min={30}
+              max={250}
+              value={block.height}
+              disabled={!!block.heightAuto}
+              onChange={(e) => updateBlock(block.id, { height: Math.max(30, Number(e.target.value)) })}
+              className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => updateBlock(block.id, { heightAuto: !block.heightAuto })}
+              className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${block.heightAuto ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600"}`}
+              title={t("structure.chartSizeAuto")}
+            >
+              auto
+            </button>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 mt-6">
+          <input type="checkbox" checked={block.showLegend} onChange={(e) => updateBlock(block.id, { showLegend: e.target.checked })} />
+          <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.chartShowLegend")}</span>
+        </label>
+        <label className="flex items-center gap-2 mt-6">
+          <input type="checkbox" checked={block.showValues} onChange={(e) => updateBlock(block.id, { showValues: e.target.checked })} />
+          <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.chartShowValues")}</span>
+        </label>
+      </div>
+
+      {(block.chartKind === "bar" || block.chartKind === "stacked_bar") && (
+        <label className="flex items-center gap-3">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">{t("structure.chartOrientation")}</span>
+          <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {(["vertical", "horizontal"] as ChartOrientation[]).map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => updateBlock(block.id, { orientation: o })}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  (block.orientation ?? "vertical") === o
+                    ? "bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "bg-white dark:bg-slate-800 text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {t(o === "vertical" ? "structure.chartOrientationVertical" : "structure.chartOrientationHorizontal")}
+              </button>
+            ))}
+          </div>
+        </label>
+      )}
+
+      {isSliceMode ? (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartSlices")}</span>
+            <button onClick={addSlice} className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">
+              + {t("structure.chartAddSlice")}
+            </button>
+          </div>
+          <p className="text-[10px] italic text-slate-400">{t("structure.chartSlicesHint")}</p>
+          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+            <div className="grid grid-cols-12 gap-2 px-2 text-[10px] font-medium text-slate-400 uppercase tracking-wide">
+              <span className="col-span-1"></span>
+              <span className="col-span-7">{t("structure.chartSliceLabel")}</span>
+              <span className="col-span-3">{t("structure.chartSliceValue")}</span>
+            </div>
+            {block.labels.map((lbl, idx) => (
+              <div key={idx} className="grid grid-cols-12 gap-2 items-center">
+                <input
+                  type="color"
+                  value={sliceColorAt(idx)}
+                  onChange={(e) => setSliceColor(idx, e.target.value)}
+                  className="col-span-1 h-7 w-7 cursor-pointer"
+                />
+                <input
+                  type="text"
+                  value={lbl}
+                  onChange={(e) => setSliceLabel(idx, e.target.value)}
+                  className="col-span-7 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                />
+                <input
+                  type="number"
+                  value={block.series[0]?.data[idx] ?? 0}
+                  onChange={(e) => setSliceValue(idx, Number(e.target.value))}
+                  className="col-span-3 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-mono"
+                />
+                <button onClick={() => removeSlice(idx)} className="col-span-1 text-slate-400 hover:text-red-500 justify-self-end">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            {block.labels.length === 0 && (
+              <p className="text-xs italic text-slate-400 px-2 py-2">{t("structure.chartNoSlices")}</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartLabels")}</span>
+              <button onClick={addLabel} className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">
+                + {t("structure.chartAddLabel")}
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              {block.labels.map((lbl, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono text-slate-400 w-6">#{idx + 1}</span>
+                  <input
+                    type="text"
+                    value={lbl}
+                    onChange={(e) => updateLabel(idx, e.target.value)}
+                    className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                  />
+                  <button onClick={() => removeLabel(idx)} className="text-slate-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartSeries")}</span>
+              <button onClick={addSeries} className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">
+                + {t("structure.chartAddSeries")}
+              </button>
+            </div>
+            <div className="space-y-3 max-h-72 overflow-y-auto">
+              {block.series.map((s) => (
+                <div key={s.id} className="rounded border border-slate-200 dark:border-slate-700 p-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={s.color ?? "#6366f1"} onChange={(e) => updateSeries(s.id, { color: e.target.value })} className="h-7 w-7 cursor-pointer" />
+                    <input
+                      type="text"
+                      value={s.name}
+                      onChange={(e) => updateSeries(s.id, { name: e.target.value })}
+                      className="flex-1 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                    />
+                    <button onClick={() => removeSeries(s.id)} className="text-slate-400 hover:text-red-500"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {block.labels.map((lbl, idx) => (
+                      <div key={idx} className="flex items-center gap-1">
+                        <span className="text-[10px] font-mono text-slate-400 w-12 truncate" title={lbl}>{lbl}</span>
+                        <input
+                          type="number"
+                          value={s.data[idx] ?? 0}
+                          onChange={(e) => updateSeriesValue(s.id, idx, Number(e.target.value))}
+                          className="w-full rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-1.5 py-1 text-xs font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      <ChartStyleSection
+        sort={block.sort}
+        colorRules={block.colorRules}
+        onSortChange={(s) => updateBlock(block.id, { sort: s })}
+        onRulesChange={(r) => updateBlock(block.id, { colorRules: r })}
+        showValueRules={true}
+        t={t}
+      />
+
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={!!block.pageBreakBefore} onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })} />
+        <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+      </label>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Chart inventory properties ======================================
+// =====================================================================
+
+function ChartInventoryProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+}: {
+  block: ChartInventoryBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+}) {
+  const { current } = useAppContext();
+  const isNodeReport = reportType === "node";
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [allTags, setAllTags] = useState<InvTagItem[]>([]);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const selectionMode: ChartDeviceSelectionMode = block.deviceSelectionMode ?? "all";
+  const tagIds = block.tagIds ?? [];
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`).then((r) => r.json()).then(setStructure).catch(() => {});
+    fetch(`/api/nodes?context=${current.id}`).then((r) => r.json()).then(setAllNodes).catch(() => {});
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setAllTags).catch(() => {});
+  }, [current]);
+
+  const setDimension = (key: "primary" | "secondary", value: ChartDimension | null) => {
+    updateBlock(block.id, { [key]: value } as Partial<ChartInventoryBlock>);
+  };
+
+  const setMode = (mode: ChartDeviceSelectionMode) => {
+    updateBlock(block.id, { deviceSelectionMode: mode });
+  };
+  const toggleTag = (id: number) => {
+    if (tagIds.includes(id)) {
+      updateBlock(block.id, { tagIds: tagIds.filter((t) => t !== id) });
+    } else {
+      updateBlock(block.id, { tagIds: [...tagIds, id] });
+    }
+  };
+
+  const renderDimensionEditor = (label: string, key: "primary" | "secondary", dim: ChartDimension | null | undefined, allowNone: boolean) => {
+    const cur = dim ?? null;
+    const kind = cur?.kind ?? (allowNone ? null : "discoveredVersion");
+    const cat = cur?.category ?? "";
+    const entryKey = cur?.entryKey ?? "";
+    const catData = structure.find((c) => c.categoryName === cat);
+    const entryKeys = catData?.entries.map((e) => e.key) ?? [];
+    // Columns: filtered by entryKey when one is selected, otherwise union of all entries' columns
+    const cols = entryKey
+      ? (catData?.entries.find((e) => e.key === entryKey)?.columns ?? [])
+      : (catData?.entries.flatMap((e) => e.columns) ?? []);
+    const uniqCols = Array.from(new Set(cols));
+    return (
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{label}</span>
+        <div className={`grid gap-2 ${kind === "inventory" ? "grid-cols-4" : "grid-cols-3"}`}>
+          <select
+            value={kind ?? ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "") setDimension(key, null);
+              else if (v === "inventory") setDimension(key, { kind: "inventory", category: "", entryKey: "", colLabel: "" });
+              else setDimension(key, { kind: v as ChartDimensionKind });
+            }}
+            className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs"
+          >
+            {allowNone && <option value="">— {t("structure.chartDimNone")} —</option>}
+            <option value="device">{t("structure.chartDimDevice")}</option>
+            <option value="discoveredVersion">{t("structure.chartDimVersion")}</option>
+            <option value="model">{t("structure.chartDimModel")}</option>
+            <option value="manufacturer">{t("structure.chartDimManufacturer")}</option>
+            <option value="productModel">{t("structure.chartDimProductModel")}</option>
+            <option value="productRange">{t("structure.chartDimProductRange")}</option>
+            <option value="tag">{t("structure.chartDimTag")}</option>
+            <option value="inventory">{t("structure.chartDimInventory")}</option>
+          </select>
+          {kind === "inventory" && (
+            <>
+              <select
+                value={cat}
+                onChange={(e) => setDimension(key, { kind: "inventory", category: e.target.value, entryKey: "", colLabel: "" })}
+                className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs"
+              >
+                <option value="">{t("structure.chartDimCategoryPick")}</option>
+                {structure.map((c) => (
+                  <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+                ))}
+              </select>
+              <select
+                value={entryKey}
+                onChange={(e) => setDimension(key, { kind: "inventory", category: cat, entryKey: e.target.value, colLabel: cur?.colLabel ?? "" })}
+                disabled={!cat}
+                className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs disabled:opacity-50"
+              >
+                <option value="">{t("structure.chartDimAllKeys")}</option>
+                {entryKeys.map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+              <select
+                value={cur?.colLabel ?? ""}
+                onChange={(e) => setDimension(key, { kind: "inventory", category: cat, entryKey, colLabel: e.target.value })}
+                disabled={!cat}
+                className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs disabled:opacity-50"
+              >
+                <option value="">{t("structure.chartDimColumnPick")}</option>
+                {uniqCols.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const filteredNodes = allNodes.filter((n) =>
+    nodeSearch === "" ||
+    (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+    (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+    n.ipAddress.includes(nodeSearch)
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-4">
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartTitle")}</span>
+          <input type="text" value={block.title ?? ""} onChange={(e) => updateBlock(block.id, { title: e.target.value })} className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+        </label>
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartKind")}</span>
+          <select value={block.chartKind} onChange={(e) => updateBlock(block.id, { chartKind: e.target.value as ChartKind })} className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm">
+            {CHART_KINDS.map((k) => (
+              <option key={k.value} value={k.value}>{t(k.labelKey)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartWidth")} (mm)</span>
+          <div className="flex gap-1.5">
+            <input
+              type="number"
+              min={40}
+              max={250}
+              value={block.width}
+              disabled={!!block.widthAuto}
+              onChange={(e) => updateBlock(block.id, { width: Math.max(40, Number(e.target.value)) })}
+              className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => updateBlock(block.id, { widthAuto: !block.widthAuto })}
+              className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${block.widthAuto ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600"}`}
+              title={t("structure.chartSizeAuto")}
+            >
+              auto
+            </button>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.chartHeight")} (mm)</span>
+          <div className="flex gap-1.5">
+            <input
+              type="number"
+              min={30}
+              max={250}
+              value={block.height}
+              disabled={!!block.heightAuto}
+              onChange={(e) => updateBlock(block.id, { height: Math.max(30, Number(e.target.value)) })}
+              className="flex-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={() => updateBlock(block.id, { heightAuto: !block.heightAuto })}
+              className={`px-2 py-1 rounded-md text-[11px] font-medium border transition-colors ${block.heightAuto ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300" : "border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600"}`}
+              title={t("structure.chartSizeAuto")}
+            >
+              auto
+            </button>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 mt-6">
+          <input type="checkbox" checked={block.showLegend} onChange={(e) => updateBlock(block.id, { showLegend: e.target.checked })} />
+          <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.chartShowLegend")}</span>
+        </label>
+        <label className="flex items-center gap-2 mt-6">
+          <input type="checkbox" checked={block.showValues} onChange={(e) => updateBlock(block.id, { showValues: e.target.checked })} />
+          <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.chartShowValues")}</span>
+        </label>
+      </div>
+
+      {(block.chartKind === "bar" || block.chartKind === "stacked_bar") && (
+        <label className="flex items-center gap-3">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300 whitespace-nowrap">{t("structure.chartOrientation")}</span>
+          <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+            {(["vertical", "horizontal"] as ChartOrientation[]).map((o) => (
+              <button
+                key={o}
+                type="button"
+                onClick={() => updateBlock(block.id, { orientation: o })}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  (block.orientation ?? "vertical") === o
+                    ? "bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300"
+                    : "bg-white dark:bg-slate-800 text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {t(o === "vertical" ? "structure.chartOrientationVertical" : "structure.chartOrientationHorizontal")}
+              </button>
+            ))}
+          </div>
+        </label>
+      )}
+
+      {renderDimensionEditor(t("structure.chartPrimaryDim"), "primary", block.primary, false)}
+      {renderDimensionEditor(t("structure.chartSecondaryDim"), "secondary", block.secondary, true)}
+
+      {(() => {
+        const metric: ChartInventoryMetric = block.metric ?? { kind: "count" };
+        const cat = metric.category ?? "";
+        const entryKey = metric.entryKey ?? "";
+        const catData = structure.find((c) => c.categoryName === cat);
+        const entryKeys = catData?.entries.map((e) => e.key) ?? [];
+        const cols = entryKey
+          ? (catData?.entries.find((e) => e.key === entryKey)?.columns ?? [])
+          : (catData?.entries.flatMap((e) => e.columns) ?? []);
+        const uniqCols = Array.from(new Set(cols));
+        const updateMetric = (patch: Partial<ChartInventoryMetric>) =>
+          updateBlock(block.id, { metric: { ...metric, ...patch } });
+        return (
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartMetric")}</span>
+              <div className="flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                {(["count", "value"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => updateBlock(block.id, { metric: k === "count" ? { kind: "count" } : { kind: "value", category: "", entryKey: "", colLabel: "", aggregation: "sum" } })}
+                    className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                      metric.kind === k
+                        ? "bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300"
+                        : "bg-white dark:bg-slate-800 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    {t(k === "count" ? "structure.chartMetricCount" : "structure.chartMetricValue")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {metric.kind === "count" ? (
+              <p className="text-[10px] italic text-slate-400">{t("structure.chartMetricCountHint")}</p>
+            ) : (
+              <>
+                <p className="text-[10px] italic text-slate-400">{t("structure.chartMetricValueHint")}</p>
+                <div className="grid grid-cols-4 gap-2">
+                  <select
+                    value={cat}
+                    onChange={(e) => updateMetric({ category: e.target.value, entryKey: "", colLabel: "" })}
+                    className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs"
+                  >
+                    <option value="">{t("structure.chartDimCategoryPick")}</option>
+                    {structure.map((c) => (
+                      <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={entryKey}
+                    onChange={(e) => updateMetric({ entryKey: e.target.value })}
+                    disabled={!cat}
+                    className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    <option value="">{t("structure.chartDimAllKeys")}</option>
+                    {entryKeys.map((k) => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={metric.colLabel ?? ""}
+                    onChange={(e) => updateMetric({ colLabel: e.target.value })}
+                    disabled={!cat}
+                    className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs disabled:opacity-50"
+                  >
+                    <option value="">{t("structure.chartDimColumnPick")}</option>
+                    {uniqCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={metric.aggregation ?? "sum"}
+                    onChange={(e) => updateMetric({ aggregation: e.target.value as "sum" | "avg" | "min" | "max" })}
+                    className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs"
+                  >
+                    <option value="sum">{t("structure.chartAggSum")}</option>
+                    <option value="avg">{t("structure.chartAggAvg")}</option>
+                    <option value="min">{t("structure.chartAggMin")}</option>
+                    <option value="max">{t("structure.chartAggMax")}</option>
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {!isNodeReport && (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            {(["all", "tag", "device"] as ChartDeviceSelectionMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  selectionMode === m
+                    ? "border-fuchsia-500 bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 hover:bg-slate-100"
+                }`}
+              >
+                {t(m === "all" ? "structure.chartDeviceModeAll" : m === "tag" ? "structure.chartDeviceModeTag" : "structure.chartDeviceModeDevice")}
+              </button>
+            ))}
+          </div>
+
+          {selectionMode === "all" && (
+            <p className="text-[10px] italic text-slate-400 px-1">{t("structure.chartDeviceModeAllHint")}</p>
+          )}
+
+          {selectionMode === "tag" && (
+            <div className="space-y-2">
+              <p className="text-[10px] italic text-slate-400">{t("structure.chartDeviceModeTagHint")} ({tagIds.length})</p>
+              <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                {allTags.map((tg) => {
+                  const active = tagIds.includes(tg.id);
+                  return (
+                    <button
+                      key={tg.id}
+                      type="button"
+                      onClick={() => toggleTag(tg.id)}
+                      style={active ? { backgroundColor: tg.color, borderColor: tg.color, color: "#fff" } : { borderColor: tg.color, color: tg.color }}
+                      className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-80"
+                    >
+                      {tg.name}
+                    </button>
+                  );
+                })}
+                {allTags.length === 0 && (
+                  <p className="text-[10px] italic text-slate-400">{t("structure.chartNoTags")}</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {selectionMode === "device" && (
+            <div className="space-y-2">
+              <p className="text-[10px] italic text-slate-400">{t("structure.chartDeviceModeDeviceHint")} ({block.nodeIds.length})</p>
+              <input type="text" placeholder={t("structure.searchNodes")} value={nodeSearch} onChange={(e) => setNodeSearch(e.target.value)} className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {filteredNodes.map((n) => {
+                  const checked = block.nodeIds.includes(n.id);
+                  return (
+                    <label key={n.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) updateBlock(block.id, { nodeIds: [...block.nodeIds, n.id] });
+                          else updateBlock(block.id, { nodeIds: block.nodeIds.filter((id) => id !== n.id) });
+                        }}
+                      />
+                      <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{n.hostname || n.name || n.ipAddress}</span>
+                      <span className="text-[10px] font-mono text-slate-400 ml-auto">{n.ipAddress}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <ChartStyleSection
+        sort={block.sort}
+        colorRules={block.colorRules}
+        onSortChange={(s) => updateBlock(block.id, { sort: s })}
+        onRulesChange={(r) => updateBlock(block.id, { colorRules: r })}
+        showValueRules={true}
+        t={t}
+      />
+
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={!!block.pageBreakBefore} onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })} />
+        <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+      </label>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Timeline properties =============================================
+// =====================================================================
+
+interface ProductRangeItem {
+  id: number;
+  name: string;
+  manufacturer?: { id: number; name: string } | null;
+  releaseDate?: string | null;
+  endOfSaleDate?: string | null;
+  endOfSupportDate?: string | null;
+  endOfLifeDate?: string | null;
+}
+
+function TimelineProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+}: {
+  block: TimelineBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+}) {
+  const { current } = useAppContext();
+  const isNodeReport = reportType === "node";
+  const [ranges, setRanges] = useState<ProductRangeItem[]>([]);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/product-ranges?context=${current.id}`).then((r) => r.json()).then(setRanges).catch(() => {});
+    fetch(`/api/nodes?context=${current.id}`).then((r) => r.json()).then(setAllNodes).catch(() => {});
+  }, [current]);
+
+  const filteredRanges = ranges.filter((r) => search === "" || r.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredNodes = allNodes.filter((n) =>
+    search === "" ||
+    (n.hostname ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    (n.name ?? "").toLowerCase().includes(search.toLowerCase()) ||
+    n.ipAddress.includes(search)
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => updateBlock(block.id, { mode: "product_range" })}
+          className={`rounded-lg border px-3 py-2 text-sm font-medium ${block.mode === "product_range" ? "border-orange-500 bg-orange-50 dark:bg-orange-500/10 text-orange-700" : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600"}`}
+        >
+          {t("structure.timelineModeRange")}
+        </button>
+        <button
+          type="button"
+          onClick={() => updateBlock(block.id, { mode: "node" })}
+          className={`rounded-lg border px-3 py-2 text-sm font-medium ${block.mode === "node" ? "border-orange-500 bg-orange-50 dark:bg-orange-500/10 text-orange-700" : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600"}`}
+        >
+          {t("structure.timelineModeNode")}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.timelineHeight")} (mm)</span>
+          <input type="number" min={2} max={20} value={block.height} onChange={(e) => updateBlock(block.id, { height: Math.max(2, Number(e.target.value)) })} className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+        </label>
+        <label className="space-y-1.5">
+          <span className="text-xs font-medium text-slate-700 dark:text-slate-300">{t("structure.timelineRowSpacing")} (mm)</span>
+          <input type="number" min={10} max={60} value={block.rowSpacing} onChange={(e) => updateBlock(block.id, { rowSpacing: Math.max(10, Number(e.target.value)) })} className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm" />
+        </label>
+        <label className="flex items-center gap-2 mt-6">
+          <input type="checkbox" checked={block.showLegend} onChange={(e) => updateBlock(block.id, { showLegend: e.target.checked })} />
+          <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.timelineShowLegend")}</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-5 gap-2">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={block.showRelease} onChange={(e) => updateBlock(block.id, { showRelease: e.target.checked })} /><span className="text-xs">{t("structure.timelineRelease")}</span></label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={block.showEndOfSale} onChange={(e) => updateBlock(block.id, { showEndOfSale: e.target.checked })} /><span className="text-xs">{t("structure.timelineEoS")}</span></label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={block.showEndOfSupport} onChange={(e) => updateBlock(block.id, { showEndOfSupport: e.target.checked })} /><span className="text-xs">{t("structure.timelineEoSp")}</span></label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={block.showEndOfLife} onChange={(e) => updateBlock(block.id, { showEndOfLife: e.target.checked })} /><span className="text-xs">{t("structure.timelineEoL")}</span></label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={block.showNow} onChange={(e) => updateBlock(block.id, { showNow: e.target.checked })} /><span className="text-xs">{t("structure.timelineNow")}</span></label>
+      </div>
+
+      {block.mode === "product_range" && (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+          <label className="flex items-start gap-2 px-1 py-1 rounded cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!block.allProductRanges}
+              onChange={(e) => updateBlock(block.id, { allProductRanges: e.target.checked })}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.timelineAllRanges")}</span>
+              <p className="text-[10px] italic text-slate-400 mt-0.5">{t("structure.timelineAllRangesHint")}</p>
+            </div>
+          </label>
+
+          {!block.allProductRanges && (
+            <>
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.timelineProductRanges")} ({block.productRangeIds.length})</span>
+              </div>
+              <input type="text" placeholder={t("structure.searchProductRange")} value={search} onChange={(e) => setSearch(e.target.value)} className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
+              <div className="max-h-72 overflow-y-auto space-y-1">
+                {filteredRanges.map((pr) => {
+                  const checked = block.productRangeIds.includes(pr.id);
+                  return (
+                    <label key={pr.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) updateBlock(block.id, { productRangeIds: [...block.productRangeIds, pr.id] });
+                          else updateBlock(block.id, { productRangeIds: block.productRangeIds.filter((id) => id !== pr.id) });
+                        }}
+                      />
+                      <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{pr.name}</span>
+                      {pr.manufacturer && (
+                        <span className="text-[10px] font-mono text-slate-400 ml-auto">{pr.manufacturer.name}</span>
+                      )}
+                    </label>
+                  );
+                })}
+                {filteredRanges.length === 0 && (
+                  <p className="text-xs italic text-slate-400 px-2 py-2">{t("structure.timelineNoRanges")}</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {block.mode === "node" && !isNodeReport && (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.timelineNodes")} ({block.nodeIds.length})</span>
+          </div>
+          <input type="text" placeholder={t("structure.searchNodes")} value={search} onChange={(e) => setSearch(e.target.value)} className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs" />
+          <div className="max-h-72 overflow-y-auto space-y-1">
+            {filteredNodes.map((n) => {
+              const checked = block.nodeIds.includes(n.id);
+              return (
+                <label key={n.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      if (e.target.checked) updateBlock(block.id, { nodeIds: [...block.nodeIds, n.id] });
+                      else updateBlock(block.id, { nodeIds: block.nodeIds.filter((id) => id !== n.id) });
+                    }}
+                  />
+                  <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{n.hostname || n.name || n.ipAddress}</span>
+                  <span className="text-[10px] font-mono text-slate-400 ml-auto">{n.ipAddress}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {block.mode === "node" && isNodeReport && (
+        <p className="text-xs italic text-slate-400">{t("structure.timelineNodeAutoHint")}</p>
+      )}
+
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={!!block.pageBreakBefore} onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })} />
+        <span className="text-xs text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+      </label>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Reusable style section for chart_static + chart_inventory =======
+// =====================================================================
+
+interface ChartStyleSectionProps {
+  sort?: ChartSortConfig;
+  colorRules?: ChartColorRule[];
+  onSortChange: (sort: ChartSortConfig | undefined) => void;
+  onRulesChange: (rules: ChartColorRule[]) => void;
+  showValueRules: boolean;
+  t: (key: string, params?: Record<string, string>) => string;
+}
+
+function ChartStyleSection({ sort, colorRules, onSortChange, onRulesChange, showValueRules, t }: ChartStyleSectionProps) {
+  const rules = colorRules ?? [];
+  const updateRule = (idx: number, patch: Partial<ChartColorRule>) => {
+    onRulesChange(rules.map((r, k) => (k === idx ? { ...r, ...patch } : r)));
+  };
+  const addRule = () => {
+    onRulesChange([...rules, { id: uid(), kind: "label", textOp: "eq", text: "", color: "#ef4444" }]);
+  };
+  const removeRule = (idx: number) => onRulesChange(rules.filter((_, k) => k !== idx));
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartStyleSection")}</span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 items-center">
+        <span className="text-xs text-slate-600 dark:text-slate-400">{t("structure.chartSort")}</span>
+        <select
+          value={sort?.by ?? "none"}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "none") onSortChange(undefined);
+            else onSortChange({ by: v as "label" | "value", direction: sort?.direction ?? "asc" });
+          }}
+          className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs"
+        >
+          <option value="none">{t("structure.chartSortNone")}</option>
+          <option value="label">{t("structure.chartSortByLabel")}</option>
+          <option value="value">{t("structure.chartSortByValue")}</option>
+        </select>
+        <select
+          value={sort?.direction ?? "asc"}
+          onChange={(e) => sort && onSortChange({ ...sort, direction: e.target.value as "asc" | "desc" })}
+          disabled={!sort}
+          className="rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1.5 text-xs disabled:opacity-50"
+        >
+          <option value="asc">{t("structure.chartSortAsc")}</option>
+          <option value="desc">{t("structure.chartSortDesc")}</option>
+        </select>
+      </div>
+
+      <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">{t("structure.chartColorRules")} ({rules.length})</span>
+          <button onClick={addRule} className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-600 hover:bg-blue-100">
+            + {t("structure.chartAddColorRule")}
+          </button>
+        </div>
+        <p className="text-[10px] italic text-slate-400">{t("structure.chartColorRulesHint")}</p>
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {rules.map((r, idx) => (
+            <div key={r.id} className="rounded-md border border-slate-200 dark:border-slate-700 p-2">
+              <div className="grid grid-cols-12 gap-2 items-center">
+                <select
+                  value={r.kind}
+                  onChange={(e) => {
+                    const k = e.target.value as ChartColorRuleKind;
+                    if (k === "value") updateRule(idx, { kind: k, valueOp: "gt", valueA: 0, text: undefined, textOp: undefined });
+                    else updateRule(idx, { kind: k, textOp: "eq", text: "", valueOp: undefined, valueA: undefined, valueB: undefined });
+                  }}
+                  className="col-span-3 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                >
+                  <option value="label">{t("structure.chartColorRuleByLabel")}</option>
+                  <option value="series">{t("structure.chartColorRuleBySeries")}</option>
+                  {showValueRules && <option value="value">{t("structure.chartColorRuleByValue")}</option>}
+                </select>
+                {r.kind === "value" ? (
+                  <>
+                    <select
+                      value={r.valueOp ?? "gt"}
+                      onChange={(e) => updateRule(idx, { valueOp: e.target.value as ChartColorValueOp })}
+                      className="col-span-3 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                    >
+                      <option value="lt">&lt;</option>
+                      <option value="lte">≤</option>
+                      <option value="gt">&gt;</option>
+                      <option value="gte">≥</option>
+                      <option value="eq">=</option>
+                      <option value="between">{t("structure.chartColorRuleBetween")}</option>
+                    </select>
+                    <input
+                      type="number"
+                      value={r.valueA ?? 0}
+                      onChange={(e) => updateRule(idx, { valueA: Number(e.target.value) })}
+                      className={`${r.valueOp === "between" ? "col-span-2" : "col-span-4"} rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-mono`}
+                    />
+                    {r.valueOp === "between" && (
+                      <input
+                        type="number"
+                        value={r.valueB ?? 0}
+                        onChange={(e) => updateRule(idx, { valueB: Number(e.target.value) })}
+                        className="col-span-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs font-mono"
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <select
+                      value={r.textOp ?? "eq"}
+                      onChange={(e) => updateRule(idx, { textOp: e.target.value as ChartColorTextOp })}
+                      className="col-span-3 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                    >
+                      <option value="eq">=</option>
+                      <option value="neq">≠</option>
+                      <option value="contains">{t("structure.chartColorRuleContains")}</option>
+                      <option value="starts_with">{t("structure.chartColorRuleStartsWith")}</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={r.text ?? ""}
+                      onChange={(e) => updateRule(idx, { text: e.target.value })}
+                      className="col-span-4 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+                    />
+                  </>
+                )}
+                <input
+                  type="color"
+                  value={r.color}
+                  onChange={(e) => updateRule(idx, { color: e.target.value })}
+                  className="col-span-1 h-7 w-7 cursor-pointer"
+                />
+                <button onClick={() => removeRule(idx)} className="col-span-1 text-slate-400 hover:text-red-500 justify-self-end">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+

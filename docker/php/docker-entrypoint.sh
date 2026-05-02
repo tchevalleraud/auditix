@@ -55,7 +55,9 @@ if [ -f /var/www/bin/console ]; then
     php bin/console cache:warmup --no-interaction 2>/dev/null || true
 
     echo ">> Fixing permissions..."
-    chown -R www-data:www-data /var/www 2>/dev/null || true
+    # Only chown files not already owned by www-data — avoids ~70s walk on macOS
+    # bind mounts when ownership is already correct (steady-state restarts).
+    find /var/www \! -user www-data -exec chown www-data:www-data {} + 2>/dev/null || true
 fi
 
 # NGINX management: ensure www-data can write generated config and certificate files
