@@ -55,7 +55,7 @@ if [ -f /var/www/bin/console ]; then
     php bin/console cache:warmup --no-interaction 2>/dev/null || true
 
     echo ">> Fixing permissions..."
-    chown -R www-data:www-data /var/www/var 2>/dev/null || true
+    chown -R www-data:www-data /var/www 2>/dev/null || true
 fi
 
 # NGINX management: ensure www-data can write generated config and certificate files
