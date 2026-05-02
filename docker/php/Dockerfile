@@ -38,7 +38,8 @@ WORKDIR /var/www
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY worker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh
+COPY supervisor-entrypoint.sh /usr/local/bin/supervisor-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh /usr/local/bin/worker-entrypoint.sh /usr/local/bin/supervisor-entrypoint.sh
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["php-fpm"]

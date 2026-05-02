@@ -11,6 +11,7 @@ use App\Message\EvaluateComplianceMessage;
 use App\Service\ComplianceEvaluator;
 use App\Service\VulnerabilityScoreCalculator;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -23,6 +24,7 @@ class EvaluateComplianceMessageHandler
         private readonly HubInterface $hub,
         private readonly ComplianceEvaluator $evaluator,
         private readonly VulnerabilityScoreCalculator $vulnCalculator,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function __invoke(EvaluateComplianceMessage $message): void
@@ -39,6 +41,15 @@ class EvaluateComplianceMessageHandler
         // Collect all rules for this policy
         $rules = $this->collectPolicyRules($policy);
 
+        $this->logger->info('[compliance] start', [
+            'policyId' => $policy->getId(),
+            'policyName' => $policy->getName(),
+            'nodeId' => $node->getId(),
+            'ip' => $node->getIpAddress(),
+            'rulesTotal' => count($rules),
+        ]);
+        $t0 = microtime(true);
+
         // Delete old results for this (policy, node)
         $this->em->createQuery(
             'DELETE FROM App\Entity\ComplianceResult r WHERE r.policy = :policy AND r.node = :node'
@@ -50,6 +61,13 @@ class EvaluateComplianceMessageHandler
         $evaluated = 0;
 
         foreach ($rules as $rule) {
+            $this->logger->info('[compliance] rule', [
+                'policyId' => $policy->getId(),
+                'nodeId' => $node->getId(),
+                'ip' => $node->getIpAddress(),
+                'ruleId' => $rule->getId(),
+                'ruleName' => $rule->getName(),
+            ]);
             $evaluation = $this->evaluator->evaluateRule($rule, $node);
 
             $result = new ComplianceResult();
@@ -122,6 +140,15 @@ class EvaluateComplianceMessageHandler
         $node->setComplianceEvaluating(null);
 
         $this->em->flush();
+
+        $this->logger->info('[compliance] done', [
+            'policyId' => $policy->getId(),
+            'nodeId' => $node->getId(),
+            'ip' => $node->getIpAddress(),
+            'grade' => $grade,
+            'stats' => $stats,
+            'durationMs' => (int) ((microtime(true) - $t0) * 1000),
+        ]);
 
         // Publish completion
         $this->publishCompletion($policy, $node, $grade, $stats, count($rules));

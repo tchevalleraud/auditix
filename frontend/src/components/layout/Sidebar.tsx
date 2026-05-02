@@ -132,6 +132,7 @@ const adminNav: NavCategory[] = [
     label: "sidebar.catServer",
     items: [
       { key: "sidebar.health", href: "/admin/health", icon: HeartPulse },
+      { key: "sidebar.workers", href: "/admin/server/workers", icon: Cpu },
       { key: "sidebar.nginx", href: "/admin/server/nginx", icon: Globe },
       { key: "sidebar.logs", href: "/admin/logs", icon: ScrollText },
       { key: "sidebar.tasks", href: "/admin/tasks", icon: ListTodo },

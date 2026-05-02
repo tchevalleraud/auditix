@@ -141,17 +141,20 @@ class NginxConfigService
         $mode = $config->getMode();
 
         $upstreams = <<<NGINX
-upstream nextjs {
-    server node:3000;
-}
-
 upstream phpfpm {
     server php:9000;
 }
 
 NGINX;
 
+        // Resolve `node` and `mercure` via Docker's embedded DNS (127.0.0.11) at
+        // request time, so a container restart that gets a new IP doesn't break
+        // proxying until nginx is reloaded. Static `upstream` blocks cache the
+        // first resolution forever; using a variable in `proxy_pass` opts into
+        // resolver-driven re-resolution every `valid=...` seconds.
         $appLocations = <<<'NGINX'
+    resolver 127.0.0.11 valid=10s ipv6=off;
+
     client_max_body_size 50M;
 
     access_log /var/log/nginx/access.real.log;
@@ -183,7 +186,9 @@ NGINX;
     }
 
     location /.well-known/mercure {
-        proxy_pass http://mercure/.well-known/mercure;
+        # Use host:port without path so nginx forwards the original URI + query string
+        set $upstream_mercure mercure:80;
+        proxy_pass http://$upstream_mercure;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $host;
@@ -194,7 +199,8 @@ NGINX;
     }
 
     location / {
-        proxy_pass http://nextjs;
+        set $upstream_node node:3000;
+        proxy_pass http://$upstream_node;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -205,7 +211,8 @@ NGINX;
     }
 
     location /_next/webpack-hmr {
-        proxy_pass http://nextjs;
+        set $upstream_node_hmr node:3000;
+        proxy_pass http://$upstream_node_hmr;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -235,6 +242,24 @@ server {
 {$appLocations}
 }
 NGINX;
+            // If a certificate is still on disk, keep an HTTPS listener that
+            // explicitly clears any cached HSTS header (max-age=0) and redirects
+            // back to HTTP. Browsers that still try HTTPS first (cached redirect
+            // or HSTS) will hit this and unstick themselves without manual cache
+            // clearing.
+            if ($config->hasCertificate()) {
+                $servers .= "\n\n" . <<<NGINX
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name {$serverName};
+
+{$tlsBlock}
+    add_header Strict-Transport-Security "max-age=0" always;
+    return 301 http://\$host\$request_uri;
+}
+NGINX;
+            }
         } elseif ($mode === NginxConfig::MODE_HTTPS) {
             $servers = <<<NGINX
 server {

@@ -2,6 +2,8 @@
 
 namespace App\Controller\Api\Admin;
 
+use App\Repository\WorkerPoolSettingsRepository;
+use App\Service\RabbitMqManagementClient;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -10,6 +12,28 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/admin/health')]
 class HealthController extends AbstractController
 {
+    private const SCALABLE_SERVICES = [
+        'worker-monitoring',
+        'worker-collector',
+        'worker-generator',
+        'worker-compliance',
+        'worker-vulnerability',
+        'worker-system-update',
+    ];
+
+    private const SINGLETON_WORKERS = [
+        'worker-scheduler',
+        'worker-cleanup',
+        'worker-orchestrator',
+        'worker-supervisor',
+    ];
+
+    public function __construct(
+        private readonly WorkerPoolSettingsRepository $poolRepo,
+        private readonly RabbitMqManagementClient $rabbit,
+    ) {
+    }
+
     #[Route('', methods: ['GET'])]
     public function index(Connection $connection): JsonResponse
     {
@@ -34,13 +58,12 @@ class HealthController extends AbstractController
                 $entry['image'] = $container['image'] ?? null;
             }
 
-            // Enrich with version info
             if ($serviceName === 'php' && $entry['status'] === 'healthy') {
                 $entry['version'] = PHP_VERSION;
             }
             if ($serviceName === 'postgres' && $entry['status'] === 'healthy') {
                 try {
-                    $result = $connection->executeQuery("SELECT version()")->fetchOne();
+                    $result = $connection->executeQuery('SELECT version()')->fetchOne();
                     if ($result && preg_match('/PostgreSQL ([\d.]+)/', $result, $m)) {
                         $entry['version'] = $m[1];
                     }
@@ -50,27 +73,57 @@ class HealthController extends AbstractController
             $services[] = $entry;
         }
 
-        // Worker services — group by service name, count replicas
-        $workerServices = ['worker-scheduler', 'worker-monitoring', 'worker-collector', 'worker-generator', 'worker-cleanup'];
-        foreach ($workerServices as $workerName) {
-            $matching = array_filter($containers, fn($c) => ($c['service'] ?? '') === $workerName);
-            $total = count($matching);
-            $running = count(array_filter($matching, fn($c) => ($c['state'] ?? '') === 'running'));
+        // Singleton workers (not auto-scaled)
+        foreach (self::SINGLETON_WORKERS as $workerName) {
+            $services[] = $this->summarizeWorker($workerName, $containers);
+        }
 
-            $status = 'unknown';
-            if ($total > 0) {
-                $status = $running === $total ? 'healthy' : ($running > 0 ? 'degraded' : 'unhealthy');
+        // Scalable workers — enrich with pool settings + queue stats
+        $poolByService = [];
+        foreach ($this->poolRepo->findAllOrdered() as $settings) {
+            $poolByService[$settings->getServiceName()] = $settings;
+        }
+
+        foreach (self::SCALABLE_SERVICES as $workerName) {
+            $entry = $this->summarizeWorker($workerName, $containers);
+            $settings = $poolByService[$workerName] ?? null;
+            if ($settings !== null) {
+                $stats = $this->rabbit->getQueueStats($settings->getQueue());
+                $entry['pool'] = [
+                    'queue' => $settings->getQueue(),
+                    'enabled' => $settings->isEnabled(),
+                    'minContainers' => $settings->getMinContainers(),
+                    'maxContainers' => $settings->getMaxContainers(),
+                    'minProcesses' => $settings->getMinProcessesPerContainer(),
+                    'maxProcesses' => $settings->getMaxProcessesPerContainer(),
+                    'queueReady' => $stats['ready'] ?? null,
+                    'queueUnacked' => $stats['unacked'] ?? null,
+                    'queueConsumers' => $stats['consumers'] ?? null,
+                ];
             }
-
-            $services[] = [
-                'name' => $workerName,
-                'status' => $status,
-                'replicas' => $running,
-                'totalReplicas' => $total,
-            ];
+            $services[] = $entry;
         }
 
         return $this->json($services);
+    }
+
+    private function summarizeWorker(string $workerName, array $containers): array
+    {
+        $matching = array_filter($containers, fn($c) => ($c['service'] ?? '') === $workerName);
+        $total = count($matching);
+        $running = count(array_filter($matching, fn($c) => ($c['state'] ?? '') === 'running'));
+
+        $status = 'unknown';
+        if ($total > 0) {
+            $status = $running === $total ? 'healthy' : ($running > 0 ? 'degraded' : 'unhealthy');
+        }
+
+        return [
+            'name' => $workerName,
+            'status' => $status,
+            'replicas' => $running,
+            'totalReplicas' => $total,
+        ];
     }
 
     private function getDockerContainers(): array
@@ -110,7 +163,6 @@ class HealthController extends AbstractController
             $labels = $container['Labels'] ?? [];
             $state = strtolower($container['State'] ?? 'unknown');
 
-            // Extract health from Status field (e.g. "Up 3 hours (healthy)")
             $statusStr = $container['Status'] ?? '';
             $health = '';
             if (preg_match('/\((healthy|unhealthy)\)/', $statusStr, $m)) {

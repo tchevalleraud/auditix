@@ -19,6 +19,7 @@ use App\Service\ConditionTreeEvaluator;
 use App\Service\PolicyAutoAssigner;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
@@ -42,6 +43,7 @@ class CollectNodeMessageHandler
         private readonly ConditionTreeEvaluator $conditionTree,
         private readonly MessageBusInterface $bus,
         private readonly PolicyAutoAssigner $policyAutoAssigner,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function __invoke(CollectNodeMessage $message): void
@@ -61,6 +63,13 @@ class CollectNodeMessageHandler
         $collection->setStartedAt(new \DateTimeImmutable());
         $this->em->flush();
         $this->publishUpdate($collection);
+
+        $this->logger->info('[collect] start', [
+            'collectionId' => $collection->getId(),
+            'nodeId' => $node->getId(),
+            'ip' => $node->getIpAddress(),
+            'model' => $model?->getName(),
+        ]);
 
         $commands = $this->resolveCommands($model);
 
@@ -139,8 +148,24 @@ class CollectNodeMessageHandler
                         $lineSlug = $this->slugify($line);
                         $filepath = $ruleDir . '/' . $lineSlug . '.txt';
 
+                        $this->logger->info('[collect] cmd start', [
+                            'collectionId' => $collection->getId(),
+                            'nodeId' => $node->getId(),
+                            'ip' => $ip,
+                            'cmd' => $line,
+                            'cmdName' => $cmd->getName(),
+                        ]);
+                        $cmdT0 = microtime(true);
                         $ssh->write($line . "\n");
                         $response = $this->readFullResponse($ssh);
+                        $this->logger->info('[collect] cmd done', [
+                            'collectionId' => $collection->getId(),
+                            'nodeId' => $node->getId(),
+                            'ip' => $ip,
+                            'cmd' => $line,
+                            'durationMs' => (int) ((microtime(true) - $cmdT0) * 1000),
+                            'bytes' => strlen($response),
+                        ]);
 
                         // Remove the echoed command from the beginning of the response
                         $responseLines = explode("\n", $response);
@@ -172,6 +197,15 @@ class CollectNodeMessageHandler
             $collection->setCompletedAt(new \DateTimeImmutable());
             $this->em->flush();
             $this->publishUpdate($collection);
+
+            $this->logger->info('[collect] done', [
+                'collectionId' => $collection->getId(),
+                'nodeId' => $node->getId(),
+                'ip' => $ip,
+                'commandsTotal' => count($commands),
+                'commandsCompleted' => $completedCount,
+                'hasError' => $hasError,
+            ]);
 
             // Apply collection rules and extract inventory data
             $extractOk = false;
@@ -442,6 +476,13 @@ class CollectNodeMessageHandler
         $model = $node->getModel();
         $rules = $this->resolveRules($model);
 
+        $this->logger->info('[extract] start', [
+            'collectionId' => $collection->getId(),
+            'nodeId' => $node->getId(),
+            'ip' => $node->getIpAddress(),
+            'rulesTotal' => count($rules),
+        ]);
+
         if (empty($rules)) {
             return;
         }
@@ -470,6 +511,14 @@ class CollectNodeMessageHandler
         $nodeFieldUpdates = [];
 
         foreach ($rules as $rule) {
+            $this->logger->info('[extract] rule', [
+                'collectionId' => $collection->getId(),
+                'nodeId' => $node->getId(),
+                'ip' => $node->getIpAddress(),
+                'ruleId' => $rule->getId(),
+                'ruleName' => $rule->getName(),
+            ]);
+
             // Get file content for this rule
             $text = $this->getRuleOutput($rule, $baseDir, $collection, $node);
             if (!$text) {

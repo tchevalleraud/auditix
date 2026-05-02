@@ -75,7 +75,8 @@
     "api": "API",
     "settings": "Impostazioni",
     "mailServers": "Server di posta",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "Workers"
   },
   "topbar": {
     "backToContext": "Torna al contesto",
@@ -507,6 +508,36 @@
     "degraded": "Degradato",
     "infrastructure": "Infrastruttura",
     "workers": "Workers"
+  },
+  "admin_workers": {
+    "title": "Pool di worker",
+    "subtitle": "Configura il numero di container e processi per coda con auto-scaling",
+    "refresh": "Aggiorna",
+    "save": "Salva",
+    "saved": "Configurazione salvata",
+    "queue": "Coda",
+    "enabled": "Attivato",
+    "disabled": "Disattivato",
+    "minContainers": "Min. container",
+    "maxContainers": "Max. container",
+    "minProcesses": "Min. processi / container",
+    "maxProcesses": "Max. processi / container",
+    "scaleUpThreshold": "Soglia di scale-up (msg / consumer)",
+    "scaleUpThresholdHint": "Backlog per consumer che attiva un nuovo container",
+    "scaleDownIdle": "Inattivita prima dello scale-down (s)",
+    "scaleDownIdleHint": "Tempo senza messaggi prima di rimuovere un container",
+    "memoryLimit": "Limite memoria / processo",
+    "maxCapacity": "Capacita massima",
+    "processes": "processi",
+    "updatedAt": "Aggiornato il",
+    "live": {
+      "containers": "Container attivi",
+      "consumers": "Consumer",
+      "backlog": "Backlog"
+    },
+    "errors": {
+      "saveFailed": "Salvataggio non riuscito"
+    }
   },
   "admin_logs": {
     "title": "Log",
@@ -2057,6 +2088,7 @@
     "appliedReloaded": "Configurazione applicata e NGINX ricaricato.",
     "appliedNoReload": "Configurazione scritta ma NGINX non è stato ricaricato ({detail}). Ricarica il container manualmente.",
     "pendingApply": "Modifiche in sospeso non ancora inviate a NGINX.",
+    "hstsCleanupActive": "Modalità HTTP con un certificato ancora caricato: è attivo un listener HTTPS di pulizia. Restituisce \"Strict-Transport-Security: max-age=0\" e reindirizza su HTTP per cancellare qualsiasi HSTS rimasto nella cache del browser. Rimuovi il certificato per disattivare completamente l'ascolto su HTTPS.",
     "lastApplied": "Ultima applicazione: {date}",
     "certSection": "Certificato SSL",
     "noCert": "Nessun certificato caricato.",

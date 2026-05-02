@@ -5,6 +5,7 @@ namespace App\MessageHandler;
 use App\Entity\Collection;
 use App\Message\ProcessInventoryMessage;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
 use Symfony\Component\Mercure\HubInterface;
@@ -19,6 +20,7 @@ class ProcessInventoryMessageHandler
         private readonly HubInterface $hub,
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function __invoke(ProcessInventoryMessage $message): void
@@ -43,6 +45,7 @@ class ProcessInventoryMessageHandler
         $this->em->flush();
         $this->publishExtractionEvent($nodeId, 'running');
 
+        $t0 = microtime(true);
         try {
             $this->collectHandler->processInventoryRules($collection, $node, $baseDir);
             $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
@@ -50,6 +53,13 @@ class ProcessInventoryMessageHandler
             $this->em->flush();
             $this->publishExtractionEvent($nodeId, 'completed');
             $this->collectHandler->publishNodeUpdated($node);
+
+            $this->logger->info('[extract] done', [
+                'collectionId' => $collection->getId(),
+                'nodeId' => $nodeId,
+                'ip' => $node->getIpAddress(),
+                'durationMs' => (int) ((microtime(true) - $t0) * 1000),
+            ]);
 
             if ($message->shouldChainCompliance()) {
                 $this->collectHandler->dispatchComplianceForNode($node);
@@ -59,6 +69,12 @@ class ProcessInventoryMessageHandler
             $collection->setExtractError($e->getMessage());
             $this->em->flush();
             $this->publishExtractionEvent($nodeId, 'failed', $e->getMessage());
+            $this->logger->error('[extract] failed', [
+                'collectionId' => $collection->getId(),
+                'nodeId' => $nodeId,
+                'ip' => $node->getIpAddress(),
+                'error' => $e->getMessage(),
+            ]);
             throw $e;
         }
     }

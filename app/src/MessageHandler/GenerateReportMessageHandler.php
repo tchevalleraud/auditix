@@ -12,6 +12,7 @@ use App\Message\GenerateReportMessage;
 use App\Service\ComplianceEvaluator;
 use App\Service\InventoryNodeRuleEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Mercure\HubInterface;
 use Symfony\Component\Mercure\Update;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -25,6 +26,7 @@ class GenerateReportMessageHandler
         private readonly HubInterface $hub,
         private readonly InventoryNodeRuleEvaluator $inventoryRuleEvaluator,
         private readonly ComplianceEvaluator $complianceEvaluator,
+        private readonly LoggerInterface $logger,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -36,6 +38,14 @@ class GenerateReportMessageHandler
         $this->em->flush();
         $this->publish($report, 'running');
 
+        $this->logger->info('[generator] start', [
+            'reportId' => $report->getId(),
+            'reportName' => $report->getName(),
+            'type' => $report->getType(),
+            'nodes' => $report->getType() === Report::TYPE_NODE ? count($report->getNodes()) : null,
+        ]);
+        $t0 = microtime(true);
+
         try {
             $dir = sprintf('/var/www/var/reports/%d', $report->getId());
             if (!is_dir($dir)) {
@@ -43,9 +53,14 @@ class GenerateReportMessageHandler
             }
 
             if ($report->getType() === Report::TYPE_NODE) {
-                // Generate one PDF per associated node
                 $generatedFiles = [];
                 foreach ($report->getNodes() as $node) {
+                    $nodeT0 = microtime(true);
+                    $this->logger->info('[generator] node start', [
+                        'reportId' => $report->getId(),
+                        'nodeId' => $node->getId(),
+                        'ip' => $node->getIpAddress(),
+                    ]);
                     $nodeDir = $dir . '/node_' . $node->getId();
                     if (!is_dir($nodeDir)) {
                         mkdir($nodeDir, 0775, true);
@@ -53,6 +68,11 @@ class GenerateReportMessageHandler
                     $filePath = $nodeDir . '/report.pdf';
                     $this->generatePdf($report, $filePath, $node);
                     $generatedFiles[(string) $node->getId()] = sprintf('reports/%d/node_%d/report.pdf', $report->getId(), $node->getId());
+                    $this->logger->info('[generator] node done', [
+                        'reportId' => $report->getId(),
+                        'nodeId' => $node->getId(),
+                        'durationMs' => (int) ((microtime(true) - $nodeT0) * 1000),
+                    ]);
                 }
 
                 $report->setGeneratingStatus(null);
@@ -71,11 +91,20 @@ class GenerateReportMessageHandler
                 $this->em->flush();
             }
 
+            $this->logger->info('[generator] done', [
+                'reportId' => $report->getId(),
+                'durationMs' => (int) ((microtime(true) - $t0) * 1000),
+            ]);
+
             $this->publish($report, 'completed');
         } catch (\Throwable $e) {
             $report->setGeneratingStatus(null);
             $this->em->flush();
             $this->publish($report, 'failed');
+            $this->logger->error('[generator] failed', [
+                'reportId' => $report->getId(),
+                'error' => $e->getMessage(),
+            ]);
             throw $e;
         }
     }
@@ -771,6 +800,15 @@ class GenerateReportMessageHandler
             $block = $blocks[$i];
             $type = $block['type'] ?? '';
             $nextType = ($i + 1 < $blockCount) ? ($blocks[$i + 1]['type'] ?? '') : '';
+
+            $this->logger->info('[generator] block', [
+                'reportId' => $report?->getId(),
+                'nodeId' => $forNode?->getId(),
+                'index' => $i,
+                'total' => $blockCount,
+                'type' => $type,
+                'level' => $block['level'] ?? null,
+            ]);
 
             if ($type === 'heading') {
                 $level = $block['level'] ?? 1;

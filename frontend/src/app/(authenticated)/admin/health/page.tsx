@@ -12,6 +12,18 @@ import {
   HeartPulse,
 } from "lucide-react";
 
+interface PoolInfo {
+  queue: string;
+  enabled: boolean;
+  minContainers: number;
+  maxContainers: number;
+  minProcesses: number;
+  maxProcesses: number;
+  queueReady: number | null;
+  queueUnacked: number | null;
+  queueConsumers: number | null;
+}
+
 interface Service {
   name: string;
   status: "healthy" | "unhealthy" | "degraded" | "unknown";
@@ -19,6 +31,7 @@ interface Service {
   image?: string;
   replicas?: number;
   totalReplicas?: number;
+  pool?: PoolInfo;
 }
 
 export default function HealthPage() {
@@ -176,6 +189,35 @@ export default function HealthPage() {
                     {service.replicas}/{service.totalReplicas} replica{(service.totalReplicas ?? 0) !== 1 ? "s" : ""}
                   </span>
                 </div>
+                {service.pool && (
+                  <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <div className="flex justify-between">
+                      <span>containers</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {service.replicas} / {service.pool.maxContainers} (min {service.pool.minContainers})
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>processes/container</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {service.pool.minProcesses}–{service.pool.maxProcesses}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>consumers</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {service.pool.queueConsumers ?? "—"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>backlog</span>
+                      <span className="font-mono text-slate-700 dark:text-slate-300">
+                        {service.pool.queueReady ?? "—"}
+                        {service.pool.queueUnacked ? ` (+${service.pool.queueUnacked})` : ""}
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -83,7 +83,8 @@
     "settings": "Parametres",
     "authentication": "Authentification",
     "mailServers": "Serveurs mail",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "Workers"
   },
   "topbar": {
     "backToContext": "Retour au contexte",
@@ -620,6 +621,36 @@
     "degraded": "Degrade",
     "infrastructure": "Infrastructure",
     "workers": "Workers"
+  },
+  "admin_workers": {
+    "title": "Pools de workers",
+    "subtitle": "Configurez le nombre de containers et de processus par queue avec auto-scaling.",
+    "refresh": "Actualiser",
+    "save": "Enregistrer",
+    "saved": "Configuration enregistrée",
+    "queue": "Queue",
+    "enabled": "Actif",
+    "disabled": "Inactif",
+    "minContainers": "Containers min",
+    "maxContainers": "Containers max",
+    "minProcesses": "Processus min / container",
+    "maxProcesses": "Processus max / container",
+    "scaleUpThreshold": "Seuil scale-up (msg / consumer)",
+    "scaleUpThresholdHint": "Backlog moyen par consumer pour déclencher l'ajout d'un container.",
+    "scaleDownIdle": "Idle avant scale-down (s)",
+    "scaleDownIdleHint": "Durée sans message avant retrait d'un container.",
+    "memoryLimit": "Limite mémoire / processus",
+    "maxCapacity": "Capacité max",
+    "processes": "processus",
+    "updatedAt": "Modifié le",
+    "live": {
+      "containers": "Containers actifs",
+      "consumers": "Consumers",
+      "backlog": "En attente"
+    },
+    "errors": {
+      "saveFailed": "Échec de l'enregistrement"
+    }
   },
   "admin_logs": {
     "title": "Logs",
@@ -2603,6 +2634,7 @@
     "appliedReloaded": "Configuration appliquée et NGINX rechargé.",
     "appliedNoReload": "Configuration écrite mais NGINX n'a pas pu être rechargé ({detail}). Rechargez le conteneur manuellement.",
     "pendingApply": "Des modifications sont en attente et n'ont pas encore été poussées à NGINX.",
+    "hstsCleanupActive": "Mode HTTP avec un certificat encore présent : un écouteur HTTPS de nettoyage est actif. Il renvoie « Strict-Transport-Security: max-age=0 » et redirige vers HTTP afin de désactiver tout HSTS encore en cache côté navigateur. Supprimez le certificat pour stopper complètement l'écoute HTTPS.",
     "lastApplied": "Dernière application : {date}",
     "certSection": "Certificat SSL",
     "noCert": "Aucun certificat téléversé.",

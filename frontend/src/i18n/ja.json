@@ -75,7 +75,8 @@
     "api": "API",
     "settings": "設定",
     "mailServers": "メールサーバー",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "ワーカー"
   },
   "topbar": {
     "backToContext": "コンテキストに戻る",
@@ -507,6 +508,36 @@
     "degraded": "劣化",
     "infrastructure": "インフラストラクチャ",
     "workers": "ワーカー"
+  },
+  "admin_workers": {
+    "title": "ワーカープール",
+    "subtitle": "キューごとのコンテナ数とプロセス数を自動スケーリングで設定",
+    "refresh": "更新",
+    "save": "保存",
+    "saved": "設定を保存しました",
+    "queue": "キュー",
+    "enabled": "有効",
+    "disabled": "無効",
+    "minContainers": "最小コンテナ数",
+    "maxContainers": "最大コンテナ数",
+    "minProcesses": "最小プロセス数 / コンテナ",
+    "maxProcesses": "最大プロセス数 / コンテナ",
+    "scaleUpThreshold": "スケールアップ閾値 (メッセージ / コンシューマー)",
+    "scaleUpThresholdHint": "新しいコンテナを起動するコンシューマーごとのバックログ",
+    "scaleDownIdle": "スケールダウンまでのアイドル時間 (秒)",
+    "scaleDownIdleHint": "コンテナを削除するまでメッセージがない時間",
+    "memoryLimit": "メモリ上限 / プロセス",
+    "maxCapacity": "最大キャパシティ",
+    "processes": "プロセス",
+    "updatedAt": "更新日時",
+    "live": {
+      "containers": "アクティブなコンテナ",
+      "consumers": "コンシューマー",
+      "backlog": "バックログ"
+    },
+    "errors": {
+      "saveFailed": "保存に失敗しました"
+    }
   },
   "admin_logs": {
     "title": "ログ",
@@ -2057,6 +2088,7 @@
     "appliedReloaded": "設定を適用し NGINX を再読み込みしました。",
     "appliedNoReload": "設定は書き込まれましたが NGINX を再読み込みできませんでした({detail})。コンテナを手動で再読み込みしてください。",
     "pendingApply": "未反映の変更があります。",
+    "hstsCleanupActive": "HTTP モードで証明書がまだ登録されているため、HTTPS クリーンアップ用のリスナーが稼働中です。「Strict-Transport-Security: max-age=0」を返し HTTP にリダイレクトすることで、ブラウザにキャッシュされた HSTS を解除します。HTTPS の待ち受けを完全に停止するには証明書を削除してください。",
     "lastApplied": "最終適用: {date}",
     "certSection": "SSL 証明書",
     "noCert": "証明書がアップロードされていません。",

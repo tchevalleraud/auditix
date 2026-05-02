@@ -247,6 +247,13 @@ export default function NginxConfigPage() {
         </div>
       )}
 
+      {config.mode === "http" && config.hasCertificate && (
+        <div className="flex items-start gap-2 rounded-lg border border-blue-200 dark:border-blue-500/30 bg-blue-50 dark:bg-blue-500/10 px-4 py-3 text-sm text-blue-800 dark:text-blue-300">
+          <Info className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{t("admin_nginx.hstsCleanupActive")}</span>
+        </div>
+      )}
+
       {/* Mode + server name */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
         <div className="border-b border-slate-100 dark:border-slate-800 px-5 py-4">

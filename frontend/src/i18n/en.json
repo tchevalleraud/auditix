@@ -83,7 +83,8 @@
     "settings": "Settings",
     "authentication": "Authentication",
     "mailServers": "Mail servers",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "Workers"
   },
   "topbar": {
     "backToContext": "Back to context",
@@ -648,6 +649,36 @@
     "degraded": "Degraded",
     "infrastructure": "Infrastructure",
     "workers": "Workers"
+  },
+  "admin_workers": {
+    "title": "Worker pools",
+    "subtitle": "Configure container and process counts per queue with auto-scaling",
+    "refresh": "Refresh",
+    "save": "Save",
+    "saved": "Configuration saved",
+    "queue": "Queue",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "minContainers": "Min containers",
+    "maxContainers": "Max containers",
+    "minProcesses": "Min processes / container",
+    "maxProcesses": "Max processes / container",
+    "scaleUpThreshold": "Scale-up threshold (msg / consumer)",
+    "scaleUpThresholdHint": "Per-consumer backlog that triggers a new container",
+    "scaleDownIdle": "Idle before scale-down (s)",
+    "scaleDownIdleHint": "Time without messages before removing a container",
+    "memoryLimit": "Memory limit / process",
+    "maxCapacity": "Max capacity",
+    "processes": "processes",
+    "updatedAt": "Updated at",
+    "live": {
+      "containers": "Active containers",
+      "consumers": "Consumers",
+      "backlog": "Backlog"
+    },
+    "errors": {
+      "saveFailed": "Save failed"
+    }
   },
   "admin_logs": {
     "title": "Logs",
@@ -2631,6 +2662,7 @@
     "appliedReloaded": "Configuration applied and NGINX reloaded.",
     "appliedNoReload": "Configuration written but NGINX could not be reloaded ({detail}). Reload the container manually.",
     "pendingApply": "Pending changes have not been pushed to NGINX yet.",
+    "hstsCleanupActive": "HTTP mode with a certificate still uploaded: a HTTPS cleanup listener is active. It returns \"Strict-Transport-Security: max-age=0\" and redirects to HTTP to clear any HSTS still cached client-side. Remove the certificate to stop listening on HTTPS entirely.",
     "lastApplied": "Last applied: {date}",
     "certSection": "SSL certificate",
     "noCert": "No certificate uploaded yet.",

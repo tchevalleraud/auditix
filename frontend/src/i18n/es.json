@@ -75,7 +75,8 @@
     "api": "API",
     "settings": "Configuracion",
     "mailServers": "Servidores de correo",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "Workers"
   },
   "topbar": {
     "backToContext": "Volver al contexto",
@@ -507,6 +508,36 @@
     "degraded": "Degradado",
     "infrastructure": "Infraestructura",
     "workers": "Workers"
+  },
+  "admin_workers": {
+    "title": "Pools de workers",
+    "subtitle": "Configurar la cantidad de contenedores y procesos por cola con autoescalado",
+    "refresh": "Actualizar",
+    "save": "Guardar",
+    "saved": "Configuracion guardada",
+    "queue": "Cola",
+    "enabled": "Activado",
+    "disabled": "Desactivado",
+    "minContainers": "Min. contenedores",
+    "maxContainers": "Max. contenedores",
+    "minProcesses": "Min. procesos / contenedor",
+    "maxProcesses": "Max. procesos / contenedor",
+    "scaleUpThreshold": "Umbral de escalado (msg / consumidor)",
+    "scaleUpThresholdHint": "Backlog por consumidor que dispara un nuevo contenedor",
+    "scaleDownIdle": "Inactividad antes de reducir (s)",
+    "scaleDownIdleHint": "Tiempo sin mensajes antes de eliminar un contenedor",
+    "memoryLimit": "Limite de memoria / proceso",
+    "maxCapacity": "Capacidad maxima",
+    "processes": "procesos",
+    "updatedAt": "Actualizado el",
+    "live": {
+      "containers": "Contenedores activos",
+      "consumers": "Consumidores",
+      "backlog": "Backlog"
+    },
+    "errors": {
+      "saveFailed": "Error al guardar"
+    }
   },
   "admin_logs": {
     "title": "Logs",
@@ -2057,6 +2088,7 @@
     "appliedReloaded": "Configuración aplicada y NGINX recargado.",
     "appliedNoReload": "Configuración escrita pero NGINX no se pudo recargar ({detail}). Recarga el contenedor manualmente.",
     "pendingApply": "Hay cambios pendientes que aún no se han enviado a NGINX.",
+    "hstsCleanupActive": "Modo HTTP con un certificado aún cargado: hay un listener HTTPS de limpieza activo. Devuelve \"Strict-Transport-Security: max-age=0\" y redirige a HTTP para borrar cualquier HSTS aún en caché del navegador. Elimina el certificado para detener por completo la escucha en HTTPS.",
     "lastApplied": "Última aplicación: {date}",
     "certSection": "Certificado SSL",
     "noCert": "Aún no hay certificado.",

@@ -75,7 +75,8 @@
     "api": "API",
     "settings": "Einstellungen",
     "mailServers": "Mail-Server",
-    "nginx": "NGINX"
+    "nginx": "NGINX",
+    "workers": "Workers"
   },
   "topbar": {
     "backToContext": "Zuruck zum Kontext",
@@ -507,6 +508,36 @@
     "degraded": "Eingeschrankt",
     "infrastructure": "Infrastruktur",
     "workers": "Workers"
+  },
+  "admin_workers": {
+    "title": "Worker-Pools",
+    "subtitle": "Container- und Prozessanzahl pro Queue mit Auto-Skalierung konfigurieren",
+    "refresh": "Aktualisieren",
+    "save": "Speichern",
+    "saved": "Konfiguration gespeichert",
+    "queue": "Queue",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
+    "minContainers": "Min. Container",
+    "maxContainers": "Max. Container",
+    "minProcesses": "Min. Prozesse / Container",
+    "maxProcesses": "Max. Prozesse / Container",
+    "scaleUpThreshold": "Skalierungsschwelle (Nachr. / Consumer)",
+    "scaleUpThresholdHint": "Backlog pro Consumer, der einen neuen Container ausloest",
+    "scaleDownIdle": "Leerlauf vor Verkleinerung (s)",
+    "scaleDownIdleHint": "Zeit ohne Nachrichten, bevor ein Container entfernt wird",
+    "memoryLimit": "Speicherlimit / Prozess",
+    "maxCapacity": "Maximale Kapazitaet",
+    "processes": "Prozesse",
+    "updatedAt": "Aktualisiert am",
+    "live": {
+      "containers": "Aktive Container",
+      "consumers": "Consumer",
+      "backlog": "Backlog"
+    },
+    "errors": {
+      "saveFailed": "Speichern fehlgeschlagen"
+    }
   },
   "admin_logs": {
     "title": "Logs",
@@ -2057,6 +2088,7 @@
     "appliedReloaded": "Konfiguration angewendet und NGINX neu geladen.",
     "appliedNoReload": "Konfiguration geschrieben, aber NGINX konnte nicht neu geladen werden ({detail}). Container manuell neu laden.",
     "pendingApply": "Es gibt ausstehende Änderungen, die noch nicht an NGINX gesendet wurden.",
+    "hstsCleanupActive": "HTTP-Modus mit weiterhin hinterlegtem Zertifikat: ein HTTPS-Bereinigungs-Listener ist aktiv. Er sendet \"Strict-Transport-Security: max-age=0\" und leitet auf HTTP um, um clientseitig noch zwischengespeichertes HSTS zu löschen. Entfernen Sie das Zertifikat, um HTTPS vollständig zu deaktivieren.",
     "lastApplied": "Zuletzt angewendet: {date}",
     "certSection": "SSL-Zertifikat",
     "noCert": "Noch kein Zertifikat hochgeladen.",
