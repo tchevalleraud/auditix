@@ -19,9 +19,41 @@ export const locales: { code: Locale; label: string }[] = [
   { code: "ja", label: "\u65E5\u672C\u8A9E" },
 ];
 
-const translations: Record<Locale, Record<string, Record<string, string>>> = {
-  en, fr, es, it, de, ja,
+type TranslationNode = string | { [key: string]: TranslationNode };
+type TranslationTree = Record<string, TranslationNode>;
+
+const translations: Record<Locale, TranslationTree> = {
+  en: en as TranslationTree,
+  fr: fr as TranslationTree,
+  es: es as TranslationTree,
+  it: it as TranslationTree,
+  de: de as TranslationTree,
+  ja: ja as TranslationTree,
 };
+
+function resolvePath(tree: TranslationTree, path: string[]): string | undefined {
+  let node: TranslationNode | undefined = tree as TranslationNode;
+  for (const segment of path) {
+    if (node === null || typeof node !== "object") {
+      node = undefined;
+      break;
+    }
+    node = (node as { [key: string]: TranslationNode })[segment];
+    if (node === undefined) break;
+  }
+  if (typeof node === "string") return node;
+
+  if (path.length >= 2) {
+    const section = tree[path[0]];
+    if (section !== null && typeof section === "object") {
+      const flat = (section as { [key: string]: TranslationNode })[
+        path.slice(1).join(".")
+      ];
+      if (typeof flat === "string") return flat;
+    }
+  }
+  return undefined;
+}
 
 interface I18nContextValue {
   locale: Locale;
@@ -58,9 +90,11 @@ export default function I18nProvider({ children }: { children: React.ReactNode }
   };
 
   const t = (key: string, params?: Record<string, string>): string => {
-    const [section, ...rest] = key.split(".");
-    const k = rest.join(".");
-    let value = translations[locale]?.[section]?.[k] ?? key;
+    const path = key.split(".");
+    let value =
+      resolvePath(translations[locale], path) ??
+      (locale === "en" ? undefined : resolvePath(translations.en, path)) ??
+      key;
 
     if (params) {
       for (const [param, val] of Object.entries(params)) {
