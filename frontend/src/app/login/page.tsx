@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Loader2, KeyRound, ServerCog } from "lucide-react";
-import { useI18n } from "@/components/I18nProvider";
+import { ShieldCheck, Loader2, KeyRound, ServerCog, Moon, Sun, ChevronDown } from "lucide-react";
+import { useI18n, locales } from "@/components/I18nProvider";
+import { useTheme } from "@/components/ThemeProvider";
+import flagComponents from "@/components/Flags";
 import { useBackendReady } from "@/hooks/useBackendReady";
 
 type Step = "credentials" | "totp";
@@ -33,7 +35,10 @@ function pickTextColor(bg: string | null | undefined): string {
 
 export default function LoginPage() {
   const router = useRouter();
-  const { t } = useI18n();
+  const { t, locale, setLocale } = useI18n();
+  const { setTheme, resolved } = useTheme();
+  const [langOpen, setLangOpen] = useState(false);
+  const langRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<Step>("credentials");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -47,6 +52,16 @@ export default function LoginPage() {
   const backend = useBackendReady();
   const backendReady = backend.status === "ready";
   const backendBlocked = backend.status === "not_ready" || backend.status === "checking";
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (langRef.current && !langRef.current.contains(e.target as Node)) {
+        setLangOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     if (!backendReady) return;
@@ -342,6 +357,57 @@ export default function LoginPage() {
             </div>
           </form>
         )}
+
+        <div className="mt-6 flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="relative" ref={langRef}>
+              <button
+                type="button"
+                onClick={() => setLangOpen(!langOpen)}
+                className="flex items-center gap-1 rounded-lg px-2 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                {(() => { const Flag = flagComponents[locale]; return <Flag size={20} />; })()}
+                <ChevronDown className={`h-3.5 w-3.5 text-slate-400 dark:text-slate-500 transition-transform ${langOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {langOpen && (
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg py-1 z-50">
+                  {locales.map((l) => (
+                    <button
+                      key={l.code}
+                      type="button"
+                      onClick={() => {
+                        setLocale(l.code);
+                        setLangOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-sm transition-colors ${
+                        locale === l.code
+                          ? "bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white"
+                          : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      }`}
+                    >
+                      {(() => { const Flag = flagComponents[l.code]; return <Flag size={20} />; })()}
+                      <span className="font-medium">{l.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setTheme(resolved === "light" ? "dark" : "light")}
+              aria-label={resolved === "light" ? "Switch to dark theme" : "Switch to light theme"}
+              className="rounded-lg p-2 text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+            >
+              {resolved === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+            </button>
+          </div>
+
+          <span className="text-xs text-slate-400 dark:text-slate-500">
+            Auditix v{process.env.APP_VERSION}
+          </span>
+        </div>
       </div>
     </div>
   );
