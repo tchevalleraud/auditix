@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\SnmpCredential;
+use App\Service\CredentialTester;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -14,6 +15,30 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/snmp-credentials')]
 class SnmpCredentialController extends AbstractController
 {
+    public function __construct(
+        private readonly CredentialTester $tester,
+    ) {}
+
+    #[Route('/standard-oids', methods: ['GET'])]
+    public function standardOids(): JsonResponse
+    {
+        return $this->json(CredentialTester::standardOids());
+    }
+
+    #[Route('/{id}/test', methods: ['POST'])]
+    public function test(SnmpCredential $credential, Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true) ?? [];
+        $ipAddress = trim((string) ($data['ipAddress'] ?? ''));
+        $oid = isset($data['oid']) ? trim((string) $data['oid']) : null;
+
+        if ($ipAddress === '') {
+            return $this->json(['error' => 'ipAddress is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        return $this->json($this->tester->testSnmp($credential, $ipAddress, $oid));
+    }
+
     private function serialize(SnmpCredential $c): array
     {
         return [

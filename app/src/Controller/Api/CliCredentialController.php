@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\CliCredential;
+use App\Service\CredentialTester;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -14,6 +15,23 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/cli-credentials')]
 class CliCredentialController extends AbstractController
 {
+    public function __construct(
+        private readonly CredentialTester $tester,
+    ) {}
+
+    #[Route('/{id}/test', methods: ['POST'])]
+    public function test(CliCredential $credential, Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true) ?? [];
+        $ipAddress = trim((string) ($data['ipAddress'] ?? ''));
+
+        if ($ipAddress === '') {
+            return $this->json(['error' => 'ipAddress is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        return $this->json($this->tester->testCli($credential, $ipAddress));
+    }
+
     private function serialize(CliCredential $c): array
     {
         return [

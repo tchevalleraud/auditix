@@ -12,7 +12,34 @@ import {
   KeyRound,
   Network,
   Terminal,
+  Activity,
+  X,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
+
+interface StandardOid {
+  oid: string;
+  label: string;
+  description: string;
+}
+
+interface TestResult {
+  success: boolean;
+  output: string;
+  command?: string;
+  durationMs: number;
+}
+
+interface ProfileTestResult {
+  snmp: TestResult | null;
+  cli: TestResult | null;
+}
+
+type TestTarget =
+  | { kind: "snmp"; id: number; name: string }
+  | { kind: "cli"; id: number; name: string }
+  | { kind: "profile"; id: number; name: string; hasSnmp: boolean; hasCli: boolean };
 
 interface SnmpCred {
   id: number;
@@ -79,6 +106,16 @@ export default function ProfilesPage() {
   const [snmpPrivPassword, setSnmpPrivPassword] = useState("");
   const [savingSnmp, setSavingSnmp] = useState(false);
 
+  // Test connection
+  const [testTarget, setTestTarget] = useState<TestTarget | null>(null);
+  const [testIp, setTestIp] = useState("");
+  const [testOidValue, setTestOidValue] = useState("1.3.6.1.2.1.1.5.0");
+  const [testCustomOid, setTestCustomOid] = useState("");
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | ProfileTestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+  const [standardOids, setStandardOids] = useState<StandardOid[]>([]);
+
   // CLI
   const [cliCredentials, setCliCredentials] = useState<CliCred[]>([]);
   const [cliSearch, setCliSearch] = useState("");
@@ -108,6 +145,65 @@ export default function ProfilesPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    fetch("/api/snmp-credentials/standard-oids")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: StandardOid[]) => setStandardOids(data))
+      .catch(() => setStandardOids([]));
+  }, []);
+
+  // --- Test connection ---
+  const openTest = (target: TestTarget) => {
+    setTestTarget(target);
+    setTestIp("");
+    setTestOidValue("1.3.6.1.2.1.1.5.0");
+    setTestCustomOid("");
+    setTestResult(null);
+    setTestError(null);
+  };
+
+  const closeTest = () => {
+    if (testRunning) return;
+    setTestTarget(null);
+    setTestResult(null);
+    setTestError(null);
+  };
+
+  const runTest = async () => {
+    if (!testTarget || !testIp.trim()) return;
+    setTestRunning(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      const oid = testOidValue === "__custom__" ? testCustomOid.trim() : testOidValue;
+      const url =
+        testTarget.kind === "snmp"
+          ? `/api/snmp-credentials/${testTarget.id}/test`
+          : testTarget.kind === "cli"
+            ? `/api/cli-credentials/${testTarget.id}/test`
+            : `/api/profiles/${testTarget.id}/test`;
+      const body =
+        testTarget.kind === "cli"
+          ? { ipAddress: testIp.trim() }
+          : { ipAddress: testIp.trim(), oid: oid || undefined };
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setTestError(err.error ?? `HTTP ${res.status}`);
+      } else {
+        setTestResult(await res.json());
+      }
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTestRunning(false);
+    }
+  };
 
   const dateLocale =
     locale === "fr" ? "fr-FR" : locale === "de" ? "de-DE" : locale === "es" ? "es-ES" : locale === "it" ? "it-IT" : locale === "ja" ? "ja-JP" : "en-US";
@@ -393,6 +489,22 @@ export default function ProfilesPage() {
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1">
                           <button
+                            onClick={() =>
+                              openTest({
+                                kind: "profile",
+                                id: profile.id,
+                                name: profile.name,
+                                hasSnmp: !!profile.snmpCredential,
+                                hasCli: !!profile.cliCredential,
+                              })
+                            }
+                            disabled={!profile.snmpCredential && !profile.cliCredential}
+                            title={t("profiles.test")}
+                            className="rounded-lg p-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 disabled:opacity-30 disabled:hover:bg-transparent disabled:cursor-not-allowed transition-colors"
+                          >
+                            <Activity className="h-4 w-4" />
+                          </button>
+                          <button
                             onClick={() => handleDeleteProfile(profile)}
                             className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
                           >
@@ -584,6 +696,13 @@ export default function ProfilesPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openTest({ kind: "snmp", id: cred.id, name: cred.name })}
+                            title={t("profiles.test")}
+                            className="rounded-lg p-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+                          >
+                            <Activity className="h-4 w-4" />
+                          </button>
                           <button onClick={() => handleDeleteSnmp(cred)} className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -743,6 +862,13 @@ export default function ProfilesPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => openTest({ kind: "cli", id: cred.id, name: cred.name })}
+                            title={t("profiles.test")}
+                            className="rounded-lg p-2 text-slate-400 hover:text-emerald-600 dark:text-slate-500 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 transition-colors"
+                          >
+                            <Activity className="h-4 w-4" />
+                          </button>
                           <button onClick={() => handleDeleteCli(cred)} className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -756,6 +882,141 @@ export default function ProfilesPage() {
           </div>
         </div>
       )}
+
+      {/* ========== TEST CONNECTION MODAL ========== */}
+      {testTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 backdrop-blur-sm p-4" onClick={closeTest}>
+          <div
+            className="w-full max-w-2xl rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2">
+                {testTarget.kind === "snmp" && <Network className="h-4 w-4 text-slate-500" />}
+                {testTarget.kind === "cli" && <Terminal className="h-4 w-4 text-slate-500" />}
+                {testTarget.kind === "profile" && <KeyRound className="h-4 w-4 text-slate-500" />}
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {t("profiles.testConnectionTitle")} — {testTarget.name}
+                </h3>
+              </div>
+              <button onClick={closeTest} disabled={testRunning} className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("profiles.testIpAddress")}</label>
+                <input
+                  type="text"
+                  value={testIp}
+                  onChange={(e) => setTestIp(e.target.value)}
+                  placeholder={t("profiles.testIpAddressPlaceholder")}
+                  className={inputClass}
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === "Enter" && testIp.trim() && !testRunning) runTest(); }}
+                />
+              </div>
+
+              {(testTarget.kind === "snmp" || testTarget.kind === "profile") && (
+                <div className="space-y-1.5">
+                  <label className={labelClass}>{t("profiles.testOid")}</label>
+                  <select value={testOidValue} onChange={(e) => setTestOidValue(e.target.value)} className={selectClass}>
+                    {standardOids.map((o) => (
+                      <option key={o.oid} value={o.oid}>
+                        {o.label} ({o.oid}) — {o.description}
+                      </option>
+                    ))}
+                    <option value="__custom__">{t("profiles.testOidCustom")}</option>
+                  </select>
+                  {testOidValue === "__custom__" && (
+                    <input
+                      type="text"
+                      value={testCustomOid}
+                      onChange={(e) => setTestCustomOid(e.target.value)}
+                      placeholder="1.3.6.1.2.1.1.5.0"
+                      className={inputClass}
+                    />
+                  )}
+                </div>
+              )}
+
+              {testError && (
+                <div className="rounded-lg border border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-950/30 px-4 py-3 text-sm text-red-700 dark:text-red-300">
+                  {testError}
+                </div>
+              )}
+
+              {testResult && testTarget.kind !== "profile" && (
+                <TestResultPanel result={testResult as TestResult} t={t} />
+              )}
+
+              {testResult && testTarget.kind === "profile" && (
+                <div className="space-y-3">
+                  {(testResult as ProfileTestResult).snmp && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t("profiles.testSnmpResult")}</div>
+                      <TestResultPanel result={(testResult as ProfileTestResult).snmp!} t={t} />
+                    </div>
+                  )}
+                  {(testResult as ProfileTestResult).cli && (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">{t("profiles.testCliResult")}</div>
+                      <TestResultPanel result={(testResult as ProfileTestResult).cli!} t={t} />
+                    </div>
+                  )}
+                  {!((testResult as ProfileTestResult).snmp) && !((testResult as ProfileTestResult).cli) && (
+                    <div className="text-sm text-slate-500 dark:text-slate-400">{t("profiles.testNoCredentials")}</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
+              <button type="button" onClick={closeTest} disabled={testRunning} className="rounded-lg border border-slate-200 dark:border-slate-700 px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 transition-colors">
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={runTest}
+                disabled={testRunning || !testIp.trim()}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+              >
+                {testRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+                {testRunning ? t("profiles.testRunning") : t("profiles.testRun")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TestResultPanel({ result, t }: { result: TestResult; t: (k: string, params?: Record<string, string>) => string }) {
+  return (
+    <div
+      className={`rounded-lg border px-4 py-3 ${
+        result.success
+          ? "border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-950/30"
+          : "border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-950/30"
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className={`flex items-center gap-2 text-sm font-medium ${result.success ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300"}`}>
+          {result.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+          {result.success ? t("profiles.testSuccess") : t("profiles.testFailure")}
+        </div>
+        <span className="text-xs text-slate-500 dark:text-slate-400">{t("profiles.testDuration", { ms: String(result.durationMs) })}</span>
+      </div>
+      {result.command && (
+        <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          <span className="font-semibold">{t("profiles.testCommand")}:</span> <code className="font-mono">{result.command}</code>
+        </div>
+      )}
+      <pre className="mt-2 max-h-64 overflow-auto rounded bg-slate-900 dark:bg-slate-950 p-3 text-xs text-slate-100 whitespace-pre-wrap break-all">
+        {result.output}
+      </pre>
     </div>
   );
 }

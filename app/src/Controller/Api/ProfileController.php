@@ -6,6 +6,7 @@ use App\Entity\CliCredential;
 use App\Entity\Context;
 use App\Entity\Profile;
 use App\Entity\SnmpCredential;
+use App\Service\CredentialTester;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -16,6 +17,30 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/profiles')]
 class ProfileController extends AbstractController
 {
+    public function __construct(
+        private readonly CredentialTester $tester,
+    ) {}
+
+    #[Route('/{id}/test', methods: ['POST'])]
+    public function test(Profile $profile, Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true) ?? [];
+        $ipAddress = trim((string) ($data['ipAddress'] ?? ''));
+        $oid = isset($data['oid']) ? trim((string) $data['oid']) : null;
+
+        if ($ipAddress === '') {
+            return $this->json(['error' => 'ipAddress is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $snmp = $profile->getSnmpCredential();
+        $cli = $profile->getCliCredential();
+
+        return $this->json([
+            'snmp' => $snmp ? $this->tester->testSnmp($snmp, $ipAddress, $oid) : null,
+            'cli' => $cli ? $this->tester->testCli($cli, $ipAddress) : null,
+        ]);
+    }
+
     private function serialize(Profile $p): array
     {
         $snmp = $p->getSnmpCredential();
