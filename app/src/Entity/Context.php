@@ -69,6 +69,9 @@ class Context
     #[ORM\Column(length: 20, nullable: true)]
     private ?string $lastVulnerabilitySyncStatus = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $nodeColumnsConfig = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -219,4 +222,6 @@ class Context
     public function setLastVulnerabilitySyncAt(?\DateTimeImmutable $v): static { $this->lastVulnerabilitySyncAt = $v; return $this; }
     public function getLastVulnerabilitySyncStatus(): ?string { return $this->lastVulnerabilitySyncStatus; }
     public function setLastVulnerabilitySyncStatus(?string $v): static { $this->lastVulnerabilitySyncStatus = $v; return $this; }
+    public function getNodeColumnsConfig(): ?array { return $this->nodeColumnsConfig; }
+    public function setNodeColumnsConfig(?array $v): static { $this->nodeColumnsConfig = $v; return $this; }
 }

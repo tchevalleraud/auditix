@@ -595,6 +595,187 @@ class NodeController extends AbstractController
         ]);
     }
 
+    /**
+     * Bulk extras endpoint: returns enriched per-node data needed by configurable
+     * columns (numeric scores, penalties, CVE counts by severity, system update
+     * lifecycle info, optional inventory cell values).
+     *
+     * Query params:
+     *   - context (required, int)
+     *   - fields (optional, comma list): compliance, vulnerability, systemUpdate, inventory
+     *   - inventoryColumns (optional, JSON array): [{"category":"X","column":"Y"}, ...]
+     */
+    #[Route('/extras', methods: ['GET'])]
+    public function extras(
+        Request $request,
+        EntityManagerInterface $em,
+        SystemUpdateScoreCalculator $suCalc,
+        VulnerabilityScoreCalculator $vulnCalc,
+    ): JsonResponse {
+        $contextId = $request->query->getInt('context');
+        if (!$contextId) return $this->json(new \stdClass());
+
+        $fieldsRaw = $request->query->get('fields', 'compliance,vulnerability,systemUpdate');
+        $fields = array_filter(array_map('trim', explode(',', $fieldsRaw)));
+        $want = array_flip($fields);
+
+        $nodes = $em->getRepository(Node::class)->findBy(['context' => $contextId]);
+        if (empty($nodes)) return $this->json(new \stdClass());
+
+        $nodeIds = array_map(fn(Node $n) => $n->getId(), $nodes);
+        $byId = [];
+        foreach ($nodeIds as $id) {
+            $byId[$id] = [];
+        }
+
+        $gradeNumeric = ['A' => 95.0, 'B' => 82.5, 'C' => 67.5, 'D' => 52.5, 'E' => 37.5, 'F' => 15.0];
+
+        // Compliance: count results by status per node
+        if (isset($want['compliance'])) {
+            $rows = $em->getConnection()->fetchAllAssociative(
+                'SELECT cr.node_id AS nid, cr.status, COUNT(*) AS cnt
+                 FROM compliance_result cr
+                 WHERE cr.node_id IN (:ids) AND cr.status <> :skipped
+                 GROUP BY cr.node_id, cr.status',
+                ['ids' => $nodeIds, 'skipped' => 'skipped'],
+                ['ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER]
+            );
+
+            $stats = [];
+            foreach ($rows as $r) {
+                $nid = (int) $r['nid'];
+                if (!isset($stats[$nid])) {
+                    $stats[$nid] = ['compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0];
+                }
+                if (isset($stats[$nid][$r['status']])) {
+                    $stats[$nid][$r['status']] = (int) $r['cnt'];
+                }
+            }
+
+            foreach ($nodes as $node) {
+                $nid = $node->getId();
+                $s = $stats[$nid] ?? null;
+                if ($s) {
+                    $total = $s['compliant'] + $s['non_compliant'] + $s['error'] + $s['not_applicable'];
+                    $penalty = $s['non_compliant'] + $s['error'];
+                    $numeric = $total > 0 ? round(($s['compliant'] / $total) * 100, 1) : null;
+                } else {
+                    $penalty = 0;
+                    $numeric = null;
+                }
+                $byId[$nid]['compliancePenalty'] = $penalty;
+                $byId[$nid]['complianceScoreNumeric'] = $numeric;
+                $byId[$nid]['complianceCounts'] = $s ?? ['compliant' => 0, 'non_compliant' => 0, 'error' => 0, 'not_applicable' => 0];
+            }
+        }
+
+        // Vulnerability: per-node CVE counts by severity + penalty
+        if (isset($want['vulnerability'])) {
+            foreach ($nodes as $node) {
+                $nid = $node->getId();
+                if (!$node->getModel()) {
+                    $byId[$nid]['vulnerability'] = [
+                        'total' => 0,
+                        'bySeverity' => [],
+                        'penalty' => 0,
+                        'numeric' => null,
+                    ];
+                    continue;
+                }
+                $r = $vulnCalc->calculateForNode($node);
+                $byId[$nid]['vulnerability'] = [
+                    'total' => $r['cveCount'],
+                    'bySeverity' => $r['bySeverity'],
+                    'penalty' => $r['penaltySum'],
+                    'numeric' => max(0.0, 100.0 - $r['penaltySum']),
+                ];
+            }
+        }
+
+        // System update: lifecycle + recommended version
+        if (isset($want['systemUpdate'])) {
+            foreach ($nodes as $node) {
+                $nid = $node->getId();
+                $range = $suCalc->findProductRange($node);
+                $r = $suCalc->calculateForNode($node);
+                $byId[$nid]['systemUpdate'] = [
+                    'recommendedVersion' => $range?->getRecommendedVersion(),
+                    'releaseDate' => $range?->getReleaseDate()?->format('c'),
+                    'endOfSaleDate' => $range?->getEndOfSaleDate()?->format('c'),
+                    'endOfSupportDate' => $range?->getEndOfSupportDate()?->format('c'),
+                    'endOfLifeDate' => $range?->getEndOfLifeDate()?->format('c'),
+                    'numeric' => $r['score'],
+                ];
+            }
+        }
+
+        // Global score numeric: derived from letter
+        foreach ($nodes as $node) {
+            $nid = $node->getId();
+            $byId[$nid]['scoreNumeric'] = $node->getScore() ? ($gradeNumeric[$node->getScore()] ?? null) : null;
+            $byId[$nid]['vulnerabilityScoreNumeric'] = $byId[$nid]['vulnerabilityScoreNumeric']
+                ?? ($node->getVulnerabilityScore() ? ($gradeNumeric[$node->getVulnerabilityScore()] ?? null) : null);
+            $byId[$nid]['systemUpdateScoreNumeric'] = $byId[$nid]['systemUpdateScoreNumeric']
+                ?? ($node->getSystemUpdateScore() ? ($gradeNumeric[$node->getSystemUpdateScore()] ?? null) : null);
+        }
+
+        // Inventory: parameterized columns
+        if (isset($want['inventory'])) {
+            $invRaw = $request->query->get('inventoryColumns');
+            $invCols = $invRaw ? json_decode($invRaw, true) : [];
+            if (is_array($invCols) && !empty($invCols)) {
+                $byColKey = [];
+                foreach ($invCols as $c) {
+                    if (!is_array($c)) continue;
+                    $cat = $c['category'] ?? null;
+                    $col = $c['column'] ?? null;
+                    if (!is_string($cat) || !is_string($col)) continue;
+                    $key = $cat . '||' . $col;
+                    $byColKey[$key] = ['category' => $cat, 'column' => $col];
+                }
+
+                if (!empty($byColKey)) {
+                    $catNames = array_unique(array_column($byColKey, 'category'));
+                    $colLabels = array_unique(array_column($byColKey, 'column'));
+                    $rows = $em->getConnection()->fetchAllAssociative(
+                        'SELECT e.node_id AS nid, e.category_name, e.col_label, e.entry_key, e.value
+                         FROM node_inventory_entry e
+                         WHERE e.node_id IN (:ids)
+                           AND e.category_name IN (:cats)
+                           AND e.col_label IN (:cols)',
+                        [
+                            'ids' => $nodeIds,
+                            'cats' => array_values($catNames),
+                            'cols' => array_values($colLabels),
+                        ],
+                        [
+                            'ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER,
+                            'cats' => \Doctrine\DBAL\ArrayParameterType::STRING,
+                            'cols' => \Doctrine\DBAL\ArrayParameterType::STRING,
+                        ]
+                    );
+
+                    $perNodeInv = [];
+                    foreach ($rows as $r) {
+                        $nid = (int) $r['nid'];
+                        $key = $r['category_name'] . '||' . $r['col_label'];
+                        if (!isset($byColKey[$key])) continue;
+                        if (!isset($perNodeInv[$nid])) $perNodeInv[$nid] = [];
+                        if (!isset($perNodeInv[$nid][$key])) $perNodeInv[$nid][$key] = [];
+                        $perNodeInv[$nid][$key][] = $r['value'];
+                    }
+
+                    foreach ($nodes as $node) {
+                        $nid = $node->getId();
+                        $byId[$nid]['inventory'] = $perNodeInv[$nid] ?? new \stdClass();
+                    }
+                }
+            }
+        }
+
+        return $this->json($byId);
+    }
+
     #[Route('/{id}/system-updates', methods: ['GET'])]
     public function systemUpdates(Node $node, SystemUpdateScoreCalculator $calculator): JsonResponse
     {

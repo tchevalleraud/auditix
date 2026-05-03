@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import {
@@ -14,10 +15,8 @@ import {
   Tag,
   X,
   CheckCircle2,
-  XCircle,
   ShieldCheck,
   ScanSearch,
-  ArrowUpCircle,
   HelpCircle,
   Ban,
   Minus,
@@ -36,6 +35,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import CsvImportModal from "@/components/CsvImportModal";
+import { renderCell, getSortValue, type NodeRow, type NodeExtras, type FieldRef } from "@/components/NodeCellRenderer";
 
 interface NodeTag {
   id: number;
@@ -48,32 +48,39 @@ interface NodeDynamicTag extends NodeTag {
   ruleName: string | null;
 }
 
-interface NodeItem {
-  id: number;
-  name: string | null;
-  ipAddress: string;
-  hostname: string | null;
-  score: string | null;
-  policy: string;
-  discoveredModel: string | null;
-  discoveredVersion: string | null;
-  productModel: string | null;
-  systemUpdateScore: string | null;
-  complianceEvaluating: string | null;
-  isReachable: boolean | null;
-  lastPingAt: string | null;
-  monitoringEnabled: boolean;
-  manufacturer: { id: number; name: string; logo: string | null } | null;
-  model: { id: number; name: string } | null;
-  profile: { id: number; name: string } | null;
-  tags: NodeTag[];
-  dynamicTags: NodeDynamicTag[];
-  createdAt: string;
+interface NodeItem extends NodeRow {}
+
+interface CatalogField {
+  key: string;
+  category: string;
+  sortable?: boolean;
+  reactive?: boolean;
+  primaryOnly?: boolean;
+  parameterized?: boolean;
+}
+
+interface CatalogCategory { key: string; labelKey: string; }
+
+interface ColumnDef {
+  id: string;
+  primary: FieldRef;
+  secondary: FieldRef | null;
+  labelOverride?: string;
+  align?: "left" | "center" | "right";
+  width?: "auto" | "min";
+  minWidth?: number;
+}
+
+interface ColumnsConfig {
+  columns: ColumnDef[];
+  pageSize?: number;
+  defaultSort?: { column: string; direction: "asc" | "desc" } | null;
 }
 
 export default function NodesPage() {
   const { t, locale } = useI18n();
   const { current, userInfo } = useAppContext();
+  const router = useRouter();
   const [nodes, setNodes] = useState<NodeItem[]>([]);
   const [search, setSearch] = useState("");
   const [fetchLoading, setFetchLoading] = useState(true);
@@ -90,31 +97,10 @@ export default function NodesPage() {
   // Product ranges for version upgrade detection
   const [productRanges, setProductRanges] = useState<{ name: string; recommendedVersion: string | null }[]>([]);
 
-  /** Check if a node's version is behind the recommended version from its product range */
-  const getUpgradeInfo = useCallback((node: NodeItem): { needsUpgrade: boolean; recommended: string } | null => {
-    if (!node.productModel || !node.discoveredVersion) return null;
-    // Find matching product ranges (by hardware name prefix in productModel)
-    const candidates = productRanges.filter((pr) => {
-      const hwName = pr.name.replace(/\s*\(.*$/, "");
-      return node.productModel!.toLowerCase().includes(hwName.toLowerCase());
-    });
-    if (candidates.length === 0) return null;
-    // Disambiguate by version major (Fabric Engine 7-9.x vs Switch Engine/EXOS 30+.x)
-    let match = candidates[0];
-    if (candidates.length > 1) {
-      const vMajor = parseInt(node.discoveredVersion.split(".")[0], 10);
-      for (const c of candidates) {
-        if (!c.recommendedVersion) continue;
-        const rMajor = parseInt(c.recommendedVersion.split(".")[0], 10);
-        if (Math.abs(vMajor - rMajor) <= 5) { match = c; break; }
-      }
-    }
-    if (!match.recommendedVersion) return null;
-    // Compare versions
-    const cmp = node.discoveredVersion.localeCompare(match.recommendedVersion, undefined, { numeric: true, sensitivity: "base" });
-    if (cmp >= 0) return null; // up to date
-    return { needsUpgrade: true, recommended: match.recommendedVersion };
-  }, [productRanges]);
+  // Columns config + catalog + extras
+  const [columnsConfig, setColumnsConfig] = useState<ColumnsConfig | null>(null);
+  const [catalog, setCatalog] = useState<{ categories: CatalogCategory[]; fields: CatalogField[] } | null>(null);
+  const [extras, setExtras] = useState<Record<number, NodeExtras>>({});
 
   // Action dropdown, bulk delete, bulk add
   const [actionMenuOpen, setActionMenuOpen] = useState<false | "actions" | "add" | "edit">(false);
@@ -186,6 +172,63 @@ export default function NodesPage() {
     const res = await fetch(`/api/nodes/compliance-stats?context=${current.id}`);
     if (res.ok) setComplianceStats(await res.json());
   }, [current]);
+
+  // Load catalog (once) and config (per context)
+  useEffect(() => {
+    fetch("/api/nodes/columns-catalog").then((r) => r.ok ? r.json() : null).then((c) => { if (c) setCatalog(c); });
+  }, []);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/contexts/${current.id}/node-columns-config`).then((r) => r.ok ? r.json() : null).then((c) => { if (c) setColumnsConfig(c); });
+  }, [current]);
+
+  // Derive needed extras "fields" + inventory column refs from the columns config
+  const extrasNeeded = useMemo(() => {
+    if (!columnsConfig || !catalog) return { fields: [] as string[], inventoryCols: [] as { category: string; column: string }[] };
+    const cats = new Set<string>();
+    const inv: { category: string; column: string }[] = [];
+    const collectField = (ref: FieldRef | null) => {
+      if (!ref) return;
+      const def = catalog.fields.find((f) => f.key === ref.field);
+      if (!def) return;
+      if (def.category === "score") {
+        if (ref.field.startsWith("compliance")) cats.add("compliance");
+        if (ref.field.startsWith("vulnerability")) cats.add("vulnerability");
+        if (ref.field.startsWith("systemUpdate")) cats.add("systemUpdate");
+        if (ref.field === "score") { /* derived from node directly */ }
+      } else if (def.category === "vulnerability") {
+        cats.add("vulnerability");
+      } else if (def.category === "systemUpdate") {
+        cats.add("systemUpdate");
+      } else if (def.category === "inventory") {
+        cats.add("inventory");
+        const c = typeof ref.params?.category === "string" ? ref.params.category : null;
+        const col = typeof ref.params?.column === "string" ? ref.params.column : null;
+        if (c && col) inv.push({ category: c, column: col });
+      }
+    };
+    for (const c of columnsConfig.columns) {
+      collectField(c.primary);
+      collectField(c.secondary);
+    }
+    return { fields: Array.from(cats), inventoryCols: inv };
+  }, [columnsConfig, catalog]);
+
+  const loadExtras = useCallback(async () => {
+    if (!current) return;
+    if (extrasNeeded.fields.length === 0) { setExtras({}); return; }
+    const params = new URLSearchParams();
+    params.set("context", String(current.id));
+    params.set("fields", extrasNeeded.fields.join(","));
+    if (extrasNeeded.inventoryCols.length > 0) {
+      params.set("inventoryColumns", JSON.stringify(extrasNeeded.inventoryCols));
+    }
+    const res = await fetch(`/api/nodes/extras?${params.toString()}`);
+    if (res.ok) setExtras(await res.json());
+  }, [current, extrasNeeded]);
+
+  useEffect(() => { loadExtras(); }, [loadExtras]);
 
   // Load active collections (pending/running) on mount to restore status indicators
   const loadActiveCollections = useCallback(async () => {
@@ -319,6 +362,7 @@ export default function NodesPage() {
           return next;
         });
         loadComplianceStats();
+        loadExtras();
       }
       // Nodes without a compliance policy go through RecalculateNodeScoreMessage,
       // which only emits vulnerability.score. Treat it like an evaluation end
@@ -336,13 +380,14 @@ export default function NodesPage() {
           delete next[nodeId];
           return next;
         });
+        loadExtras();
       }
     };
     return () => es.close();
-  }, [current, nodes.length, loadComplianceStats]);
+  }, [current, nodes.length, loadComplianceStats, loadExtras]);
 
   // Sort + pagination, persisted in user.preferences
-  type SortKey = "hostname" | "ipAddress" | "manufacturer" | "discoveredModel" | "discoveredVersion" | "policy" | "score";
+  type SortKey = string;
   type SortRule = { column: SortKey; direction: "asc" | "desc" };
   const PAGE_SIZES = [5, 10, 15, 25, 50, 100, 200];
   const [sorts, setSorts] = useState<SortRule[]>([]);
@@ -350,15 +395,25 @@ export default function NodesPage() {
   const [page, setPage] = useState(1);
   const prefsLoaded = useRef(false);
 
-  // Load sort + pageSize from user preferences once
+  // Initial sort + pageSize: context defaults first, then user prefs override
   useEffect(() => {
-    if (!userInfo || prefsLoaded.current) return;
+    if (!userInfo || !columnsConfig || prefsLoaded.current) return;
     const prefs = userInfo.preferences as { nodes?: { sorts?: SortRule[]; pageSize?: number } } | null;
     const nodesPref = prefs?.nodes;
-    if (nodesPref?.sorts && Array.isArray(nodesPref.sorts)) setSorts(nodesPref.sorts);
-    if (nodesPref?.pageSize && PAGE_SIZES.includes(nodesPref.pageSize)) setPageSize(nodesPref.pageSize);
+
+    if (nodesPref?.sorts && Array.isArray(nodesPref.sorts)) {
+      setSorts(nodesPref.sorts);
+    } else if (columnsConfig.defaultSort) {
+      setSorts([{ column: columnsConfig.defaultSort.column, direction: columnsConfig.defaultSort.direction }]);
+    }
+
+    if (nodesPref?.pageSize && PAGE_SIZES.includes(nodesPref.pageSize)) {
+      setPageSize(nodesPref.pageSize);
+    } else if (columnsConfig.pageSize && PAGE_SIZES.includes(columnsConfig.pageSize)) {
+      setPageSize(columnsConfig.pageSize);
+    }
     prefsLoaded.current = true;
-  }, [userInfo]);
+  }, [userInfo, columnsConfig]);
 
   // Persist sort + pageSize on every change. keepalive ensures the request
   // completes even if the user refreshes/navigates immediately after the click.
@@ -386,20 +441,8 @@ export default function NodesPage() {
     });
   };
 
-  const getSortValue = (n: NodeItem, key: SortKey): string | number => {
-    switch (key) {
-      case "hostname": return (n.hostname || n.name || "").toLowerCase();
-      case "ipAddress": {
-        const parts = n.ipAddress.split(".").map((p) => parseInt(p, 10));
-        if (parts.length !== 4 || parts.some(isNaN)) return 0;
-        return ((parts[0] * 256 + parts[1]) * 256 + parts[2]) * 256 + parts[3];
-      }
-      case "manufacturer": return (n.manufacturer?.name || "").toLowerCase();
-      case "discoveredModel": return (n.discoveredModel || "").toLowerCase();
-      case "discoveredVersion": return (n.discoveredVersion || "").toLowerCase();
-      case "policy": return n.policy || "";
-      case "score": return n.score || "Z";
-    }
+  const sortValueFor = (n: NodeItem, column: SortKey): string | number => {
+    return getSortValue(n, { field: column }, extras[n.id], complianceStats[n.id]);
   };
 
   const searched = useMemo(() => {
@@ -421,8 +464,8 @@ export default function NodesPage() {
     const sorted = [...searched];
     sorted.sort((a, b) => {
       for (const s of sorts) {
-        const va = getSortValue(a, s.column);
-        const vb = getSortValue(b, s.column);
+        const va = sortValueFor(a, s.column);
+        const vb = sortValueFor(b, s.column);
         if (va < vb) return s.direction === "asc" ? -1 : 1;
         if (va > vb) return s.direction === "asc" ? 1 : -1;
       }
@@ -710,16 +753,20 @@ export default function NodesPage() {
   const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-  const scoreColors: Record<string, string> = {
-    A: "bg-emerald-500",
-    B: "bg-lime-500",
-    C: "bg-yellow-500",
-    D: "bg-orange-500",
-    E: "bg-red-400",
-    F: "bg-red-600",
+  const getDefaultWidth = (fieldKey: string): "auto" | "min" => {
+    const autoFields = ["hostname", "name", "ipAddress", "manufacturer", "model", "profile", "productModel", "discoveredModel", "inventory"];
+    return autoFields.includes(fieldKey) ? "auto" : "min";
+  };
+  const getColumnWidthClass = (col: ColumnDef): string => {
+    const w = col.width ?? getDefaultWidth(col.primary.field);
+    return w === "min" ? "w-px whitespace-nowrap" : "";
+  };
+  const getColumnMinWidthStyle = (col: ColumnDef): { minWidth: string } | undefined => {
+    if (!col.minWidth || col.minWidth <= 0) return undefined;
+    return { minWidth: `${col.minWidth}px` };
   };
 
-  if (fetchLoading) {
+  if (fetchLoading || !columnsConfig) {
     return (
       <div className="flex items-center justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-slate-900 dark:text-white" />
@@ -727,13 +774,14 @@ export default function NodesPage() {
     );
   }
 
-  const renderSortableTh = (column: SortKey, label: string, align: "left" | "center" = "left", extra = "") => {
+  const renderSortableTh = (column: SortKey, label: string, align: "left" | "center" | "right" = "left", extra = "", key?: string, style?: { minWidth: string }) => {
     const idx = sorts.findIndex((s) => s.column === column);
     const active = idx !== -1;
     const dir = active ? sorts[idx].direction : null;
-    const alignClass = align === "center" ? "text-center justify-center" : "text-left";
+    const alignClass = align === "center" ? "text-center justify-center" : align === "right" ? "text-right justify-end" : "text-left";
+    const thAlignClass = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
     return (
-      <th className={`px-4 py-3 text-${align} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider ${extra}`}>
+      <th key={key ?? column} style={style} className={`px-4 py-3 ${thAlignClass} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider ${extra}`}>
         <button
           onClick={(e) => toggleSort(column, e.shiftKey)}
           className={`group inline-flex items-center gap-1 ${alignClass} ${active ? "text-slate-700 dark:text-slate-200" : ""} hover:text-slate-700 dark:hover:text-slate-200 transition-colors`}
@@ -883,30 +931,48 @@ export default function NodesPage() {
                     className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
                   />
                 </th>
-                {renderSortableTh("score", t("nodes.colScore"), "center", "w-12")}
-                {renderSortableTh("hostname", t("nodes.colHostname"), "left")}
-                {renderSortableTh("ipAddress", t("nodes.colIpAddress"), "left")}
-                {renderSortableTh("manufacturer", t("nodes.colManufacturer"), "left")}
-                {renderSortableTh("discoveredModel", t("nodes.colDiscoveredModel"), "left")}
-                {renderSortableTh("discoveredVersion", t("nodes.colDiscoveredVersion"), "left")}
-                {renderSortableTh("policy", t("nodes.colPolicy"), "center")}
-                <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider min-w-[160px]">
-                  <span className="flex items-center gap-1">
-                    {t("nodes.colCompliance")}
-                    <button
-                      onClick={() => setComplianceHelpOpen(true)}
-                      className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-                    >
-                      <HelpCircle className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                </th>
+                {(columnsConfig?.columns ?? []).map((col) => {
+                  const def = catalog?.fields.find((f) => f.key === col.primary.field);
+                  const sortable = !!def?.sortable;
+                  const headerKey = `nodeColumns.header.${col.primary.field}`;
+                  const fieldKey = `nodeColumns.field.${col.primary.field}`;
+                  const headerCandidate = t(headerKey);
+                  const fallback = headerCandidate === headerKey ? t(fieldKey) : headerCandidate;
+                  const label = col.labelOverride
+                    || (col.primary.field === "inventory" && typeof col.primary.params?.column === "string" ? col.primary.params.column : fallback);
+                  const defaultAlign: "left" | "center" | "right" =
+                    ["score", "policy", "complianceBar", "complianceBarOnly"].includes(col.primary.field) || col.primary.field.startsWith("cve") ? "center" : "left";
+                  const align: "left" | "center" | "right" = col.align ?? defaultAlign;
+                  const isCompliance = col.primary.field === "complianceBar" || col.primary.field === "complianceBarOnly";
+
+                  const widthClass = getColumnWidthClass(col);
+                  const minWidthStyle = getColumnMinWidthStyle(col);
+                  if (!sortable) {
+                    const alignClass = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
+                    return (
+                      <th key={col.id} style={minWidthStyle} className={`px-4 py-3 ${alignClass} ${widthClass} text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider`}>
+                        <span className="inline-flex items-center gap-1">
+                          {label}
+                          {isCompliance && (
+                            <button
+                              onClick={() => setComplianceHelpOpen(true)}
+                              className="text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
+                            >
+                              <HelpCircle className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </span>
+                      </th>
+                    );
+                  }
+                  return renderSortableTh(col.primary.field, label, align, widthClass, col.id, minWidthStyle);
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-5 py-12 text-center">
+                  <td colSpan={1 + (columnsConfig?.columns.length ?? 0)} className="px-5 py-12 text-center">
                     <Server className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
                     <p className="text-sm text-slate-400 dark:text-slate-500">
                       {search ? t("nodes.noResult") : t("nodes.noNodes")}
@@ -915,8 +981,16 @@ export default function NodesPage() {
                 </tr>
               ) : (
                 paged.map((node) => (
-                  <tr key={node.id} className={`hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${selected.has(node.id) ? "bg-slate-50 dark:bg-slate-800/30" : ""}`}>
-                    <td className="px-4 py-2 text-center">
+                  <tr
+                    key={node.id}
+                    onClick={(e) => {
+                      const target = e.target as HTMLElement;
+                      if (target.closest('input,button,a,label')) return;
+                      router.push(`/nodes/${node.id}`);
+                    }}
+                    className={`cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors ${selected.has(node.id) ? "bg-slate-50 dark:bg-slate-800/30" : ""}`}
+                  >
+                    <td className="px-4 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selected.has(node.id)}
@@ -924,242 +998,48 @@ export default function NodesPage() {
                         className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-400/20"
                       />
                     </td>
-
-                    {/* Score */}
-                    <td className="px-4 py-2 text-center">
-                      <div className="flex items-center justify-center">
-                        {complianceStatus[node.id] ? (
-                          <div className="flex h-7 w-7 items-center justify-center">
-                            <Loader2 className={`h-5 w-5 animate-spin ${complianceStatus[node.id] === "running" ? "text-blue-500" : "text-slate-400"}`} />
-                          </div>
-                        ) : node.score ? (
-                          <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold text-white ${scoreColors[node.score] ?? "bg-slate-300 dark:bg-slate-600"}`}>
-                            {node.score}
-                          </div>
-                        ) : (
-                          <div className="h-7 w-7 rounded-full bg-slate-200 dark:bg-slate-700" />
-                        )}
-                      </div>
-                    </td>
-
-                    {/* Hostname */}
-                    <td className="px-4 py-2">
-                      <Link href={`/nodes/${node.id}`} className="group flex items-center gap-2">
-                        <div>
-                          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-900 dark:text-slate-100 group-hover:underline">
-                            {node.hostname || node.name || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
-                            {collectStatus[node.id] && (
-                              collectStatus[node.id] === "completed" ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                              ) : collectStatus[node.id] === "failed" ? (
-                                <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                              ) : collectStatus[node.id] === "running" ? (
-                                <Loader2 className="h-4 w-4 animate-spin text-blue-500 shrink-0" />
-                              ) : (
-                                <Loader2 className="h-4 w-4 animate-spin text-slate-400 shrink-0" />
-                              )
-                            )}
-                            {extractStatus[node.id] && (
-                              extractStatus[node.id] === "completed" ? (
-                                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-                              ) : extractStatus[node.id] === "failed" ? (
-                                <XCircle className="h-4 w-4 text-red-500 shrink-0" />
-                              ) : extractStatus[node.id] === "running" ? (
-                                <ScanSearch className="h-4 w-4 animate-pulse text-amber-500 shrink-0" />
-                              ) : (
-                                <ScanSearch className="h-4 w-4 animate-pulse text-slate-400 shrink-0" />
-                              )
-                            )}
-                          </span>
-                          {(() => {
-                            const dyn = node.dynamicTags ?? [];
-                            const manualIds = new Set((node.tags ?? []).map((t) => t.id));
-                            const dynUnique = dyn.filter((t) => !manualIds.has(t.id));
-                            const allTags = [
-                              ...(node.tags ?? []).map((t) => ({ ...t, dynamic: false, ruleName: null as string | null })),
-                              ...dynUnique.map((t) => ({ ...t, dynamic: true })),
-                            ];
-                            if (allTags.length === 0) return null;
-                            const visible = allTags.slice(0, 3);
-                            const extra = allTags.length - visible.length;
-                            return (
-                              <div className="flex items-center gap-1 mt-0.5">
-                                {visible.map((tag, i) => (
-                                  <span
-                                    key={`${tag.dynamic ? "d" : "m"}-${tag.id}-${i}`}
-                                    className={`inline-flex items-center rounded-full px-1.5 py-0 text-[10px] font-medium text-white leading-4 ${tag.dynamic ? "border border-dashed border-white/60" : ""}`}
-                                    style={{ backgroundColor: tag.color }}
-                                    title={tag.dynamic ? `Auto${tag.ruleName ? ` · ${tag.ruleName}` : ""}` : undefined}
-                                  >
-                                    {tag.name}
-                                  </span>
-                                ))}
-                                {extra > 0 && (
-                                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500">
-                                    +{extra}
-                                  </span>
-                                )}
+                    {(columnsConfig?.columns ?? []).map((col) => {
+                      const defaultAlign: "left" | "center" | "right" =
+                        ["score", "policy", "complianceBar", "complianceBarOnly"].includes(col.primary.field) || col.primary.field.startsWith("cve") ? "center" : "left";
+                      const align: "left" | "center" | "right" = col.align ?? defaultAlign;
+                      const alignClass = align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left";
+                      const isFluid = col.primary.field === "complianceBar" || col.primary.field === "complianceBarOnly";
+                      const itemsClass = isFluid
+                        ? "items-stretch"
+                        : align === "center" ? "items-center" : align === "right" ? "items-end" : "items-start";
+                      const widthClass = getColumnWidthClass(col);
+                      const minWidthStyle = getColumnMinWidthStyle(col);
+                      return (
+                        <td key={col.id} style={minWidthStyle} className={`px-4 py-2 ${alignClass} ${widthClass}`}>
+                          <div className={`flex flex-col ${itemsClass}`}>
+                            {renderCell(node, col.primary, {
+                              extras: extras[node.id],
+                              complianceStats: complianceStats[node.id],
+                              complianceStatus: complianceStatus[node.id],
+                              collectStatus: collectStatus[node.id],
+                              extractStatus: extractStatus[node.id],
+                              productRanges,
+                              t,
+                              locale,
+                            }, "primary")}
+                            {col.secondary && (
+                              <div className="mt-0.5">
+                                {renderCell(node, col.secondary, {
+                                  extras: extras[node.id],
+                                  complianceStats: complianceStats[node.id],
+                                  complianceStatus: complianceStatus[node.id],
+                                  collectStatus: collectStatus[node.id],
+                                  extractStatus: extractStatus[node.id],
+                                  productRanges,
+                                  t,
+                                  locale,
+                                }, "secondary")}
                               </div>
-                            );
-                          })()}
-                        </div>
-                      </Link>
-                    </td>
-
-                    {/* IP Address + profile */}
-                    <td className="px-4 py-2">
-                      <Link href={`/nodes/${node.id}`} className="group">
-                        <span className="flex items-center gap-2">
-                          <span className="text-sm text-slate-700 dark:text-slate-300 font-mono group-hover:underline">
-                            {node.ipAddress}
-                          </span>
-                          {node.monitoringEnabled && (
-                            <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
-                          )}
-                        </span>
-                        {node.profile && (
-                          <div className="text-xs text-slate-500 dark:text-slate-400">{node.profile.name}</div>
-                        )}
-                      </Link>
-                    </td>
-
-                    {/* Manufacturer + Model */}
-                    <td className="px-4 py-2">
-                      {node.manufacturer ? (
-                        <div className="flex items-center gap-2">
-                          {node.manufacturer.logo && (
-                            <img src={`/api/logos/${node.manufacturer.logo}`} alt="" className="h-5 w-5 object-contain shrink-0" />
-                          )}
-                          <div>
-                            <div className="text-sm text-slate-700 dark:text-slate-300">{node.manufacturer.name}</div>
-                            {node.model && (
-                              <div className="text-xs text-slate-500 dark:text-slate-400">{node.model.name}</div>
                             )}
                           </div>
-                        </div>
-                      ) : node.model ? (
-                        <div className="text-sm text-slate-700 dark:text-slate-300">{node.model.name}</div>
-                      ) : (
-                        <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>
-                      )}
-                    </td>
-
-                    {/* Discovered Model */}
-                    <td className="px-4 py-2">
-                      <span className="text-sm text-slate-700 dark:text-slate-300">
-                        {node.discoveredModel || <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>}
-                      </span>
-                    </td>
-
-                    {/* Version */}
-                    <td className="px-4 py-2">
-                      <span className="text-sm text-slate-700 dark:text-slate-300">
-                        {node.discoveredVersion ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            {node.discoveredVersion}
-                            {(() => {
-                              const info = getUpgradeInfo(node);
-                              if (!info) return null;
-                              return (
-                                <span title={`${t("systemUpdates.recommendedVersion")}: ${info.recommended}`}>
-                                  <ArrowUpCircle className="h-3.5 w-3.5 text-amber-500" />
-                                </span>
-                              );
-                            })()}
-                          </span>
-                        ) : (
-                          <span className="text-slate-300 dark:text-slate-600">{"\u2014"}</span>
-                        )}
-                      </span>
-                    </td>
-
-                    {/* Policy */}
-                    <td className="px-4 py-2 text-center">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        node.policy === "enforce"
-                          ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400"
-                          : "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400"
-                      }`}>
-                        {node.policy === "enforce" ? t("nodes.policyEnforce") : t("nodes.policyAudit")}
-                      </span>
-                    </td>
-
-                    {/* Compliance bar */}
-                    <td className="px-4 py-2">
-                      {(() => {
-                        const isEvaluating = !!complianceStatus[node.id];
-                        if (isEvaluating) {
-                          return (
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden relative">
-                                <div
-                                  className="absolute inset-0 rounded-full"
-                                  style={{
-                                    background: complianceStatus[node.id] === "running"
-                                      ? "linear-gradient(90deg, transparent 0%, #3b82f6 50%, transparent 100%)"
-                                      : "linear-gradient(90deg, transparent 0%, #94a3b8 50%, transparent 100%)",
-                                    backgroundSize: "200% 100%",
-                                    animation: "shimmer 1.5s ease-in-out infinite",
-                                  }}
-                                />
-                              </div>
-                              <span className={`text-xs whitespace-nowrap ${complianceStatus[node.id] === "running" ? "text-blue-500" : "text-slate-400 dark:text-slate-500"}`}>
-                                {complianceStatus[node.id] === "running" ? t("compliance.evaluating") : t("compliance.pending")}
-                              </span>
-                            </div>
-                          );
-                        }
-                        const st = complianceStats[node.id];
-                        if (!st) {
-                          return (
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                                <div className="h-full rounded-full bg-slate-200 dark:bg-slate-700" style={{ width: "100%" }} />
-                              </div>
-                              <span className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{"\u2014"}</span>
-                            </div>
-                          );
-                        }
-                        const c = st.compliant || 0;
-                        const nc = st.non_compliant || 0;
-                        const err = st.error || 0;
-                        const total = c + nc + err;
-                        if (total === 0) {
-                          return (
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
-                                <div className="h-full rounded-full bg-slate-200 dark:bg-slate-700" style={{ width: "100%" }} />
-                              </div>
-                              <span className="text-xs text-slate-400 dark:text-slate-500 whitespace-nowrap">{"\u2014"}</span>
-                            </div>
-                          );
-                        }
-                        const pC = (c / total) * 100;
-                        const pNC = ((c + nc) / total) * 100;
-                        const pct = Math.round((c / total) * 100);
-                        return (
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1 h-2 rounded-full overflow-hidden relative">
-                              <div className="absolute inset-0" style={{
-                                background: `linear-gradient(to right, ${[
-                                  ...(c > 0 ? [`#10b981 0%, #10b981 ${pC}%`] : []),
-                                  ...(nc > 0 ? [`#ef4444 ${pC}%, #ef4444 ${pNC}%`] : []),
-                                  ...(err > 0 ? [`#ef4444 ${pNC}%, #ef4444 100%`] : []),
-                                ].join(", ")})`
-                              }} />
-                              {err > 0 && (
-                                <div className="absolute inset-0" style={{
-                                  clipPath: `inset(0 0 0 ${pNC}%)`,
-                                  backgroundImage: `repeating-linear-gradient(135deg, transparent, transparent 2px, rgba(255,255,255,0.35) 2px, rgba(255,255,255,0.35) 4px)`,
-                                }} />
-                              )}
-                            </div>
-                            <span className="text-xs text-slate-500 dark:text-slate-400 whitespace-nowrap">{pct}%</span>
-                          </div>
-                        );
-                      })()}
-                    </td>
-
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))
               )}

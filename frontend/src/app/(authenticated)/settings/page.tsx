@@ -14,6 +14,7 @@ import {
   Trash2,
   Key,
 } from "lucide-react";
+import { NodeColumnsTab } from "@/components/NodeColumnsTab";
 
 interface ContextUser {
   id: number;
@@ -34,7 +35,7 @@ interface ApiTokenItem {
   expired: boolean;
 }
 
-type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "members" | "lab" | "apiTokens";
+type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
@@ -322,6 +323,7 @@ export default function SettingsPage() {
     { key: "retention", label: t("settings.tabRetention") },
     { key: "vulnerability", label: t("settings.tabVulnerability") },
     { key: "systemUpdates", label: t("settings.tabSystemUpdates") },
+    { key: "nodeColumns" as TabKey, label: t("settings.tabNodeColumns") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
     { key: "lab" as TabKey, label: t("settings.tabLab") },
     { key: "apiTokens" as TabKey, label: t("settings.tabApiTokens") },
@@ -862,6 +864,10 @@ export default function SettingsPage() {
             <PluginManager contextId={current?.id} t={t} plugins={plugins} setPlugins={setPlugins} pluginSyncing={pluginSyncing} setPluginSyncing={setPluginSyncing} />
           </div>
         </div>
+      )}
+
+      {tab === "nodeColumns" && current && (
+        <NodeColumnsTab contextId={current.id} />
       )}
 
       {tab === "apiTokens" && (
