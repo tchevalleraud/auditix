@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
-import { ArrowLeft, Loader2, Search, CircleUser, Check, UserPlus, UserMinus } from "lucide-react";
+import { ArrowLeft, Loader2, Search, CircleUser, Check, UserPlus, UserMinus, Download } from "lucide-react";
 
 interface ContextUser {
   id: number;
@@ -170,6 +170,23 @@ export default function EditContextPage() {
           {t("admin_contexts.title")}
         </Link>
         <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t("admin_contexts.editContext")}</h1>
+      </div>
+
+      {/* Export */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <div className="flex items-center justify-between px-6 py-4">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("admin_contexts.exportThis")}</h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("admin_contexts.exportDescription")}</p>
+          </div>
+          <a
+            href={`/api/contexts/${contextId}/export`}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Download className="h-4 w-4" />
+            {t("admin_contexts.exportButton")}
+          </a>
+        </div>
       </div>
 
       {/* General info */}

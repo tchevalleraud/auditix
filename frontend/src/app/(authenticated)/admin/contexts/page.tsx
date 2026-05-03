@@ -4,18 +4,22 @@ import { useState } from "react";
 import Link from "next/link";
 import { useAppContext, type AppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
+import ContextImportModal from "@/components/ContextImportModal";
 import {
   Plus,
   Pencil,
   Trash2,
   Building2,
   Search,
+  Download,
+  Upload,
 } from "lucide-react";
 
 export default function ContextsPage() {
   const { contexts, reload } = useAppContext();
   const { t, locale } = useI18n();
   const [search, setSearch] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
 
   const filtered = contexts.filter(
     (c) =>
@@ -40,14 +44,34 @@ export default function ContextsPage() {
             {t("admin_contexts.subtitle")}
           </p>
         </div>
-        <Link
-          href="/admin/contexts/new"
-          className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          {t("admin_contexts.newContext")}
-        </Link>
+        <div className="flex items-center gap-2">
+          <a
+            href="/api/contexts/export-all"
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            title={t("admin_contexts.exportAll")}
+          >
+            <Download className="h-4 w-4" />
+            {t("admin_contexts.exportAll")}
+          </a>
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            <Upload className="h-4 w-4" />
+            {t("admin_contexts.importContext")}
+          </button>
+          <Link
+            href="/admin/contexts/new"
+            className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            {t("admin_contexts.newContext")}
+          </Link>
+        </div>
       </div>
+
+      <ContextImportModal open={importOpen} onClose={() => setImportOpen(false)} onImported={reload} />
 
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
