@@ -2,6 +2,11 @@
 framework:
     secret: '%env(APP_SECRET)%'
 
+    # Trust the directly-connected proxy (nginx in this stack) for X-Forwarded-* headers.
+    # In production, replace 'REMOTE_ADDR' with explicit CIDR ranges of your trusted proxies.
+    trusted_proxies: '127.0.0.1,REMOTE_ADDR'
+    trusted_headers: ['x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port', 'x-forwarded-prefix']
+
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 

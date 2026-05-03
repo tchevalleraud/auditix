@@ -35,6 +35,8 @@ import {
   Code2,
   Mail,
   Globe,
+  Radio,
+  History,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -135,8 +137,10 @@ const adminNav: NavCategory[] = [
       { key: "sidebar.workers", href: "/admin/server/workers", icon: Cpu },
       { key: "sidebar.nginx", href: "/admin/server/nginx", icon: Globe },
       { key: "sidebar.logs", href: "/admin/logs", icon: ScrollText },
+      { key: "sidebar.audit", href: "/admin/audit", icon: History },
       { key: "sidebar.tasks", href: "/admin/tasks", icon: ListTodo },
       { key: "sidebar.mailServers", href: "/admin/mail", icon: Mail },
+      { key: "sidebar.syslogServers", href: "/admin/syslog", icon: Radio },
     ],
   },
 ];
