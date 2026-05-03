@@ -10,6 +10,7 @@ use App\Message\CollectNodeMessage;
 use App\Message\EvaluateComplianceMessage;
 use App\Message\ProcessInventoryMessage;
 use App\Message\RecalculateNodeScoreMessage;
+use App\Service\CollectionImporter;
 use Doctrine\ORM\EntityManagerInterface;
 use OpenApi\Attributes as OA;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -25,6 +26,7 @@ class OperationController extends AbstractController
 {
     public function __construct(
         private readonly MessageBusInterface $bus,
+        private readonly CollectionImporter $importer,
     ) {}
 
     private function getContext(Request $request): Context
@@ -219,6 +221,142 @@ class OperationController extends AbstractController
         $em->flush();
 
         return $this->json(['dispatched' => $dispatched]);
+    }
+
+    #[Route('/import', methods: ['POST'])]
+    #[OA\Post(
+        summary: 'Manually import raw command output as a completed collection for a single node',
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\JsonContent(
+                properties: [
+                    new OA\Property(property: 'nodeId', type: 'integer', nullable: true, description: 'Node ID (alternative to nodeIp)'),
+                    new OA\Property(property: 'nodeIp', type: 'string', nullable: true, description: 'Node IP address (alternative to nodeId)'),
+                    new OA\Property(property: 'rawOutput', type: 'string', description: 'Raw CLI output containing the configured commands'),
+                    new OA\Property(property: 'tags', type: 'array', items: new OA\Items(type: 'string'), default: ['latest']),
+                    new OA\Property(
+                        property: 'promptPattern',
+                        type: 'string',
+                        nullable: true,
+                        description: 'Optional regex (without delimiters) whose first capture group isolates the typed command at the prompt',
+                    ),
+                ],
+                required: ['rawOutput'],
+            ),
+        ),
+        responses: [
+            new OA\Response(response: 201, description: 'Collection imported and inventory extraction dispatched'),
+            new OA\Response(response: 400, description: 'Validation error'),
+            new OA\Response(response: 404, description: 'Node not found'),
+        ],
+    )]
+    public function import(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $context = $this->getContext($request);
+        $data = json_decode($request->getContent(), true) ?? [];
+
+        $rawOutput = $data['rawOutput'] ?? '';
+        if ($rawOutput === '') {
+            return $this->json(['error' => 'rawOutput is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $tags = $data['tags'] ?? ['latest'];
+        $promptPattern = isset($data['promptPattern']) ? trim((string) $data['promptPattern']) : '';
+
+        $node = null;
+        if (!empty($data['nodeId'])) {
+            $node = $em->getRepository(Node::class)->find((int) $data['nodeId']);
+        } elseif (!empty($data['nodeIp'])) {
+            $node = $em->getRepository(Node::class)->findOneBy([
+                'ipAddress' => $data['nodeIp'],
+                'context' => $context,
+            ]);
+        }
+
+        if (!$node || $node->getContext()?->getId() !== $context->getId()) {
+            return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
+        }
+        if (!$node->getModel()) {
+            return $this->json(['error' => 'Node has no model configured'], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $collection = $this->importer->importRawOutputForNode(
+                $node,
+                $rawOutput,
+                is_array($tags) ? $tags : [],
+                'manual-import',
+                $promptPattern !== '' ? $promptPattern : null,
+            );
+        } catch (\RuntimeException $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+        }
+
+        $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
+
+        return $this->json([
+            'id' => $collection->getId(),
+            'nodeId' => $node->getId(),
+            'status' => $collection->getStatus(),
+            'tags' => $collection->getTags(),
+            'commandCount' => $collection->getCommandCount(),
+            'completedCount' => $collection->getCompletedCount(),
+            'createdAt' => $collection->getCreatedAt()->format('c'),
+        ], Response::HTTP_CREATED);
+    }
+
+    #[Route('/import-zip', methods: ['POST'])]
+    #[OA\Post(
+        summary: 'Import a ZIP archive of collected outputs (one <ip>_output.log per node)',
+        parameters: [
+            new OA\Parameter(name: 'dryRun', in: 'query', required: false, schema: new OA\Schema(type: 'boolean', default: false), description: 'Validate the archive without persisting collections'),
+        ],
+        requestBody: new OA\RequestBody(
+            required: true,
+            content: new OA\MediaType(
+                mediaType: 'multipart/form-data',
+                schema: new OA\Schema(
+                    required: ['file'],
+                    properties: [
+                        new OA\Property(property: 'file', type: 'string', format: 'binary', description: 'ZIP archive containing <ip>_output.log files'),
+                        new OA\Property(property: 'tags[]', type: 'array', items: new OA\Items(type: 'string'), description: 'Extra tags applied to imported collections'),
+                        new OA\Property(property: 'promptPattern', type: 'string', description: 'Optional regex (no delimiters) whose first capture group isolates the typed command'),
+                    ],
+                ),
+            ),
+        ),
+        responses: [
+            new OA\Response(response: 200, description: 'Import summary'),
+            new OA\Response(response: 400, description: 'Validation error'),
+        ],
+    )]
+    public function importZip(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $context = $this->getContext($request);
+        $dryRun = $request->query->getBoolean('dryRun');
+
+        /** @var \Symfony\Component\HttpFoundation\File\UploadedFile|null $file */
+        $file = $request->files->get('file');
+        if (!$file || !$file->isValid()) {
+            return $this->json(['error' => 'A .zip file is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $extraTags = array_values(array_filter(array_map('trim', (array) $request->request->all('tags'))));
+        $promptPattern = trim((string) $request->request->get('promptPattern', '')) ?: null;
+
+        try {
+            $result = $this->importer->importZipArchive($file->getPathname(), $context, $extraTags, $promptPattern, $dryRun, 'zip-import');
+        } catch (\RuntimeException $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+        }
+
+        foreach ($result['importedCollections'] as $collection) {
+            $this->bus->dispatch(new ProcessInventoryMessage($collection->getId()));
+        }
+
+        unset($result['importedCollections']);
+
+        return $this->json($result);
     }
 
     private function releaseTag(EntityManagerInterface $em, string $tag, Node $node): void
