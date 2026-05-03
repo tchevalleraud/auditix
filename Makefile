@@ -16,6 +16,40 @@ restart: ## Restart all services
 logs: ## Show logs for all services
 	docker compose logs -f
 
+status: ## Show application status as a synthetic table
+	@CIDS=$$(docker compose ps -q 2>/dev/null); \
+	if [ -z "$$CIDS" ]; then echo "\033[31mno running containers\033[0m"; exit 0; fi; \
+	{ \
+		docker compose ps --format 'PS|{{.Service}}|{{.Name}}|{{.State}}|{{.Status}}'; \
+		docker stats --no-stream --format 'ST|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}' $$CIDS; \
+	} | awk -F'|' ' \
+		$$1=="PS" { \
+			name=$$3; svc[name]=$$2; state[name]=$$4; s=$$5; \
+			h="-"; \
+			if (s ~ /\(healthy\)/)        h="healthy"; \
+			else if (s ~ /\(unhealthy\)/) h="unhealthy"; \
+			else if (s ~ /\(starting\)/)  h="starting"; \
+			sub(/^Up /, "", s); sub(/ \([^)]+\)$$/, "", s); \
+			health[name]=h; uptime[name]=s; order[++n]=name; total++; \
+			if (state[name]=="running") up++; \
+			if ($$2 ~ /^worker-/) workers++; \
+		} \
+		$$1=="ST" { cpu[$$2]=$$3; mem[$$2]=$$4; mp[$$2]=$$5 } \
+		END { \
+			fmt="%-22s %-9s %-10s %-16s %-8s %-20s %-7s\n"; \
+			printf "\033[36m" fmt "\033[0m", "SERVICE","STATE","HEALTH","UPTIME","CPU%","MEM","MEM%"; \
+			for (i=1;i<=n;i++) { name=order[i]; \
+				printf fmt, svc[name], state[name], health[name], uptime[name], \
+					cpu[name]?cpu[name]:"-", mem[name]?mem[name]:"-", mp[name]?mp[name]:"-"; \
+			} \
+			printf "\n\033[1mSummary:\033[0m %d/%d services up · %d workers", up, total, workers; \
+		}'; \
+	echo ""; \
+	PORT=$$(grep -E '^HTTP_PORT=' .env 2>/dev/null | cut -d= -f2); PORT=$${PORT:-80}; \
+	CODE=$$(curl -k -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:$$PORT 2>/dev/null || echo "000"); \
+	case "$$CODE" in 2*|301|302|307|308) MSG="\033[32m$$CODE OK\033[0m";; *) MSG="\033[31m$$CODE down\033[0m";; esac; \
+	printf "\033[1mHTTP:\033[0m    http://localhost:%s → %b\n" "$$PORT" "$$MSG"
+
 upgrade: ## Pull latest version, rebuild and apply migrations
 	@echo "\033[36m[pull]\033[0m Pulling latest changes..."
 	@git stash --quiet 2>/dev/null || true
