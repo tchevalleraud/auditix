@@ -9,6 +9,7 @@ use App\Entity\InventoryCategory;
 use App\Entity\TopologyDevice;
 use App\Entity\TopologyLink;
 use App\Entity\TopologyMap;
+use App\Security\Voter\ContextAccessVoter;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -49,6 +50,7 @@ class TopologyMapController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $maps = $em->getRepository(TopologyMap::class)->findBy(
             ['context' => $context],
@@ -98,6 +100,7 @@ class TopologyMapController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = trim($data['name'] ?? '');
         if ($name === '') {
@@ -119,6 +122,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(TopologyMap $map, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $deviceCount = (int) $em->createQuery(
             'SELECT COUNT(d.id) FROM App\Entity\TopologyDevice d WHERE d.map = :m'
         )->setParameter('m', $map)->getSingleScalarResult();
@@ -132,6 +136,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(TopologyMap $map, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $data = json_decode($request->getContent(), true);
         if (isset($data['name'])) {
             $name = trim($data['name']);
@@ -163,6 +168,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(TopologyMap $map, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $em->remove($map);
         $em->flush();
         return $this->json(null, Response::HTTP_NO_CONTENT);
@@ -175,6 +181,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}/nodes', methods: ['GET'])]
     public function listNodes(TopologyMap $map, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $devices = $em->getRepository(TopologyDevice::class)->findBy(['map' => $map]);
         $nodeIds = [];
         foreach ($devices as $d) {
@@ -192,6 +199,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}/nodes', methods: ['PUT'])]
     public function syncNodes(TopologyMap $map, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $data = json_decode($request->getContent(), true);
         $wantedIds = array_map('intval', $data['nodeIds'] ?? []);
 
@@ -251,6 +259,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}/generate-links', methods: ['POST'])]
     public function generateLinks(TopologyMap $map, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $linkRules = $map->getLinkRules();
         if (empty($linkRules)) {
             return $this->json(['error' => 'No link rules configured on this map'], Response::HTTP_BAD_REQUEST);
@@ -728,6 +737,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}/graph', methods: ['GET'])]
     public function graph(TopologyMap $map, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $devices = $em->getRepository(TopologyDevice::class)->findBy(['map' => $map]);
 
         $protocolFilter = $request->query->get('protocol');
@@ -949,6 +959,7 @@ class TopologyMapController extends AbstractController
         if (!$device || $device->getMap()->getId() !== $mapId) {
             return $this->json(['error' => 'Device not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $device->getMap());
         $data = json_decode($request->getContent(), true);
         $device->setStyleOverride($data['styleOverride'] ?? null);
         $em->flush();
@@ -965,6 +976,7 @@ class TopologyMapController extends AbstractController
         if (!$link || $link->getMap()->getId() !== $mapId) {
             return $this->json(['error' => 'Link not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $link->getMap());
         $data = json_decode($request->getContent(), true);
         $link->setStyleOverride($data['styleOverride'] ?? null);
         $em->flush();
@@ -977,6 +989,7 @@ class TopologyMapController extends AbstractController
     #[Route('/{id}/links', methods: ['POST'])]
     public function createLink(TopologyMap $map, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $map);
         $data = json_decode($request->getContent(), true);
 
         $sourceDeviceId = $data['sourceDeviceId'] ?? null;
@@ -1031,6 +1044,7 @@ class TopologyMapController extends AbstractController
         if (!$link || $link->getMap()->getId() !== $mapId) {
             return $this->json(['error' => 'Link not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $link->getMap());
         $em->remove($link);
         $em->flush();
         return $this->json(['ok' => true]);
@@ -1046,6 +1060,7 @@ class TopologyMapController extends AbstractController
         if (!$device || $device->getMap()->getId() !== $mapId) {
             return $this->json(['error' => 'Device not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $device->getMap());
 
         $node = $device->getNode();
         $identifiers = [

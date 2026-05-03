@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Context;
 use App\Entity\Editor;
 use App\Entity\ProductRange;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -43,6 +44,10 @@ class ProductRangeController extends AbstractController
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $ranges = $em->getRepository(ProductRange::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -58,6 +63,7 @@ class ProductRangeController extends AbstractController
         $contextId = $request->query->getInt('context');
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         if (empty($data['name'])) {
             return $this->json(['error' => 'Name is required'], Response::HTTP_BAD_REQUEST);
@@ -91,6 +97,7 @@ class ProductRangeController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(ProductRange $range, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $range);
         $data = json_decode($request->getContent(), true);
 
         if (empty($data['name'])) {
@@ -128,6 +135,7 @@ class ProductRangeController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(ProductRange $range, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $range);
         $em->remove($range);
         $em->flush();
 

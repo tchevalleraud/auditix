@@ -9,6 +9,7 @@ use App\Entity\Node;
 use App\Entity\ReportTheme;
 use App\Entity\User;
 use App\Message\SendMailReportMessage;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\MailReportService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -39,6 +40,7 @@ class MailReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $reports = $this->service->listByContext((int) $contextId);
         return $this->json(array_map($this->serializeShort(...), $reports));
@@ -57,6 +59,7 @@ class MailReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
         $defaultTheme = $this->em->getRepository(ReportTheme::class)->findOneBy(['isDefault' => true]);
         if (!$defaultTheme) {
             return $this->json(['error' => 'No default theme found'], Response::HTTP_INTERNAL_SERVER_ERROR);
@@ -83,6 +86,7 @@ class MailReportController extends AbstractController
         if ($report === null) {
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         return $this->json($this->serialize($report));
     }
 
@@ -93,6 +97,7 @@ class MailReportController extends AbstractController
         if ($report === null) {
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $data = json_decode($request->getContent(), true);
         if (!is_array($data)) {
             return $this->json(['error' => 'Invalid body'], Response::HTTP_BAD_REQUEST);
@@ -161,6 +166,7 @@ class MailReportController extends AbstractController
         if ($report === null) {
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $this->service->delete($report);
         return $this->json(null, Response::HTTP_NO_CONTENT);
     }
@@ -172,6 +178,7 @@ class MailReportController extends AbstractController
         if ($report === null) {
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $html = $this->service->renderHtml($report);
         return new Response($html, 200, ['Content-Type' => 'text/plain; charset=UTF-8']);
     }
@@ -188,6 +195,7 @@ class MailReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
         $themeId = $data['themeId'] ?? null;
         $theme = $themeId ? $this->em->getRepository(ReportTheme::class)->find($themeId) : null;
         if (!$theme) {
@@ -216,6 +224,7 @@ class MailReportController extends AbstractController
         if ($report === null) {
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         if ($report->getMailServer() === null) {
             return $this->json(['error' => 'No mail server configured'], Response::HTTP_BAD_REQUEST);
         }
@@ -238,6 +247,7 @@ class MailReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
         $nodes = $this->em->getRepository(Node::class)->findBy(['context' => $context], ['name' => 'ASC']);
         return $this->json(array_map(static fn (Node $n) => [
             'id' => $n->getId(),
@@ -266,6 +276,7 @@ class MailReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $rows = [];
         foreach ($context->getUsers() as $user) {

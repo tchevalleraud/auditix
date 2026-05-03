@@ -12,6 +12,7 @@ use App\Entity\InventoryCategory;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Node;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -88,6 +89,12 @@ class CollectionRuleController extends AbstractController
             return $this->json(['folders' => [], 'rootRules' => []]);
         }
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json(['folders' => [], 'rootRules' => []]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $rootFolders = $em->getRepository(CollectionRuleFolder::class)->findBy(
             ['context' => $contextId, 'parent' => null],
             ['name' => 'ASC']
@@ -107,6 +114,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/by-model/{id}', methods: ['GET'])]
     public function byModel(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $modelFolder = $em->getRepository(CollectionRuleFolder::class)->findOneBy([
             'model' => $model,
             'type' => CollectionRuleFolder::TYPE_MODEL,
@@ -158,6 +166,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/by-model/{id}/associate', methods: ['POST'])]
     public function associate(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $data = json_decode($request->getContent(), true);
         $ruleIds = $data['ruleIds'] ?? [];
 
@@ -176,6 +185,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/by-model/{id}/dissociate', methods: ['POST'])]
     public function dissociate(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $data = json_decode($request->getContent(), true);
         $ruleId = $data['ruleId'] ?? null;
 
@@ -194,6 +204,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/available-for-model/{id}', methods: ['GET'])]
     public function availableForModel(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $context = $model->getContext();
 
         $excludeIds = array_map(fn($r) => $r->getId(), $model->getManualRules()->toArray());
@@ -274,6 +285,7 @@ class CollectionRuleController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) {
@@ -305,12 +317,14 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(CollectionRule $rule): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         return $this->json($this->serializeRule($rule));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(CollectionRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -351,6 +365,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}/test', methods: ['POST'])]
     public function test(CollectionRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
         $nodeId = $data['nodeId'] ?? null;
 
@@ -362,6 +377,7 @@ class CollectionRuleController extends AbstractController
         if (!$node) {
             return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
 
         $command = $rule->getCommand();
         if (!$command) {
@@ -560,6 +576,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}/extracts', methods: ['GET'])]
     public function listExtracts(CollectionRule $rule): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         return $this->json(array_values(array_map(
             $this->serializeExtract(...),
             $rule->getExtracts()->toArray()
@@ -569,6 +586,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}/extracts', methods: ['POST'])]
     public function createExtract(CollectionRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
         $name = $data['name'] ?? '';
         $regex = $data['regex'] ?? '';
@@ -624,6 +642,7 @@ class CollectionRuleController extends AbstractController
         if (!$extract || $extract->getRule()->getId() !== $ruleId) {
             return $this->json(['error' => 'Extract not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $extract->getRule());
 
         $data = json_decode($request->getContent(), true);
         if (isset($data['name'])) {
@@ -685,6 +704,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}/extracts/reorder', methods: ['POST'])]
     public function reorderExtracts(CollectionRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
         $ids = $data['ids'] ?? [];
 
@@ -714,6 +734,7 @@ class CollectionRuleController extends AbstractController
         if (!$extract || $extract->getRule()->getId() !== $ruleId) {
             return $this->json(['error' => 'Extract not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $extract->getRule());
 
         $em->remove($extract);
         $em->flush();
@@ -724,6 +745,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}/duplicate', methods: ['POST'])]
     public function duplicate(CollectionRule $rule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $copy = new CollectionRule();
         $copy->setName($rule->getName() . ' (copy)');
         $copy->setDescription($rule->getDescription());
@@ -778,6 +800,7 @@ class CollectionRuleController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(CollectionRule $rule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $em->remove($rule);
         $em->flush();
 

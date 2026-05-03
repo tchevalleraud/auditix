@@ -12,6 +12,7 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Http\Attribute\IsGranted;
 
 #[Route('/api/contexts')]
 class ContextController extends AbstractController
@@ -71,6 +72,7 @@ class ContextController extends AbstractController
     }
 
     #[Route('', methods: ['POST'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function create(Request $request, EntityManagerInterface $em): JsonResponse
     {
         $data = json_decode($request->getContent(), true);
@@ -100,6 +102,7 @@ class ContextController extends AbstractController
     }
 
     #[Route('/{id}', methods: ['PUT'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function update(Context $context, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $data = json_decode($request->getContent(), true);
@@ -165,6 +168,7 @@ class ContextController extends AbstractController
     }
 
     #[Route('/{id}', methods: ['DELETE'])]
+    #[IsGranted('ROLE_ADMIN')]
     public function delete(Context $context, EntityManagerInterface $em): JsonResponse
     {
         if ($context->isDefault()) {

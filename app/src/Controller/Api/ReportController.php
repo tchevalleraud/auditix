@@ -7,6 +7,7 @@ use App\Entity\Node;
 use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -72,6 +73,7 @@ class ReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $reports = $em->getRepository(Report::class)->findBy(
             ['context' => $context],
@@ -95,6 +97,7 @@ class ReportController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $defaultTheme = $em->getRepository(ReportTheme::class)->findOneBy(['isDefault' => true]);
         if (!$defaultTheme) {
@@ -133,12 +136,14 @@ class ReportController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(Report $report): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         return $this->json($this->serialize($report));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(Report $report, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -217,6 +222,7 @@ class ReportController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Report $report, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $em->remove($report);
         $em->flush();
 
@@ -226,6 +232,7 @@ class ReportController extends AbstractController
     #[Route('/{id}/generate', methods: ['POST'])]
     public function generate(Report $report, EntityManagerInterface $em, MessageBusInterface $bus): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         if ($report->getGeneratingStatus()) {
             return $this->json(['error' => 'Generation already in progress'], Response::HTTP_CONFLICT);
         }
@@ -241,6 +248,7 @@ class ReportController extends AbstractController
     #[Route('/{id}/download', methods: ['GET'])]
     public function download(Report $report, Request $request): Response
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
         $nodeId = $request->query->get('node');
 
         if ($report->getType() === Report::TYPE_NODE && $nodeId) {

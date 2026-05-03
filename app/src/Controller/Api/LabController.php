@@ -6,6 +6,7 @@ use App\Entity\CompliancePolicy;
 use App\Entity\Context;
 use App\Entity\Lab;
 use App\Entity\LabTask;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -56,6 +57,7 @@ class LabController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $labs = $em->getRepository(Lab::class)->findBy(['context' => $context], ['name' => 'ASC']);
 
@@ -76,6 +78,7 @@ class LabController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $lab = new Lab();
         $lab->setName($data['name']);
@@ -91,12 +94,14 @@ class LabController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(Lab $lab): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         return $this->json($this->serialize($lab));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(Lab $lab, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -114,6 +119,7 @@ class LabController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Lab $lab, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         $em->remove($lab);
         $em->flush();
 
@@ -125,6 +131,7 @@ class LabController extends AbstractController
     #[Route('/{id}/tasks', methods: ['POST'])]
     public function createTask(Lab $lab, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         $data = json_decode($request->getContent(), true);
 
         if (empty($data['name'])) {
@@ -153,6 +160,7 @@ class LabController extends AbstractController
     #[Route('/{id}/tasks/{taskId}', methods: ['PUT'])]
     public function updateTask(Lab $lab, int $taskId, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         $task = $em->getRepository(LabTask::class)->find($taskId);
         if (!$task || $task->getLab()->getId() !== $lab->getId()) {
             return $this->json(['error' => 'Task not found'], Response::HTTP_NOT_FOUND);
@@ -187,6 +195,7 @@ class LabController extends AbstractController
     #[Route('/{id}/tasks/{taskId}', methods: ['DELETE'])]
     public function deleteTask(Lab $lab, int $taskId, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $lab);
         $task = $em->getRepository(LabTask::class)->find($taskId);
         if (!$task || $task->getLab()->getId() !== $lab->getId()) {
             return $this->json(['error' => 'Task not found'], Response::HTTP_NOT_FOUND);

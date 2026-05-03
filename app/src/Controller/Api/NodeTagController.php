@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Context;
 use App\Entity\Node;
 use App\Entity\NodeTag;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -31,6 +32,10 @@ class NodeTagController extends AbstractController
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $tags = $em->getRepository(NodeTag::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -46,6 +51,7 @@ class NodeTagController extends AbstractController
         $contextId = $request->query->getInt('context');
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) return $this->json(['error' => 'Name is required'], Response::HTTP_BAD_REQUEST);
@@ -64,6 +70,7 @@ class NodeTagController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(NodeTag $tag, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $tag);
         $data = json_decode($request->getContent(), true);
 
         if (array_key_exists('name', $data)) {
@@ -82,6 +89,7 @@ class NodeTagController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(NodeTag $tag, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $tag);
         $em->remove($tag);
         $em->flush();
 

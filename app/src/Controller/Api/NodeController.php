@@ -16,6 +16,7 @@ use App\Entity\Profile;
 use App\Entity\Cve;
 use App\Entity\CveDeviceModel;
 use App\Service\InventoryNodeRuleEvaluator;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\PolicyAutoAssigner;
 use App\Service\SystemUpdateScoreCalculator;
 use App\Service\VulnerabilityScoreCalculator;
@@ -102,6 +103,10 @@ class NodeController extends AbstractController
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $nodes = $em->getRepository(Node::class)->findBy(
             ['context' => $contextId],
             ['ipAddress' => 'ASC']
@@ -117,6 +122,7 @@ class NodeController extends AbstractController
         $contextId = $request->query->getInt('context');
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $ipAddress = $data['ipAddress'] ?? '';
         if (empty($ipAddress)) {
@@ -152,6 +158,7 @@ class NodeController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(Node $node, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $data = json_decode($request->getContent(), true);
 
         if (array_key_exists('ipAddress', $data)) {
@@ -195,6 +202,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/tags', methods: ['POST'])]
     public function addTag(Node $node, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $data = json_decode($request->getContent(), true);
         $tagId = $data['tagId'] ?? null;
         if (!$tagId) return $this->json(['error' => 'tagId is required'], Response::HTTP_BAD_REQUEST);
@@ -211,6 +219,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/tags/{tagId}', methods: ['DELETE'])]
     public function removeTag(Node $node, int $tagId, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $tag = $em->getRepository(NodeTag::class)->find($tagId);
         if ($tag) $node->removeTag($tag);
         $em->flush();
@@ -231,6 +240,7 @@ class NodeController extends AbstractController
         $nodes = $em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
 
         foreach ($nodes as $node) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
             $node->setIsReachable(null);
             $this->bus->dispatch(new PingNodeMessage($node->getId()));
         }
@@ -243,6 +253,7 @@ class NodeController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         // Delete collection storage files
         $collections = $em->getRepository(Collection::class)->findBy(['node' => $node]);
         foreach ($collections as $collection) {
@@ -275,6 +286,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/inventory', methods: ['GET'])]
     public function inventory(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(
             ['node' => $node],
             ['categoryName' => 'ASC', 'entryKey' => 'ASC', 'colLabel' => 'ASC']
@@ -393,6 +405,7 @@ class NodeController extends AbstractController
         $dispatched = 0;
 
         foreach ($nodes as $node) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
             $policies = $autoAssigner->autoAssign($node);
 
             if (empty($policies)) {
@@ -418,6 +431,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/evaluate-compliance', methods: ['POST'])]
     public function evaluateCompliance(Node $node, EntityManagerInterface $em, PolicyAutoAssigner $autoAssigner): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $policies = $autoAssigner->autoAssign($node);
 
         $dispatched = 0;
@@ -443,6 +457,10 @@ class NodeController extends AbstractController
     {
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $nodes = $em->getRepository(Node::class)->findBy(['context' => $contextId]);
         $nodeIds = array_map(fn(Node $n) => $n->getId(), $nodes);
@@ -471,6 +489,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/vulnerabilities', methods: ['GET'])]
     public function vulnerabilities(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $model = $node->getModel();
         $context = $node->getContext();
 
@@ -531,6 +550,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/compliance', methods: ['GET'])]
     public function compliance(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $results = $em->getRepository(ComplianceResult::class)->findBy(
             ['node' => $node],
         );
@@ -614,6 +634,10 @@ class NodeController extends AbstractController
     ): JsonResponse {
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json(new \stdClass());
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json(new \stdClass());
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $fieldsRaw = $request->query->get('fields', 'compliance,vulnerability,systemUpdate');
         $fields = array_filter(array_map('trim', explode(',', $fieldsRaw)));
@@ -779,6 +803,7 @@ class NodeController extends AbstractController
     #[Route('/{id}/system-updates', methods: ['GET'])]
     public function systemUpdates(Node $node, SystemUpdateScoreCalculator $calculator): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $result = $calculator->calculateForNode($node);
         $productRange = $calculator->findProductRange($node);
 
@@ -814,6 +839,7 @@ class NodeController extends AbstractController
         }
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['nodeIds' => []]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $data = json_decode($request->getContent(), true) ?? [];
         $rules = is_array($data['rules'] ?? null) ? $data['rules'] : [];

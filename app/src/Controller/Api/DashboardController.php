@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Collection;
 use App\Entity\Context;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\ComplianceEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -16,6 +17,7 @@ class DashboardController extends AbstractController
     #[Route('', methods: ['GET'])]
     public function index(Context $context, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
         $contextId = $context->getId();
 
         // --- Nodes ---

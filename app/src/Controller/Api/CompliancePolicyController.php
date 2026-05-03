@@ -10,6 +10,7 @@ use App\Entity\Context;
 use App\Entity\Node;
 use App\Entity\NodeTag;
 use App\Message\EvaluateComplianceMessage;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\ComplianceEvaluator;
 use App\Service\NodeMatchEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
@@ -47,6 +48,7 @@ class CompliancePolicyController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $policies = $em->getRepository(CompliancePolicy::class)->findBy(
             ['context' => $context],
@@ -70,6 +72,7 @@ class CompliancePolicyController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $policy = new CompliancePolicy();
         $policy->setName($data['name']);
@@ -92,12 +95,14 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(CompliancePolicy $policy): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         return $this->json($this->serialize($policy));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -120,6 +125,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/rules', methods: ['GET'])]
     public function rules(CompliancePolicy $policy, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $rootFolder = $em->getRepository(ComplianceRuleFolder::class)->findOneBy([
             'policy' => $policy,
             'parent' => null,
@@ -145,6 +151,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/rules/add', methods: ['POST'])]
     public function addExtraRule(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $ruleId = $data['ruleId'] ?? null;
         if (!$ruleId) return $this->json(['error' => 'ruleId is required'], Response::HTTP_BAD_REQUEST);
@@ -161,6 +168,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/rules/remove', methods: ['POST'])]
     public function removeExtraRule(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $ruleId = $data['ruleId'] ?? null;
         if (!$ruleId) return $this->json(['error' => 'ruleId is required'], Response::HTTP_BAD_REQUEST);
@@ -225,6 +233,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/nodes', methods: ['GET'])]
     public function nodes(CompliancePolicy $policy): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $nodes = [];
         foreach ($policy->getNodes() as $n) {
             $nodes[] = $this->serializeNodeCompact($n);
@@ -237,6 +246,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/nodes/add', methods: ['POST'])]
     public function addNodes(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $nodeIds = $data['nodeIds'] ?? [];
         if (empty($nodeIds)) {
@@ -258,6 +268,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/nodes/remove', methods: ['POST'])]
     public function removeNodes(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $nodeIds = $data['nodeIds'] ?? [];
         if (empty($nodeIds)) {
@@ -279,6 +290,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/nodes/add-by-tags', methods: ['POST'])]
     public function addNodesByTags(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $tagIds = $data['tagIds'] ?? [];
         if (empty($tagIds)) {
@@ -334,6 +346,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/match-rules', methods: ['PUT'])]
     public function updateMatchRules(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $policy->setMatchRules($data['matchRules'] ?? null);
         $em->flush();
@@ -344,6 +357,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/match-rules/preview', methods: ['POST'])]
     public function previewMatchRules(CompliancePolicy $policy, Request $request, NodeMatchEvaluator $evaluator): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
         $matchRules = $data['matchRules'] ?? null;
         if (!$matchRules || empty($matchRules['blocks'])) {
@@ -357,6 +371,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/match-rules/apply', methods: ['POST'])]
     public function applyMatchRules(CompliancePolicy $policy, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $matchRules = $policy->getMatchRules();
         if (!$matchRules || empty($matchRules['blocks'])) {
             return $this->json(['added' => 0, 'matched' => 0, 'total' => $policy->getNodes()->count()]);
@@ -378,6 +393,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/evaluate', methods: ['POST'])]
     public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         // Auto-apply match rules before evaluating
         $matchRules = $policy->getMatchRules();
         if ($matchRules && !empty($matchRules['blocks'])) {
@@ -403,6 +419,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/results', methods: ['GET'])]
     public function results(CompliancePolicy $policy, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $results = $em->getRepository(ComplianceResult::class)->findBy(
             ['policy' => $policy],
             ['node' => 'ASC']
@@ -478,6 +495,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}/results/{nodeId}', methods: ['DELETE'])]
     public function deleteNodeResults(CompliancePolicy $policy, int $nodeId, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $node = $em->getRepository(Node::class)->find($nodeId);
         if (!$node) return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
 
@@ -494,6 +512,7 @@ class CompliancePolicyController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(CompliancePolicy $policy, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $em->remove($policy);
         $em->flush();
 

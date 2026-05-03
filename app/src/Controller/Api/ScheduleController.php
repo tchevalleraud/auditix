@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\Schedule;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\ScheduleEventPublisher;
 use Cron\CronExpression;
 use Doctrine\ORM\EntityManagerInterface;
@@ -119,6 +120,7 @@ class ScheduleController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $schedules = $em->getRepository(Schedule::class)->findBy(
             ['context' => $context],
@@ -148,6 +150,7 @@ class ScheduleController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $schedule = new Schedule();
         $schedule->setName($data['name']);
@@ -170,12 +173,14 @@ class ScheduleController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(Schedule $schedule): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schedule);
         return $this->json($this->serialize($schedule));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(Schedule $schedule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schedule);
         $data = json_decode($request->getContent(), true);
 
         $error = $this->applyMutableFields($schedule, $data);
@@ -193,6 +198,7 @@ class ScheduleController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Schedule $schedule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schedule);
         $this->events->publish($schedule, 'schedule.deleted');
         $em->remove($schedule);
         $em->flush();
@@ -203,6 +209,7 @@ class ScheduleController extends AbstractController
     #[Route('/{id}/trigger', methods: ['POST'])]
     public function trigger(Schedule $schedule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schedule);
         if (!$schedule->isIdle()) {
             return $this->json(['error' => 'Schedule is already running'], Response::HTTP_CONFLICT);
         }
@@ -225,6 +232,7 @@ class ScheduleController extends AbstractController
     #[Route('/{id}/cancel', methods: ['POST'])]
     public function cancel(Schedule $schedule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schedule);
         $schedule->setCurrentPhase(null);
         $schedule->setCurrentPhaseStatus(null);
         $schedule->setCollectionIds(null);

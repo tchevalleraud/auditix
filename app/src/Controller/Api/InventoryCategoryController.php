@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Context;
 use App\Entity\InventoryCategory;
 use App\Entity\NodeInventoryEntry;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -22,6 +23,12 @@ class InventoryCategoryController extends AbstractController
         if (!$contextId) {
             return $this->json([]);
         }
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json([]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $rows = $em->createQueryBuilder()
             ->select('c.id', 'c.name', 'c.keyLabel', 'c.createdAt', 'COUNT(DISTINCT e.id) AS usageCount')
@@ -53,6 +60,7 @@ class InventoryCategoryController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) {
@@ -81,6 +89,7 @@ class InventoryCategoryController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(InventoryCategory $cat, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cat);
         $data = json_decode($request->getContent(), true);
         if (isset($data['name'])) {
             $cat->setName($data['name']);
@@ -110,6 +119,7 @@ class InventoryCategoryController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(InventoryCategory $cat, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cat);
         $em->remove($cat);
         $em->flush();
         return $this->json(null, Response::HTTP_NO_CONTENT);
@@ -118,6 +128,7 @@ class InventoryCategoryController extends AbstractController
     #[Route('/{id}/columns', methods: ['GET'])]
     public function columns(InventoryCategory $cat, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cat);
         $rows = $em->createQueryBuilder()
             ->select('DISTINCT e.colLabel')
             ->from(NodeInventoryEntry::class, 'e')
@@ -133,6 +144,7 @@ class InventoryCategoryController extends AbstractController
     #[Route('/{id}/column-config', methods: ['GET'])]
     public function getColumnConfig(InventoryCategory $cat, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cat);
         $discovered = $this->fetchDiscoveredColumns($cat, $em);
         return $this->json([
             'columns' => $this->mergeColumnConfig($cat->getColumnConfig(), $discovered),
@@ -143,6 +155,7 @@ class InventoryCategoryController extends AbstractController
     #[Route('/{id}/column-config', methods: ['PUT'])]
     public function updateColumnConfig(InventoryCategory $cat, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cat);
         $data = json_decode($request->getContent(), true);
         $columns = $data['columns'] ?? null;
         if (!is_array($columns)) {
@@ -259,6 +272,7 @@ class InventoryCategoryController extends AbstractController
         if (!$context) {
             return $this->json([]);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         // Get all unique category/entryKey/colLabel combinations for this context
         $qb = $em->createQueryBuilder();

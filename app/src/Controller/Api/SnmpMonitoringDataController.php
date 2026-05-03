@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\MonitoringOid;
 use App\Entity\Node;
 use App\Entity\SnmpMonitoringData;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -17,6 +18,7 @@ class SnmpMonitoringDataController extends AbstractController
     #[Route('/by-node/{id}', methods: ['GET'])]
     public function byNode(Node $node, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $context = $node->getContext();
         $retentionMinutes = $context ? $context->getSnmpRetentionMinutes() : 120;
         $since = new \DateTimeImmutable("-{$retentionMinutes} minutes");

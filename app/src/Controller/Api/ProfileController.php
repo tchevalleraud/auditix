@@ -6,6 +6,7 @@ use App\Entity\CliCredential;
 use App\Entity\Context;
 use App\Entity\Profile;
 use App\Entity\SnmpCredential;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\CredentialTester;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -24,6 +25,7 @@ class ProfileController extends AbstractController
     #[Route('/{id}/test', methods: ['POST'])]
     public function test(Profile $profile, Request $request): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $profile);
         $data = json_decode($request->getContent(), true) ?? [];
         $ipAddress = trim((string) ($data['ipAddress'] ?? ''));
         $oid = isset($data['oid']) ? trim((string) $data['oid']) : null;
@@ -70,6 +72,10 @@ class ProfileController extends AbstractController
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $profiles = $em->getRepository(Profile::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -86,6 +92,7 @@ class ProfileController extends AbstractController
         $contextId = $request->query->getInt('context');
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) return $this->json(['error' => 'Name is required'], Response::HTTP_BAD_REQUEST);
@@ -112,6 +119,7 @@ class ProfileController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(Profile $profile, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $profile);
         $data = json_decode($request->getContent(), true);
 
         $name = $data['name'] ?? '';
@@ -136,6 +144,7 @@ class ProfileController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Profile $profile, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $profile);
         $em->remove($profile);
         $em->flush();
 

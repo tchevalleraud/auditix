@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\UserDashboard;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -28,6 +29,7 @@ class DashboardConfigController extends AbstractController
         if (!$context) {
             return $this->json(['widgets' => null]);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $config = $em->getRepository(UserDashboard::class)->findOneBy([
             'user' => $user,
@@ -54,6 +56,7 @@ class DashboardConfigController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $config = $em->getRepository(UserDashboard::class)->findOneBy([
             'user' => $user,

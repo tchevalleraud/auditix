@@ -7,6 +7,7 @@ use App\Entity\Context;
 use App\Entity\Node;
 use App\Message\CollectNodeMessage;
 use App\Message\ProcessInventoryMessage;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\CollectionImporter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -60,6 +61,7 @@ class CollectionController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $collections = $em->getRepository(Collection::class)->findBy(
             ['context' => $context],
@@ -82,6 +84,7 @@ class CollectionController extends AbstractController
         $collections = $em->getRepository(Collection::class)->findBy(['id' => $ids]);
 
         foreach ($collections as $collection) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
             $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
             $this->deleteDirectory($storageDir);
             $em->remove($collection);
@@ -109,6 +112,7 @@ class CollectionController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         if (empty($nodeIds)) {
             return $this->json(['error' => 'No nodes specified'], Response::HTTP_BAD_REQUEST);
@@ -118,6 +122,7 @@ class CollectionController extends AbstractController
         $collections = [];
 
         foreach ($nodes as $node) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
             // Release tags from other collections of the same node
             foreach ($tags as $tag) {
                 $this->releaseTag($em, $tag, $node);
@@ -158,6 +163,7 @@ class CollectionController extends AbstractController
         $dispatched = 0;
 
         foreach ($nodes as $node) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
             // Find the latest completed collection with 'latest' tag
             $row = $em->getConnection()->fetchAssociative(
                 'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1',
@@ -176,6 +182,7 @@ class CollectionController extends AbstractController
     #[Route('/by-node/{id}', methods: ['GET'])]
     public function byNode(Node $node, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
         $collections = $em->getRepository(Collection::class)->findBy(
             ['node' => $node],
             ['createdAt' => 'DESC'],
@@ -188,6 +195,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(Collection $collection): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $data = $this->serialize($collection);
 
         // Build tree: rules (folders) → command files
@@ -232,6 +240,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}/download', methods: ['GET'])]
     public function download(Collection $collection): Response
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
 
         if (!is_dir($storageDir)) {
@@ -268,6 +277,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}/files/{path}', methods: ['GET'], requirements: ['path' => '.+'])]
     public function readFile(Collection $collection, string $path): Response
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
 
         // Sanitize: only allow traversal within the collection directory
@@ -288,6 +298,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}/tags', methods: ['POST'])]
     public function addTag(Collection $collection, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $data = json_decode($request->getContent(), true);
         $tag = trim($data['tag'] ?? '');
         if ($tag === '') {
@@ -302,6 +313,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}/tags/{tag}', methods: ['DELETE'])]
     public function removeTag(Collection $collection, string $tag, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $collection->removeTag($tag);
         $em->flush();
         return $this->json($this->serialize($collection));
@@ -310,6 +322,7 @@ class CollectionController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Collection $collection, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
         $storageDir = $this->getParameter('kernel.project_dir') . '/var/' . $collection->getStoragePath();
         $this->deleteDirectory($storageDir);
 
@@ -334,6 +347,7 @@ class CollectionController extends AbstractController
 
         $node = $em->getRepository(Node::class)->find($nodeId);
         if (!$node) return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
 
         if (!$node->getModel()) {
             return $this->json(['error' => 'Node has no model configured'], Response::HTTP_BAD_REQUEST);
@@ -358,6 +372,7 @@ class CollectionController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $dryRun = $request->query->getBoolean('dryRun');
 

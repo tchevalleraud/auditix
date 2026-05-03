@@ -6,6 +6,7 @@ use App\Entity\CollectionCommand;
 use App\Entity\CollectionFolder;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
+use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -62,6 +63,12 @@ class CollectionCommandController extends AbstractController
             return $this->json(['folders' => [], 'rootCommands' => []]);
         }
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json(['folders' => [], 'rootCommands' => []]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         // Root folders (no parent)
         $rootFolders = $em->getRepository(CollectionFolder::class)->findBy(
             ['context' => $contextId, 'parent' => null],
@@ -83,6 +90,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/by-model/{id}', methods: ['GET'])]
     public function byModel(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         // Find the model's folder and manufacturer's folder
         $modelFolder = $em->getRepository(CollectionFolder::class)->findOneBy([
             'model' => $model,
@@ -137,6 +145,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/by-model/{id}/associate', methods: ['POST'])]
     public function associate(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $data = json_decode($request->getContent(), true);
         $commandIds = $data['commandIds'] ?? [];
 
@@ -155,6 +164,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/by-model/{id}/dissociate', methods: ['POST'])]
     public function dissociate(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $data = json_decode($request->getContent(), true);
         $commandId = $data['commandId'] ?? null;
 
@@ -173,6 +183,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/available-for-model/{id}', methods: ['GET'])]
     public function availableForModel(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $context = $model->getContext();
 
         // IDs already associated (auto or manual)
@@ -249,6 +260,7 @@ class CollectionCommandController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) {
@@ -283,6 +295,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(CollectionCommand $cmd, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cmd);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -310,6 +323,7 @@ class CollectionCommandController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(CollectionCommand $cmd, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $cmd);
         $em->remove($cmd);
         $em->flush();
 

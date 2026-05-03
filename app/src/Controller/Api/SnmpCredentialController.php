@@ -4,6 +4,7 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\SnmpCredential;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\CredentialTester;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -28,6 +29,7 @@ class SnmpCredentialController extends AbstractController
     #[Route('/{id}/test', methods: ['POST'])]
     public function test(SnmpCredential $credential, Request $request): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $credential);
         $data = json_decode($request->getContent(), true) ?? [];
         $ipAddress = trim((string) ($data['ipAddress'] ?? ''));
         $oid = isset($data['oid']) ? trim((string) $data['oid']) : null;
@@ -62,6 +64,10 @@ class SnmpCredentialController extends AbstractController
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $credentials = $em->getRepository(SnmpCredential::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -77,6 +83,7 @@ class SnmpCredentialController extends AbstractController
         $contextId = $request->query->getInt('context');
         $context = $contextId ? $em->getRepository(Context::class)->find($contextId) : null;
         if (!$context) return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) return $this->json(['error' => 'Name is required'], Response::HTTP_BAD_REQUEST);
@@ -102,6 +109,7 @@ class SnmpCredentialController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(SnmpCredential $credential, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $credential);
         $data = json_decode($request->getContent(), true);
 
         $name = $data['name'] ?? '';
@@ -125,6 +133,7 @@ class SnmpCredentialController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(SnmpCredential $credential, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $credential);
         $em->remove($credential);
         $em->flush();
 

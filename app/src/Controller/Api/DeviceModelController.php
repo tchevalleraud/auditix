@@ -7,6 +7,7 @@ use App\Entity\CollectionRuleFolder;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
+use App\Security\Voter\ContextAccessVoter;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -44,6 +45,12 @@ class DeviceModelController extends AbstractController
             return $this->json([]);
         }
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json([]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $models = $em->getRepository(DeviceModel::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -62,6 +69,7 @@ class DeviceModelController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $data['name'] ?? '';
         if (empty($name)) {
@@ -127,12 +135,14 @@ class DeviceModelController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(DeviceModel $model): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         return $this->json($this->serialize($model));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $data = json_decode($request->getContent(), true);
 
         $name = $data['name'] ?? '';
@@ -187,6 +197,7 @@ class DeviceModelController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
         $em->remove($model);
         $em->flush();
 

@@ -6,6 +6,7 @@ use App\Entity\CollectionFolder;
 use App\Entity\CollectionRuleFolder;
 use App\Entity\Context;
 use App\Entity\Editor;
+use App\Security\Voter\ContextAccessVoter;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -37,6 +38,12 @@ class EditorController extends AbstractController
             return $this->json([]);
         }
 
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json([]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
         $editors = $em->getRepository(Editor::class)->findBy(
             ['context' => $contextId],
             ['name' => 'ASC']
@@ -56,6 +63,7 @@ class EditorController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $name = $request->request->get('name');
 
@@ -107,6 +115,7 @@ class EditorController extends AbstractController
         EntityManagerInterface $em,
         SluggerInterface $slugger,
     ): JsonResponse {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $editor);
         $name = $request->request->get('name');
 
         if (empty($name)) {
@@ -157,6 +166,7 @@ class EditorController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(Editor $editor, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $editor);
         $this->deleteLogoFile($editor);
 
         $em->remove($editor);

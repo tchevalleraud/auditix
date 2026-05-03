@@ -7,6 +7,7 @@ use App\Entity\ComplianceRule;
 use App\Entity\ComplianceRuleFolder;
 use App\Entity\Context;
 use App\Entity\Node;
+use App\Security\Voter\ContextAccessVoter;
 use App\Service\ComplianceEvaluator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -73,6 +74,7 @@ class ComplianceRuleController extends AbstractController
         if (!$context) {
             return $this->json(['folders' => [], 'rootRules' => []]);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $policies = $em->getRepository(CompliancePolicy::class)->findBy(
             ['context' => $context],
@@ -148,6 +150,7 @@ class ComplianceRuleController extends AbstractController
         if (!$context) {
             return $this->json(['error' => 'Context not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
 
         $rule = new ComplianceRule();
         $rule->setName($data['name']);
@@ -180,12 +183,14 @@ class ComplianceRuleController extends AbstractController
     #[Route('/{id}', methods: ['GET'])]
     public function show(ComplianceRule $rule): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         return $this->json($this->serializeRule($rule));
     }
 
     #[Route('/{id}', methods: ['PUT'])]
     public function update(ComplianceRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -215,6 +220,7 @@ class ComplianceRuleController extends AbstractController
     #[Route('/{id}', methods: ['DELETE'])]
     public function delete(ComplianceRule $rule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $em->remove($rule);
         $em->flush();
 
@@ -224,6 +230,7 @@ class ComplianceRuleController extends AbstractController
     #[Route('/{id}/test', methods: ['POST'])]
     public function test(ComplianceRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
         $nodeId = $data['nodeId'] ?? null;
 
@@ -235,6 +242,7 @@ class ComplianceRuleController extends AbstractController
         if (!$node) {
             return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
 
         $sources = $rule->getDataSources();
         if (empty($sources)) {
@@ -261,6 +269,7 @@ class ComplianceRuleController extends AbstractController
     #[Route('/{id}/clone', methods: ['POST'])]
     public function clone(ComplianceRule $rule, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $clone = new ComplianceRule();
         $clone->setName($rule->getName() . ' (copy)');
         $clone->setIdentifier($rule->getIdentifier() ? $rule->getIdentifier() . '_copy' : null);
@@ -281,6 +290,7 @@ class ComplianceRuleController extends AbstractController
     #[Route('/{id}/evaluate', methods: ['POST'])]
     public function evaluate(ComplianceRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
         $data = json_decode($request->getContent(), true);
         $nodeId = $data['nodeId'] ?? null;
         $debug = !empty($data['debug']);
@@ -293,6 +303,7 @@ class ComplianceRuleController extends AbstractController
         if (!$node) {
             return $this->json(['error' => 'Node not found'], Response::HTTP_NOT_FOUND);
         }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
 
         $result = $this->evaluator->evaluateRule($rule, $node);
 
