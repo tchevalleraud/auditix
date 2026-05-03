@@ -2171,6 +2171,8 @@
     "inventoryPreview": "Apercu du tableau",
     "inventoryPreviewNote": "Les valeurs seront remplies lors de la generation du rapport",
     "inventoryHeaderLabel": "Label personnalise du header...",
+    "inventorySortAsc": "Trier croissant (une seule colonne à la fois)",
+    "inventorySortDesc": "Trier décroissant (une seule colonne à la fois)",
     "inventoryStyle": "Style",
     "inventoryFontSize": "Taille de police",
     "inventoryFontSizeInherited": "Herite",

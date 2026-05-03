@@ -1749,6 +1749,8 @@
     "inventoryPreview": "Vista previa de la tabla",
     "inventoryPreviewNote": "Los valores se completaran durante la generacion del informe",
     "inventoryHeaderLabel": "Etiqueta personalizada del encabezado...",
+    "inventorySortAsc": "Ordenar ascendente (solo una columna a la vez)",
+    "inventorySortDesc": "Ordenar descendente (solo una columna a la vez)",
     "inventoryStyle": "Estilo",
     "inventoryFontSize": "Tamano de fuente",
     "inventoryFontSizeInherited": "Heredado",

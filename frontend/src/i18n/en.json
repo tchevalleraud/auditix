@@ -2199,6 +2199,8 @@
     "inventoryPreview": "Table preview",
     "inventoryPreviewNote": "Values will be populated during report generation",
     "inventoryHeaderLabel": "Custom header label...",
+    "inventorySortAsc": "Sort ascending (only one column at a time)",
+    "inventorySortDesc": "Sort descending (only one column at a time)",
     "inventoryStyle": "Style",
     "inventoryFontSize": "Font size",
     "inventoryFontSizeInherited": "Inherited",

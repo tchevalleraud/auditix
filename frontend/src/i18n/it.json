@@ -1749,6 +1749,8 @@
     "inventoryPreview": "Anteprima tabella",
     "inventoryPreviewNote": "I valori saranno compilati durante la generazione del report",
     "inventoryHeaderLabel": "Etichetta intestazione personalizzata...",
+    "inventorySortAsc": "Ordinamento crescente (una sola colonna alla volta)",
+    "inventorySortDesc": "Ordinamento decrescente (una sola colonna alla volta)",
     "inventoryStyle": "Stile",
     "inventoryFontSize": "Dimensione testo",
     "inventoryFontSizeInherited": "Ereditato",

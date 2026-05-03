@@ -1577,6 +1577,28 @@ class GenerateReportMessageHandler
                     }
                 }
 
+                // --- Sort node ids by configured sort column (single column, asc/desc) ---
+                $sortColId = null;
+                $sortDir = 'asc';
+                foreach ($columns as $colDef) {
+                    $s = $colDef['sort'] ?? null;
+                    if ($s === 'asc' || $s === 'desc') {
+                        $sortColId = $colDef['id'] ?? null;
+                        $sortDir = $s;
+                        break;
+                    }
+                }
+                if ($sortColId !== null && $sortColId !== '') {
+                    usort($nodeIds, function ($a, $b) use ($invData, $sortColId, $sortDir) {
+                        $va = (string) ($invData[$a][$sortColId] ?? '');
+                        $vb = (string) ($invData[$b][$sortColId] ?? '');
+                        $cmp = (is_numeric($va) && is_numeric($vb))
+                            ? ((float) $va <=> (float) $vb)
+                            : strnatcasecmp($va, $vb);
+                        return $sortDir === 'desc' ? -$cmp : $cmp;
+                    });
+                }
+
                 // --- Dynamic column width calculation ---
                 $cellPadding = 4; // mm padding per cell (left+right)
                 $pdf->SetFont($bodyFont, '', $invFontSize);

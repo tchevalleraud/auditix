@@ -1749,6 +1749,8 @@
     "inventoryPreview": "テーブルプレビュー",
     "inventoryPreviewNote": "値はレポート生成時に入力されます",
     "inventoryHeaderLabel": "カスタムヘッダーラベル...",
+    "inventorySortAsc": "昇順で並べ替え（一度に1列のみ）",
+    "inventorySortDesc": "降順で並べ替え（一度に1列のみ）",
     "inventoryStyle": "スタイル",
     "inventoryFontSize": "フォントサイズ",
     "inventoryFontSizeInherited": "継承",

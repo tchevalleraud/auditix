@@ -1749,6 +1749,8 @@
     "inventoryPreview": "Tabellenvorschau",
     "inventoryPreviewNote": "Werte werden bei der Berichterstellung ausgefuellt",
     "inventoryHeaderLabel": "Benutzerdefiniertes Header-Label...",
+    "inventorySortAsc": "Aufsteigend sortieren (nur eine Spalte gleichzeitig)",
+    "inventorySortDesc": "Absteigend sortieren (nur eine Spalte gleichzeitig)",
     "inventoryStyle": "Stil",
     "inventoryFontSize": "Schriftgroesse",
     "inventoryFontSizeInherited": "Vererbt",

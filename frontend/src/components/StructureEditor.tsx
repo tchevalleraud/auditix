@@ -52,6 +52,8 @@ import {
   LineChart,
   Activity,
   CalendarClock,
+  ArrowUpAZ,
+  ArrowDownAZ,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -123,6 +125,7 @@ export interface InventoryTableColumn {
   aggregation?: "value" | "count";
   matchValue?: string;
   matchOperator?: InventoryCountOperator;
+  sort?: "asc" | "desc";
 }
 
 export interface InventoryCountColumn {
@@ -2687,6 +2690,17 @@ function InventoryTableProperties({
     });
   };
 
+  const setColumnSort = (colId: string, dir: "asc" | "desc") => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => {
+        if (c.id === colId) {
+          return c.sort === dir ? { ...c, sort: undefined } : { ...c, sort: dir };
+        }
+        return c.sort ? { ...c, sort: undefined } : c;
+      }),
+    });
+  };
+
   const moveColumn = (idx: number, dir: -1 | 1) => {
     const target = idx + dir;
     if (target < 0 || target >= block.columns.length) return;
@@ -3029,6 +3043,11 @@ function InventoryTableProperties({
                   <button type="button" onClick={() => updateColumnProp(col.id, { valign: "top" })} className={alignBtnClass(col.valign === "top")} title={t("structure.alignTop")}><VAlignIcon type="top" /></button>
                   <button type="button" onClick={() => updateColumnProp(col.id, { valign: "middle" })} className={alignBtnClass((col.valign ?? "middle") === "middle")} title={t("structure.alignMiddle")}><VAlignIcon type="middle" /></button>
                   <button type="button" onClick={() => updateColumnProp(col.id, { valign: "bottom" })} className={alignBtnClass(col.valign === "bottom")} title={t("structure.alignBottom")}><VAlignIcon type="bottom" /></button>
+                </div>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button type="button" onClick={() => setColumnSort(col.id, "asc")} className={alignBtnClass(col.sort === "asc")} title={t("structure.inventorySortAsc")}><ArrowUpAZ className="h-3 w-3" /></button>
+                  <button type="button" onClick={() => setColumnSort(col.id, "desc")} className={alignBtnClass(col.sort === "desc")} title={t("structure.inventorySortDesc")}><ArrowDownAZ className="h-3 w-3" /></button>
                 </div>
               </div>
             </div>
@@ -5378,6 +5397,14 @@ function InventoryColumnsPanel({ columns, onChange, t }: InventoryColumnsPanelPr
 
   const removeColumn = (colId: string) => onChange(columns.filter((c) => c.id !== colId));
   const updateColumn = (colId: string, patch: Partial<InventoryTableColumn>) => onChange(columns.map((c) => (c.id === colId ? { ...c, ...patch } : c)));
+  const setSort = (colId: string, dir: "asc" | "desc") => {
+    onChange(columns.map((c) => {
+      if (c.id === colId) {
+        return c.sort === dir ? { ...c, sort: undefined } : { ...c, sort: dir };
+      }
+      return c.sort ? { ...c, sort: undefined } : c;
+    }));
+  };
   const moveColumn = (idx: number, dir: -1 | 1) => {
     const target = idx + dir;
     if (target < 0 || target >= columns.length) return;
@@ -5425,6 +5452,10 @@ function InventoryColumnsPanel({ columns, onChange, t }: InventoryColumnsPanelPr
               <button type="button" onClick={() => updateColumn(col.id, { align: "left" })} className={alignBtn((col.align ?? "left") === "left")}><AlignLeft className="h-3 w-3" /></button>
               <button type="button" onClick={() => updateColumn(col.id, { align: "center" })} className={alignBtn(col.align === "center")}><AlignCenter className="h-3 w-3" /></button>
               <button type="button" onClick={() => updateColumn(col.id, { align: "right" })} className={alignBtn(col.align === "right")}><AlignRight className="h-3 w-3" /></button>
+            </div>
+            <div className="flex items-center gap-0.5 shrink-0 border-l border-slate-200 dark:border-slate-700 pl-1.5 ml-0.5">
+              <button type="button" onClick={() => setSort(col.id, "asc")} className={alignBtn(col.sort === "asc")} title={t("structure.inventorySortAsc")}><ArrowUpAZ className="h-3 w-3" /></button>
+              <button type="button" onClick={() => setSort(col.id, "desc")} className={alignBtn(col.sort === "desc")} title={t("structure.inventorySortDesc")}><ArrowDownAZ className="h-3 w-3" /></button>
             </div>
           </div>
         </div>
