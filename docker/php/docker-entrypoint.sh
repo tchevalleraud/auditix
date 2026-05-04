@@ -55,9 +55,13 @@ if [ -f /var/www/bin/console ]; then
     php bin/console cache:warmup --no-interaction 2>/dev/null || true
 
     echo ">> Fixing permissions..."
-    # Only chown files not already owned by www-data — avoids ~70s walk on macOS
-    # bind mounts when ownership is already correct (steady-state restarts).
-    find /var/www \! -user www-data -exec chown www-data:www-data {} + 2>/dev/null || true
+    # Restrict ownership changes to directories Symfony actually writes to.
+    # Source files stay owned by the host user so `git pull` works without sudo.
+    for d in /var/www/var /var/www/vendor; do
+        if [ -d "$d" ]; then
+            find "$d" \! -user www-data -exec chown www-data:www-data {} + 2>/dev/null || true
+        fi
+    done
 fi
 
 # NGINX management: ensure www-data can write generated config and certificate files
