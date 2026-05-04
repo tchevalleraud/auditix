@@ -2,30 +2,30 @@
 sidebar_position: 1
 ---
 
-# Prerequis
+# Prérequis
 
-Avant d'installer Auditix, assurez-vous que votre serveur repond aux exigences suivantes.
+Avant d'installer Auditix, assurez-vous que votre serveur répond aux exigences suivantes.
 
-## Configuration systeme
+## Configuration système
 
-| Composant     | Minimum            | Recommande          |
-|---------------|--------------------|---------------------|
-| **OS**        | Linux (toute distro) | Ubuntu 22.04+ / Debian 12+ |
-| **CPU**       | 2 coeurs           | 4+ coeurs           |
-| **RAM**       | 2 Go               | 4+ Go               |
-| **Disque**    | 10 Go              | 20+ Go              |
+| Composant | Minimum | Recommandé |
+|---|---|---|
+| **OS** | Linux (toute distro) | Ubuntu 22.04+ / Debian 12+ |
+| **CPU** | 2 cœurs | 4+ cœurs |
+| **RAM** | 2 Go | 4+ Go |
+| **Disque** | 10 Go | 20+ Go |
 
 ## Logiciels requis
 
-| Logiciel           | Version  |
-|--------------------|----------|
-| **Docker**         | 24.0+    |
-| **Docker Compose** | 2.20+    |
-| **Git**            | 2.0+     |
+| Logiciel | Version |
+|---|---|
+| **Docker** | 24.0+ |
+| **Docker Compose** | 2.20+ |
+| **Git** | 2.0+ |
 
 ### Installer Docker
 
-Si Docker n'est pas installe sur votre serveur :
+Si Docker n'est pas installé sur votre serveur :
 
 ```bash
 # Ubuntu/Debian
@@ -33,32 +33,33 @@ curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 ```
 
-### Verifier l'installation
+### Vérifier l'installation
 
 ```bash
 docker --version
 docker compose version
 ```
 
-## Acces reseau
+## Accès réseau
 
-Auditix necessite les acces reseau suivants :
+Auditix nécessite les accès réseau suivants :
 
-- **Sortant** : Acces Internet pour telecharger les images Docker (uniquement lors de l'installation/mise a jour)
-- **Entrant** : Le port HTTP configure (defaut : `80`) doit etre accessible depuis les navigateurs clients
-- **Vers les equipements reseau** : Acces SSH (port 22) et/ou SNMP (port 161/UDP) depuis l'hote Docker vers vos equipements
+- **Sortant** : accès Internet pour télécharger les images Docker (uniquement lors de l'installation/mise à jour).
+- **Entrant** : le port HTTP configuré (défaut : `80`) doit être accessible depuis les navigateurs clients.
+- **Vers les équipements réseau** : accès SSH (port 22) et/ou SNMP (port 161/UDP) depuis l'hôte Docker vers vos équipements.
 
-## Ports utilises
+## Ports utilisés
 
-| Port  | Service    | Description                          |
-|-------|------------|--------------------------------------|
-| 80    | Nginx      | Interface web (configurable via `HTTP_PORT`) |
-| 5432  | PostgreSQL | Base de donnees (interne uniquement) |
-| 5672  | RabbitMQ   | File de messages (interne uniquement) |
-| 15672 | RabbitMQ   | Interface de gestion (interne uniquement) |
-| 3000  | Next.js    | Frontend (interne uniquement)        |
-| 9000  | PHP-FPM    | Backend (interne uniquement)         |
+| Port | Service | Description |
+|---|---|---|
+| 80 | Nginx | Interface web (configurable via `HTTP_PORT`). |
+| 443 | Nginx | Interface web HTTPS (mode HTTPS). |
+| 5432 | PostgreSQL | Base de données (interne uniquement). |
+| 5672 | RabbitMQ | File de messages (interne uniquement). |
+| 15672 | RabbitMQ | Interface de gestion (interne uniquement). |
+| 3000 | Next.js | Frontend (interne uniquement). |
+| 9000 | PHP-FPM | Backend (interne uniquement). |
 
 :::info
-Seul le port Nginx (defaut `80`) doit etre expose a l'exterieur. Tous les autres services communiquent en interne via le reseau Docker.
+Seul le port Nginx (défaut `80` ou `443` en HTTPS) doit être exposé à l'extérieur. Tous les autres services communiquent en interne via le réseau Docker.
 :::

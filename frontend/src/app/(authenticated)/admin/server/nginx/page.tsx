@@ -262,7 +262,7 @@ export default function NginxConfigPage() {
         <div className="p-5 space-y-5">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {([
-              { value: "http", icon: Globe, label: t("admin_nginx.modeHttp"), hint: t("admin_nginx.modeHttpHint") },
+              { value: "http", icon: Globe, label: t("admin_nginx.modeHttp"), hint: t("admin_nginx.modeHttpHint"), needsCert: false },
               { value: "https", icon: Lock, label: t("admin_nginx.modeHttps"), hint: t("admin_nginx.modeHttpsHint"), needsCert: true },
               { value: "http_https", icon: ShieldCheck, label: t("admin_nginx.modeHttpHttps"), hint: t("admin_nginx.modeHttpHttpsHint"), needsCert: true },
             ] as const).map((opt) => {

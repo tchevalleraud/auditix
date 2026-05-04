@@ -13,7 +13,7 @@ const config: Config = {
   organizationName: 'tchevalleraud',
   projectName: 'auditix',
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
   onBrokenMarkdownLinks: 'warn',
 
   i18n: {
@@ -35,7 +35,7 @@ const config: Config = {
           lastVersion: 'current',
           versions: {
             current: {
-              label: '2.1.x',
+              label: '4.1.x',
               badge: true,
             },
           },

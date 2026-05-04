@@ -62,3 +62,46 @@ The **Actions** dropdown button in the node header provides:
 
 - **Evaluate compliance** — Run compliance evaluation against all assigned policies
 - **Collect** — Start a new data collection from the device
+- **Ping** — ICMP probe with latency report
+- **Extract** — Re-run extraction rules against the latest collected output
+
+Multiple actions can be **chained** — pick more than one from the dropdown and they run in order, each waiting for the previous to finish. Live status updates stream into the row via Mercure (no manual refresh needed).
+
+## Bulk actions
+
+From the node list, tick rows and click **Bulk actions**. Same set of actions as above (ping, collect, extract, tag), applied to the selection.
+
+```http
+POST /api/nodes/bulk-actions
+{
+  "nodeIds": [12, 14, 17, 18],
+  "actions": ["ping", "collect", "extract"]
+}
+```
+
+:::info Screenshot expected
+**File**: `static/img/screenshots/nodes/bulk-actions.png`
+**Description**: Node list with 4 rows ticked, the **Bulk actions** dropdown open showing checkboxes (Ping, Collect, Extract, Tag…), an "Apply" button at the bottom and a small live counter "0/4 done" appearing once the action starts.
+:::
+
+## CSV import
+
+To onboard many nodes at once, use **Nodes → Import → CSV**. The expected layout:
+
+```csv
+name,ipAddress,hostname,manufacturer,model,profile,tags
+core-rtr-01,10.0.0.1,core-rtr-01,Cisco,ASR1001-X,Cisco Admin,"core,prod"
+core-rtr-02,10.0.0.2,core-rtr-02,Cisco,ASR1001-X,Cisco Admin,"core,prod"
+edge-sw-01,10.0.1.1,edge-sw-01,Arista,DCS-7050SX,Arista RO,"edge,prod"
+```
+
+Headers can appear in any order; unknown columns are ignored. References to manufacturers, models, profiles and tags must already exist (or be created in the same context). Row-level errors are reported in the import preview before any commit.
+
+:::info Screenshot expected
+**File**: `static/img/screenshots/nodes/csv-import.png`
+**Description**: CSV import wizard — left pane shows a drag-drop zone, right pane shows the parsed preview as a table with row-level status pills (NEW / DUPLICATE / ERROR) and a counter "98 ready · 2 errors · 0 duplicates".
+:::
+
+## Customisable columns
+
+Columns of the node list (and of every inventory category opened from a node) are configurable per context — see [Inventory categories](../inventory/categories).

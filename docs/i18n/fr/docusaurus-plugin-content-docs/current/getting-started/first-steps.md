@@ -4,69 +4,73 @@ sidebar_position: 3
 
 # Premiers pas
 
-Apres avoir installe Auditix, suivez ces etapes pour configurer votre environnement.
+Après avoir installé Auditix, suivez ces étapes pour configurer votre environnement.
 
 ## 1. Connexion
 
-Accedez a votre instance Auditix et connectez-vous avec les identifiants par defaut :
+Accédez à votre instance Auditix et connectez-vous avec les identifiants par défaut :
 
 - **Nom d'utilisateur** : `admin`
 - **Mot de passe** : `password`
 
 ## 2. Changer votre mot de passe
 
-Allez dans votre **Profil** (cliquez sur votre avatar en haut a droite) et changez le mot de passe par defaut.
+Allez dans **Compte → Sécurité** (cliquez sur votre avatar en haut à droite) et changez le mot de passe par défaut. Activez la [2FA TOTP](../admin/authentication/2fa) dans la foulée si votre stratégie le permet.
 
 ## 3. Configurer votre contexte
 
-Un contexte par defaut nomme "Default" est cree automatiquement. Vous pouvez le personnaliser :
+Un contexte par défaut nommé « Default » est créé automatiquement. Vous pouvez le personnaliser :
 
-1. Cliquez sur le **selecteur de contexte** dans la barre superieure
-2. Allez dans l'onglet **Parametres** du contexte
-3. Modifiez le nom et la description
-4. Activez le **Monitoring** si vous souhaitez le monitoring SNMP/ICMP
+1. Cliquez sur le **sélecteur de contexte** dans la barre supérieure.
+2. Allez dans l'onglet **Paramètres** du contexte.
+3. Modifiez le nom et la description.
+4. Activez le **Monitoring** si vous souhaitez le polling SNMP/ICMP.
 
-## 4. Ajouter des fabricants et modeles
+## 4. Ajouter fabricants et modèles
 
-Avant d'ajouter des noeuds, configurez votre bibliotheque d'equipements :
+Avant d'ajouter des nœuds, configurez votre bibliothèque d'équipements :
 
-1. Allez dans **Fabricants** dans la barre laterale
-2. Creez des fabricants (ex : Cisco, Juniper, Fortinet)
-3. Pour chaque fabricant, ajoutez des **Modeles** avec leurs scripts de connexion et commandes de collecte
+1. Allez dans **Fabricants** dans la barre latérale.
+2. Créez des fabricants (ex. Cisco, Juniper, Fortinet).
+3. Pour chaque fabricant, ajoutez des **Modèles** avec leurs scripts de connexion et commandes de collecte.
 
-## 5. Ajouter votre premier noeud
+## 5. Ajouter votre premier nœud
 
-1. Allez dans **Noeuds** dans la barre laterale
-2. Cliquez sur **Nouveau noeud**
+Vous pouvez créer les nœuds un par un, ou tous d'un coup via [import CSV](../guide/nodes/nodes).
+
+1. Allez dans **Nœuds** dans la barre latérale.
+2. Cliquez sur **Nouveau nœud**.
 3. Remplissez les informations :
-   - **Adresse IP** (obligatoire)
-   - **Nom** / **Hostname** (optionnel)
-   - **Fabricant** et **Modele**
-   - **Profil** (identifiants SSH)
+   - **Adresse IP** (obligatoire),
+   - **Nom** / **Hostname** (optionnel),
+   - **Fabricant** et **Modèle**,
+   - **Profil** (identifiants SSH).
 
-## 6. Lancer une collecte
+## 6. Tester le profil
 
-Une fois votre noeud configure avec un modele et un profil :
+Avant de lancer une collecte, vérifiez le profil avec **Profil → Tester** : Auditix tente une connexion live et reporte la latence et le banner SSH/SNMP — c'est le moyen le plus rapide de détecter une mauvaise crédential ou un firewall qui filtre.
 
-1. Ouvrez la page de detail du noeud
-2. Cliquez sur le bouton **Actions**
-3. Selectionnez **Collecter**
-4. Ajoutez optionnellement des tags pour organiser la collecte
-5. Cliquez sur **Demarrer**
+## 7. Lancer une collecte
 
-La collecte s'executera en arriere-plan. Vous pouvez suivre sa progression dans l'onglet **Collectes**.
+1. Ouvrez la page de détail du nœud.
+2. Cliquez sur **Actions → Collecter**.
+3. Suivez la progression dans l'onglet **Collectes** (mises à jour live via Mercure).
 
-## 7. Evaluer la conformite
+## 8. Évaluer la conformité
 
-Apres avoir configure les politiques et regles de conformite :
+Après avoir configuré politiques et règles de conformité :
 
-1. Ouvrez la page de detail d'un noeud
-2. Cliquez sur le bouton **Actions**
-3. Selectionnez **Evaluer la conformite**
+1. Ouvrez la page de détail d'un nœud.
+2. Cliquez sur **Actions → Évaluer la conformité**.
 
-Le score de conformite apparaitra une fois l'evaluation terminee.
+Le score de conformité apparaîtra une fois l'évaluation terminée.
 
-## Etapes suivantes
+## 9. Automatiser
 
-- [Guide utilisateur](../guide/dashboard) — Explorez toutes les fonctionnalites de l'application
-- [Variables d'environnement](../admin/environment-variables) — Ajustez votre deploiement
+Plutôt que de tout déclencher à la main, créez un [planning](../guide/schedules) qui enchaîne collecte → extraction → conformité → rapport → e-mail à la fréquence souhaitée.
+
+## Étapes suivantes
+
+- [Guide utilisateur](../guide/dashboard) — explorez toutes les fonctionnalités.
+- [Variables d'environnement](../admin/environment-variables) — ajustez votre déploiement.
+- [API REST](../api/overview) — automatisez Auditix depuis vos scripts.

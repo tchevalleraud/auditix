@@ -46,6 +46,40 @@ Scale workers based on your infrastructure size and needs:
 | `WORKER_COLLECTOR_REPLICAS`    | `2`     | Data collection workers. |
 | `WORKER_COMPLIANCE_REPLICAS`   | `2`     | Compliance evaluation workers. |
 | `WORKER_GENERATOR_REPLICAS`    | `1`     | Report generation workers. |
+| `WORKER_SCHEDULER_PROCESSES`   | `1`     | Consumers per scheduler container. |
+| `WORKER_MONITORING_PROCESSES`  | `4`     | Consumers per monitoring container. |
+| `WORKER_COLLECTOR_PROCESSES`   | `4`     | Consumers per collector container. |
+| `WORKER_GENERATOR_PROCESSES`   | `2`     | Consumers per generator container. |
+
+The total concurrency for a pool is `replicas × processes`. Both can also be tuned live from **Administration → Server → Workers** — see the [Worker pools page](./server/workers).
+
+## Authentication & sessions
+
+| Variable | Default | Description |
+|---|---|---|
+| `OIDC_CALLBACK_BASE_URL` | derived from `DEFAULT_URI` | Base URL announced to OIDC providers (`/api/auth/oidc/{slug}/callback`). Override only when behind a path rewriter. |
+| `SESSION_LIFETIME_SECONDS` | `28800` | Absolute session lifetime (default 8 h). |
+| `IDLE_TIMEOUT_SECONDS` | configurable in GUI | Initial idle timeout. The GUI value wins once set. |
+
+## Audit & syslog
+
+| Variable | Default | Description |
+|---|---|---|
+| `AUDIT_LOG_RETENTION_DAYS` | `365` | Days to keep entries in the local DB. `0` = forever. |
+| `SYSLOG_FORWARD_RETRY_MAX_SECONDS` | `300` | Backoff cap before a syslog message is dropped after repeated forwarding failures. |
+
+## API
+
+| Variable | Default | Description |
+|---|---|---|
+| `API_RATE_LIMIT_PER_MINUTE` | `600` | Requests per minute per token. `0` disables the limiter. |
+| `API_TOKEN_DEFAULT_TTL_DAYS` | `365` | Default TTL applied when creating a token without explicit expiry. |
+
+## Uploads
+
+| Variable | Default | Description |
+|---|---|---|
+| `UPLOAD_MAX_SIZE_MB` | `50` | Hard cap on uploaded files (CSV imports, ZIP archives, certificates). |
 
 ### Scaling Guidelines
 

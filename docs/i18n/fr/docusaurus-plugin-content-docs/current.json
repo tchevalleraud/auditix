@@ -1,10 +1,10 @@
 {
   "version.label": {
-    "message": "2.1.x",
+    "message": "4.1.x",
     "description": "The label for version current"
   },
   "sidebar.docsSidebar.category.Getting Started": {
-    "message": "Demarrage",
+    "message": "Démarrage",
     "description": "The label for category 'Getting Started' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.User Guide": {
@@ -12,23 +12,51 @@
     "description": "The label for category 'User Guide' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.Node Management": {
-    "message": "Gestion des noeuds",
+    "message": "Gestion des nœuds",
     "description": "The label for category 'Node Management' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Topology": {
+    "message": "Topologie",
+    "description": "The label for category 'Topology' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.Collections": {
     "message": "Collectes",
     "description": "The label for category 'Collections' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.Compliance": {
-    "message": "Conformite",
+    "message": "Conformité",
     "description": "The label for category 'Compliance' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Inventory": {
+    "message": "Inventaire",
+    "description": "The label for category 'Inventory' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.Reports": {
     "message": "Rapports",
     "description": "The label for category 'Reports' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.API": {
+    "message": "API",
+    "description": "The label for category 'API' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.Administration": {
     "message": "Administration",
     "description": "The label for category 'Administration' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Authentication": {
+    "message": "Authentification",
+    "description": "The label for category 'Authentication' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Mail": {
+    "message": "Messagerie",
+    "description": "The label for category 'Mail' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Server": {
+    "message": "Serveur",
+    "description": "The label for category 'Server' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Audit": {
+    "message": "Audit",
+    "description": "The label for category 'Audit' in sidebar 'docsSidebar'"
   }
 }

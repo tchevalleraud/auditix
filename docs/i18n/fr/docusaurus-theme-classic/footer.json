@@ -4,12 +4,16 @@
     "description": "The title of the footer links column with title=Documentation in the footer"
   },
   "link.title.Community": {
-    "message": "Community",
+    "message": "Communauté",
     "description": "The title of the footer links column with title=Community in the footer"
   },
   "link.item.label.Getting Started": {
-    "message": "Getting Started",
+    "message": "Démarrage",
     "description": "The label of footer link with label=Getting Started linking to /docs/getting-started/installation"
+  },
+  "link.item.label.User Guide": {
+    "message": "Guide utilisateur",
+    "description": "The label of footer link"
   },
   "link.item.label.Configuration": {
     "message": "Configuration",
@@ -20,11 +24,11 @@
     "description": "The label of footer link with label=GitHub linking to https://github.com/tchevalleraud/auditix"
   },
   "link.item.label.Issues": {
-    "message": "Issues",
+    "message": "Tickets",
     "description": "The label of footer link with label=Issues linking to https://github.com/tchevalleraud/auditix/issues"
   },
   "copyright": {
-    "message": "Copyright 2026 Auditix. Built with Docusaurus.",
+    "message": "Copyright 2026 Auditix. Construit avec Docusaurus.",
     "description": "The footer copyright"
   }
 }
