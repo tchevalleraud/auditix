@@ -63,10 +63,12 @@ status: ## Show application status as a synthetic table
 
 # ----- Backup / restore -----
 
-backup: ## Create a timestamped backup of the database and persistent files
+backup: ## Create a timestamped backup of the database and persistent files (LABEL=name to tag the archive)
 	@TS=$$(date +%Y%m%d-%H%M%S); \
-	OUT_DIR="backups/auditix-$$TS"; \
-	OUT_TGZ="backups/auditix-$$TS.tar.gz"; \
+	LABEL_PART=""; \
+	[ -n "$(LABEL)" ] && LABEL_PART="-$(LABEL)"; \
+	OUT_DIR="backups/auditix$$LABEL_PART-$$TS"; \
+	OUT_TGZ="backups/auditix$$LABEL_PART-$$TS.tar.gz"; \
 	mkdir -p "$$OUT_DIR"; \
 	echo "\033[36m[backup]\033[0m Ensuring postgres is running..."; \
 	docker compose up -d postgres >/dev/null 2>&1; \
@@ -83,7 +85,9 @@ backup: ## Create a timestamped backup of the database and persistent files
 		$$([ -d app/var/reports ] && echo app/var/reports) \
 		2>/dev/null || true; \
 	cat VERSION > "$$OUT_DIR/VERSION"; \
-	tar czf "$$OUT_TGZ" -C backups "auditix-$$TS"; \
+	git rev-parse --abbrev-ref HEAD 2>/dev/null > "$$OUT_DIR/REF" || true; \
+	git rev-parse HEAD 2>/dev/null >> "$$OUT_DIR/REF" || true; \
+	tar czf "$$OUT_TGZ" -C backups "auditix$$LABEL_PART-$$TS"; \
 	rm -rf "$$OUT_DIR"; \
 	echo "\033[32m[backup]\033[0m Saved to $$OUT_TGZ"
 
@@ -127,21 +131,46 @@ doctor-fix: ## Run doctor and apply auto-fixes for safe issues
 
 # ----- Upgrade -----
 
-upgrade: ## Pull latest version, backup, rebuild and apply migrations (SKIP_BACKUP=1 to skip)
-	@echo "\033[36m[1/7]\033[0m Pulling latest changes..."
-	@git stash --quiet 2>/dev/null || true
-	@git pull --ff-only
-	@if [ "$(SKIP_BACKUP)" = "1" ]; then \
+upgrade: ## Upgrade in place (BRANCH=name or TAG=vX.Y.Z to switch refs, SKIP_BACKUP=1 to skip backup)
+	@CURRENT_REF="$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD)"; \
+	if [ -n "$(BRANCH)" ] && [ -n "$(TAG)" ]; then \
+		echo "\033[31mError:\033[0m use either BRANCH= or TAG=, not both"; exit 1; \
+	fi; \
+	if [ -n "$(BRANCH)" ]; then \
+		TARGET_REF="$(BRANCH)"; TARGET_KIND=branch; \
+	elif [ -n "$(TAG)" ]; then \
+		TARGET_REF="$(TAG)"; TARGET_KIND=tag; \
+	else \
+		TARGET_REF="$$CURRENT_REF"; TARGET_KIND=branch; \
+	fi; \
+	if [ "$$TARGET_REF" != "$$CURRENT_REF" ]; then \
+		BACKUP_LABEL="from-$$CURRENT_REF"; \
+	else \
+		BACKUP_LABEL=""; \
+	fi; \
+	echo "\033[36m[1/7]\033[0m Preparing upgrade ($$CURRENT_REF → $$TARGET_REF, kind=$$TARGET_KIND)..."; \
+	if [ "$(SKIP_BACKUP)" = "1" ]; then \
 		echo "\033[33m[2/7]\033[0m Backup skipped (SKIP_BACKUP=1)"; \
 	else \
 		echo "\033[36m[2/7]\033[0m Creating safety backup..."; \
-		$(MAKE) --no-print-directory backup; \
-	fi
-	@echo "\033[36m[3/7]\033[0m Rebuilding containers..."
+		$(MAKE) --no-print-directory backup LABEL="$$BACKUP_LABEL"; \
+	fi; \
+	echo "\033[36m[3/7]\033[0m Fetching from origin..."; \
+	git stash --quiet 2>/dev/null || true; \
+	git fetch --tags --prune origin; \
+	if [ "$$TARGET_KIND" = "tag" ]; then \
+		git checkout "$$TARGET_REF"; \
+	else \
+		git checkout "$$TARGET_REF"; \
+		git pull --ff-only origin "$$TARGET_REF"; \
+	fi; \
+	$(MAKE) --no-print-directory _upgrade_apply
+
+_upgrade_apply:
+	@echo "\033[36m[4/7]\033[0m Rebuilding containers..."
 	docker compose up -d --build
-	@echo "\033[36m[4/7]\033[0m Installing PHP dependencies..."
+	@echo "\033[36m[5/7]\033[0m Installing PHP dependencies and applying migrations..."
 	docker compose exec -T php composer install --no-interaction --optimize-autoloader
-	@echo "\033[36m[5/7]\033[0m Clearing cache and applying migrations..."
 	docker compose exec -T php php bin/console cache:clear --no-interaction
 	docker compose exec -T php php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
 	@echo "\033[36m[6/7]\033[0m Restarting workers..."

@@ -125,6 +125,14 @@ if [ "$SCHEMA_OK" = "1" ]; then
         PENDING=$((MIGS_FS - MIGS_DB))
         warn "$PENDING pending migration(s)"
         hint "Apply: make upgrade   (or: docker compose exec php php bin/console doctrine:migrations:migrate --no-interaction)"
+    elif [ "$MIGS_DB" -gt "$MIGS_FS" ]; then
+        EXTRA=$((MIGS_DB - MIGS_FS))
+        warn "Database has $EXTRA migration(s) not present in this checkout"
+        hint "This usually means you switched to an older branch/tag while the DB was upgraded by a newer one."
+        hint "The schema may carry columns/tables the current code does not know about — usually harmless"
+        hint "as long as no NOT NULL or FK conflict exists."
+        hint "To get back to a coherent state with the previous branch:"
+        hint "  make restore BACKUP=backups/auditix-from-<source-branch>-*.tar.gz"
     else
         ok "All $MIGS_DB migrations recorded as applied"
     fi

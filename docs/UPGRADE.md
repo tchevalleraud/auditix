@@ -44,6 +44,8 @@ behave identically.
 
 ## Upgrade
 
+### Stay on the current branch
+
 ```bash
 cd /path/to/auditix
 make upgrade
@@ -51,11 +53,11 @@ make upgrade
 
 `make upgrade` performs:
 
-1. `git pull --ff-only`
-2. **Automatic backup** of database + uploads/reports/collections (see *Backup* below)
-3. Rebuild containers
-4. `composer install`
-5. `cache:clear` + `doctrine:migrations:migrate`
+1. **Automatic backup** of database + uploads/reports/collections (see *Backup* below)
+2. `git fetch --tags --prune origin`
+3. `git pull --ff-only` (or `git checkout` when switching refs, see below)
+4. Rebuild containers
+5. `composer install` + `cache:clear` + `doctrine:migrations:migrate`
 6. Restart workers
 7. Restart nginx once the frontend is ready
 
@@ -64,6 +66,33 @@ To skip the backup step (faster, but no recovery point):
 ```bash
 make upgrade SKIP_BACKUP=1
 ```
+
+### Switch to another branch or tag
+
+```bash
+make upgrade BRANCH=dev          # follow the dev branch
+make upgrade TAG=v4.3.0          # pin to a specific tag (detached HEAD)
+make upgrade BRANCH=main         # come back to main
+```
+
+When the target ref differs from the current one, the safety backup is
+labelled with the source branch (e.g. `backups/auditix-from-main-…tar.gz`),
+which makes restore easier:
+
+```bash
+# go test the dev branch
+make upgrade BRANCH=dev
+
+# come back to a clean main state
+make upgrade BRANCH=main
+make restore BACKUP=backups/auditix-from-main-<timestamp>.tar.gz
+```
+
+> ⚠️ Doctrine does not auto-rollback migrations. Going from a more advanced
+> branch (e.g. `dev`) back to an older one (`main`) leaves the schema with
+> columns/tables that the older code doesn't know about — usually harmless,
+> but `make doctor` will warn you about it. The clean recovery path is to
+> restore the labelled backup taken when you left the older branch.
 
 ## Backup and restore
 
