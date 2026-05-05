@@ -44,12 +44,17 @@ behave identically.
 
 ## Upgrade
 
-### Stay on the current branch
+### Default behavior
 
 ```bash
 cd /path/to/auditix
 make upgrade
 ```
+
+- **On a branch** (`main`, `dev`, …): pulls the latest commits of that branch.
+- **On a tag** (detached HEAD, the default after the one-line installer):
+  jumps to the latest stable tag (e.g. v4.3.1 → v4.3.2).
+- Override with `BRANCH=` or `TAG=` (see below).
 
 `make upgrade` performs:
 

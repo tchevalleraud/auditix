@@ -140,11 +140,25 @@ upgrade: ## Upgrade in place (BRANCH=name or TAG=vX.Y.Z to switch refs, SKIP_BAC
 		TARGET_REF="$(BRANCH)"; TARGET_KIND=branch; \
 	elif [ -n "$(TAG)" ]; then \
 		TARGET_REF="$(TAG)"; TARGET_KIND=tag; \
+	elif [ "$$CURRENT_REF" = "HEAD" ]; then \
+		echo "\033[36m[upgrade]\033[0m Detached HEAD detected, resolving latest stable tag..."; \
+		LATEST_TAG="$$(git ls-remote --tags --refs origin 2>/dev/null \
+			| awk -F/ '{print $$NF}' \
+			| grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$$' \
+			| sort -V \
+			| tail -n 1)"; \
+		if [ -z "$$LATEST_TAG" ]; then \
+			echo "\033[31mError:\033[0m cannot resolve latest tag. Specify BRANCH= or TAG= explicitly."; exit 1; \
+		fi; \
+		TARGET_REF="$$LATEST_TAG"; TARGET_KIND=tag; \
+		CURRENT_TAG="$$(git describe --tags --exact-match 2>/dev/null || echo HEAD)"; \
+		echo "\033[36m[upgrade]\033[0m $$CURRENT_TAG → $$LATEST_TAG (latest tag)"; \
 	else \
 		TARGET_REF="$$CURRENT_REF"; TARGET_KIND=branch; \
 	fi; \
 	if [ "$$TARGET_REF" != "$$CURRENT_REF" ]; then \
 		BACKUP_LABEL="from-$$CURRENT_REF"; \
+		[ "$$CURRENT_REF" = "HEAD" ] && BACKUP_LABEL="from-$$(git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"; \
 	else \
 		BACKUP_LABEL=""; \
 	fi; \
