@@ -131,6 +131,8 @@ class GenerateReportMessageHandler
             'col_version' => 'Version',
             'col_date' => 'Date',
             'col_description' => 'Description',
+            'comparison_title' => 'Comparaison',
+            'comparison_common' => 'Communs',
         ],
         'en' => [
             'priority_critical' => 'Critical',
@@ -151,6 +153,8 @@ class GenerateReportMessageHandler
             'col_version' => 'Version',
             'col_date' => 'Date',
             'col_description' => 'Description',
+            'comparison_title' => 'Comparison',
+            'comparison_common' => 'Common',
         ],
         'de' => [
             'priority_critical' => 'Kritisch',
@@ -171,6 +175,8 @@ class GenerateReportMessageHandler
             'col_version' => 'Version',
             'col_date' => 'Datum',
             'col_description' => 'Beschreibung',
+            'comparison_title' => 'Vergleich',
+            'comparison_common' => 'Gemeinsam',
         ],
         'es' => [
             'priority_critical' => 'Critico',
@@ -191,6 +197,8 @@ class GenerateReportMessageHandler
             'col_version' => 'Version',
             'col_date' => 'Fecha',
             'col_description' => 'Descripcion',
+            'comparison_title' => 'Comparacion',
+            'comparison_common' => 'Comunes',
         ],
         'it' => [
             'priority_critical' => 'Critico',
@@ -211,6 +219,8 @@ class GenerateReportMessageHandler
             'col_version' => 'Versione',
             'col_date' => 'Data',
             'col_description' => 'Descrizione',
+            'comparison_title' => 'Confronto',
+            'comparison_common' => 'Comuni',
         ],
         'ja' => [
             'toc' => '目次',
@@ -227,6 +237,8 @@ class GenerateReportMessageHandler
             'col_version' => 'バージョン',
             'col_date' => '日付',
             'col_description' => '説明',
+            'comparison_title' => '比較',
+            'comparison_common' => '共通',
         ],
     ];
 
@@ -3464,6 +3476,448 @@ class GenerateReportMessageHandler
                     $pdf->Ln($pSpaceAfter);
                 }
                 $prevType = 'timeline';
+
+            } elseif ($type === 'comparison_summary') {
+                $cmpNode1Id = (int) ($block['node1Id'] ?? 0);
+                $cmpNode2Id = (int) ($block['node2Id'] ?? 0);
+                $cmpComparisons = $block['comparisons'] ?? [];
+                $cmpShowHeader = !empty($block['showHeader']);
+                $cmpFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : ($styles['table']['fontSize'] ?? $bodySize);
+
+                if (!$cmpNode1Id || !$cmpNode2Id || empty($cmpComparisons)) {
+                    continue;
+                }
+                $cmpNode1 = $this->em->getRepository(Node::class)->find($cmpNode1Id);
+                $cmpNode2 = $this->em->getRepository(Node::class)->find($cmpNode2Id);
+                if (!$cmpNode1 || !$cmpNode2) {
+                    continue;
+                }
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $tableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $headerBg = $this->hexToRgb($tableStyle['headerBg'] ?? '#1e293b');
+                $headerColor = $this->hexToRgb($tableStyle['headerColor'] ?? '#ffffff');
+                $borderColor = $this->hexToRgb($tableStyle['borderColor'] ?? '#e2e8f0');
+                $alternateRows = $tableStyle['alternateRows'] ?? true;
+                $alternateBg = $this->hexToRgb($tableStyle['alternateBg'] ?? '#f8fafc');
+
+                $cmpNode1Label = (string) ($block['node1Label'] ?? '');
+                if ($cmpNode1Label === '') {
+                    $cmpNode1Label = $cmpNode1->getHostname() ?: $cmpNode1->getName() ?: $cmpNode1->getIpAddress();
+                }
+                $cmpNode2Label = (string) ($block['node2Label'] ?? '');
+                if ($cmpNode2Label === '') {
+                    $cmpNode2Label = $cmpNode2->getHostname() ?: $cmpNode2->getName() ?: $cmpNode2->getIpAddress();
+                }
+                $cmpLocale = $report ? $report->getLocale() : 'fr';
+                $cmpTrans = self::PDF_TRANSLATIONS[$cmpLocale] ?? self::PDF_TRANSLATIONS['en'];
+                $cmpTitleHeader = (string) ($block['titleHeader'] ?? '');
+                if ($cmpTitleHeader === '') $cmpTitleHeader = $cmpTrans['comparison_title'] ?? 'Comparison';
+                $cmpCommonHeader = (string) ($block['commonHeader'] ?? '');
+                if ($cmpCommonHeader === '') $cmpCommonHeader = $cmpTrans['comparison_common'] ?? 'Common';
+
+                // 4 columns: title | N1 (+/-) | common | N2 (+/-)
+                $headers = [$cmpTitleHeader, $cmpNode1Label, $cmpCommonHeader, $cmpNode2Label];
+                $cmpRows = [];
+
+                $invRepo = $this->em->getRepository(NodeInventoryEntry::class);
+
+                foreach ($cmpComparisons as $cmp) {
+                    $cmpTitle = (string) ($cmp['title'] ?? '');
+                    $cmpCat = (string) ($cmp['categoryName'] ?? '');
+                    $matchCols = $cmp['matchColumns'] ?? [];
+                    if (!is_array($matchCols)) $matchCols = [];
+                    if ($cmpCat === '') {
+                        $cmpRows[] = [$cmpTitle, 0, 0, 0, 0, 0];
+                        continue;
+                    }
+
+                    // Identity tuple per entryKey: (key, ...matchColumns values)
+                    $loadIdentity = function (Node $n) use ($invRepo, $cmpCat, $matchCols): array {
+                        $entries = $invRepo->createQueryBuilder('e')
+                            ->where('e.node = :n')
+                            ->andWhere('e.categoryName = :cat')
+                            ->setParameter('n', $n)
+                            ->setParameter('cat', $cmpCat)
+                            ->getQuery()
+                            ->getResult();
+                        $byKey = [];
+                        foreach ($entries as $e) {
+                            $k = $e->getEntryKey() ?? '';
+                            $cl = $e->getColLabel() ?? '';
+                            if (!isset($byKey[$k])) $byKey[$k] = [];
+                            $byKey[$k][mb_strtolower($cl)] = $e->getValue() ?? '';
+                        }
+                        $tuples = [];
+                        foreach ($byKey as $k => $cols) {
+                            $parts = [$k];
+                            foreach ($matchCols as $mc) {
+                                $parts[] = $cols[mb_strtolower((string) $mc)] ?? '';
+                            }
+                            $tuples[$k] = implode("\x1f", $parts);
+                        }
+                        return $tuples;
+                    };
+
+                    $t1 = $loadIdentity($cmpNode1);
+                    $t2 = $loadIdentity($cmpNode2);
+
+                    // onlyN1: keys only in N1 (truly extra in N1, missing in N2)
+                    // onlyN2: keys only in N2 (truly extra in N2, missing in N1)
+                    // mismatch: keys present in both but identity tuples differ — counts as missing on both sides
+                    $onlyN1 = 0; $onlyN2 = 0; $mismatch = 0; $common = 0;
+                    foreach ($t1 as $k => $tup1) {
+                        if (!isset($t2[$k])) {
+                            $onlyN1++;
+                        } elseif ($t2[$k] === $tup1) {
+                            $common++;
+                        } else {
+                            $mismatch++;
+                        }
+                    }
+                    foreach ($t2 as $k => $tup2) {
+                        if (!isset($t1[$k])) {
+                            $onlyN2++;
+                        }
+                    }
+
+                    // N1 cell: + = onlyN1, - = onlyN2 + mismatch
+                    // N2 cell: + = onlyN2, - = onlyN1 + mismatch
+                    $cmpRows[] = [
+                        $cmpTitle,
+                        $onlyN1, $onlyN2 + $mismatch,
+                        $common,
+                        $onlyN2, $onlyN1 + $mismatch,
+                    ];
+                }
+
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $minLineH = $cmpFontSize * 0.3528 + 3;
+                $cellPadding = 6;
+                $colCountCmp = 4;
+
+                // Plain text used for width measurement (HTML rendered on actual draw)
+                // Row layout: [title, n1Plus, n1Minus, common, n2Plus, n2Minus]
+                $cellPlain = function (int $colIdx, array $row) {
+                    if ($colIdx === 0) return (string) $row[0];
+                    if ($colIdx === 2) return (string) $row[3];
+                    $pos = $colIdx === 1 ? (int) $row[1] : (int) $row[4];
+                    $neg = $colIdx === 1 ? (int) $row[2] : (int) $row[5];
+                    if ($pos === 0 && $neg === 0) return '-';
+                    $parts = [];
+                    if ($pos > 0) $parts[] = '+' . $pos;
+                    if ($neg > 0) $parts[] = '-' . $neg;
+                    return implode(' / ', $parts);
+                };
+
+                $maxWidths = array_fill(0, $colCountCmp, 0);
+                $pdf->SetFont($bodyFont, 'B', $cmpFontSize);
+                foreach ($headers as $hi => $h) {
+                    $maxWidths[$hi] = max($maxWidths[$hi], $pdf->GetStringWidth($h) + $cellPadding);
+                }
+                $pdf->SetFont($bodyFont, '', $cmpFontSize);
+                foreach ($cmpRows as $row) {
+                    for ($c = 0; $c < $colCountCmp; $c++) {
+                        $text = $cellPlain($c, $row);
+                        $maxWidths[$c] = max($maxWidths[$c], $pdf->GetStringWidth($text) + $cellPadding);
+                    }
+                }
+                $totalNatural = array_sum($maxWidths);
+                $colWidthsCmp = [];
+                if ($totalNatural < $contentW) {
+                    $extra = $contentW - $totalNatural;
+                    $colWidthsCmp[0] = $maxWidths[0] + $extra;
+                    for ($c = 1; $c < $colCountCmp; $c++) $colWidthsCmp[$c] = $maxWidths[$c];
+                } else {
+                    $scale = $contentW / max($totalNatural, 0.01);
+                    foreach ($maxWidths as $w) $colWidthsCmp[] = $w * $scale;
+                }
+
+                $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                if ($cmpShowHeader) {
+                    $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                    $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                    $pdf->SetFont($bodyFont, 'B', $cmpFontSize);
+                    $maxH = $minLineH;
+                    foreach ($headers as $hi => $h) {
+                        $maxH = max($maxH, $pdf->getStringHeight($colWidthsCmp[$hi], $h) + 2);
+                    }
+                    $startY = $pdf->GetY();
+                    $startX = $mLeft;
+                    foreach ($headers as $hi => $h) {
+                        $align = $hi === 0 ? 'L' : 'C';
+                        $pdf->MultiCell($colWidthsCmp[$hi], $maxH, $h, 1, $align, true, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                        $startX += $colWidthsCmp[$hi];
+                    }
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+
+                $renderDiffHtml = function (int $pos, int $neg): string {
+                    if ($pos === 0 && $neg === 0) {
+                        return '<font color="#94a3b8"><b>-</b></font>';
+                    }
+                    $parts = [];
+                    if ($pos > 0) $parts[] = '<font color="#16a34a"><b>+' . $pos . '</b></font>';
+                    if ($neg > 0) $parts[] = '<font color="#dc2626"><b>-' . $neg . '</b></font>';
+                    return implode(' <font color="#000000"><b>/</b></font> ', $parts);
+                };
+
+                foreach ($cmpRows as $ri => $row) {
+                    $titleText = (string) $row[0];
+                    $commonText = (string) $row[3];
+                    $n1Plain = $cellPlain(1, $row);
+                    $n2Plain = $cellPlain(3, $row);
+
+                    $maxH = $minLineH;
+                    $maxH = max($maxH, $pdf->getStringHeight($colWidthsCmp[0], $titleText) + 2);
+                    $maxH = max($maxH, $pdf->getStringHeight($colWidthsCmp[1], $n1Plain) + 2);
+                    $maxH = max($maxH, $pdf->getStringHeight($colWidthsCmp[2], $commonText) + 2);
+                    $maxH = max($maxH, $pdf->getStringHeight($colWidthsCmp[3], $n2Plain) + 2);
+                    $startY = $pdf->GetY();
+                    if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) {
+                        $pdf->AddPage();
+                        $startY = $pdf->GetY();
+                    }
+                    $fill = $alternateRows && ($ri % 2 === 1);
+                    $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+
+                    // Title
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, '', $cmpFontSize);
+                    $pdf->MultiCell($colWidthsCmp[0], $maxH, $titleText, 1, 'L', $fill, 0, $mLeft, $startY, true, 0, false, true, $maxH, 'M');
+
+                    // N1 cell
+                    $x1 = $mLeft + $colWidthsCmp[0];
+                    $pdf->SetXY($x1, $startY);
+                    $pdf->Cell($colWidthsCmp[1], $maxH, '', 1, 0, 'C', $fill);
+                    $html1 = $renderDiffHtml((int) $row[1], (int) $row[2]);
+                    $contentH1 = $pdf->getStringHeight($colWidthsCmp[1], $n1Plain);
+                    $yOff1 = max(0, ($maxH - $contentH1) / 2);
+                    $pdf->writeHTMLCell($colWidthsCmp[1], 0, $x1, $startY + $yOff1, $html1, 0, 0, false, true, 'C', true);
+
+                    // Common
+                    $x2 = $x1 + $colWidthsCmp[1];
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, '', $cmpFontSize);
+                    $pdf->MultiCell($colWidthsCmp[2], $maxH, $commonText, 1, 'C', $fill, 0, $x2, $startY, true, 0, false, true, $maxH, 'M');
+
+                    // N2 cell
+                    $x3 = $x2 + $colWidthsCmp[2];
+                    $pdf->SetXY($x3, $startY);
+                    $pdf->Cell($colWidthsCmp[3], $maxH, '', 1, 0, 'C', $fill);
+                    $html2 = $renderDiffHtml((int) $row[4], (int) $row[5]);
+                    $contentH2 = $pdf->getStringHeight($colWidthsCmp[3], $n2Plain);
+                    $yOff2 = max(0, ($maxH - $contentH2) / 2);
+                    $pdf->writeHTMLCell($colWidthsCmp[3], 0, $x3, $startY + $yOff2, $html2, 0, 0, false, true, 'C', true);
+
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'comparison_summary';
+
+            } elseif ($type === 'comparison_detail') {
+                $cdNode1Id = (int) ($block['node1Id'] ?? 0);
+                $cdNode2Id = (int) ($block['node2Id'] ?? 0);
+                $cdCat = (string) ($block['categoryName'] ?? '');
+                $cdShowOnlyDiffs = !empty($block['showOnlyDiffs']);
+                $cdPresent = (string) ($block['presentTemplate'] ?? '-');
+                $cdMissing = (string) ($block['missingTemplate'] ?? '');
+                $cdDifferent = (string) ($block['differentTemplate'] ?? '');
+                $cdMatchColumns = $block['matchColumns'] ?? [];
+                if (!is_array($cdMatchColumns)) $cdMatchColumns = [];
+                $cdShowHeader = !empty($block['showHeader']);
+                $cdFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : ($styles['table']['fontSize'] ?? $bodySize);
+
+                if (!$cdNode1Id || !$cdNode2Id || $cdCat === '') {
+                    continue;
+                }
+                $cdNode1 = $this->em->getRepository(Node::class)->find($cdNode1Id);
+                $cdNode2 = $this->em->getRepository(Node::class)->find($cdNode2Id);
+                if (!$cdNode1 || !$cdNode2) {
+                    continue;
+                }
+
+                $invRepo2 = $this->em->getRepository(NodeInventoryEntry::class);
+                $loadByKey = function (Node $n) use ($invRepo2, $cdCat): array {
+                    $entries = $invRepo2->createQueryBuilder('e')
+                        ->where('e.node = :n')
+                        ->andWhere('e.categoryName = :cat')
+                        ->setParameter('n', $n)
+                        ->setParameter('cat', $cdCat)
+                        ->getQuery()
+                        ->getResult();
+                    $byKey = [];
+                    foreach ($entries as $e) {
+                        $k = $e->getEntryKey() ?? '';
+                        $cl = $e->getColLabel() ?? '';
+                        if (!isset($byKey[$k])) $byKey[$k] = [];
+                        $byKey[$k][mb_strtolower($cl)] = $e->getValue() ?? '';
+                    }
+                    return $byKey;
+                };
+
+                $d1 = $loadByKey($cdNode1);
+                $d2 = $loadByKey($cdNode2);
+
+                $allKeys = array_values(array_unique(array_merge(array_keys($d1), array_keys($d2))));
+                sort($allKeys, SORT_NATURAL | SORT_FLAG_CASE);
+
+                $renderTpl = function (string $tpl, string $key, array $cols): string {
+                    $tpl = preg_replace_callback('/\{\{\s*key\s*\}\}/i', fn() => $key, $tpl);
+                    $tpl = preg_replace_callback('/\{\{\s*loop\.([A-Za-z0-9 _#-]+)\s*\}\}/', function ($m) use ($cols) {
+                        return (string) ($cols[mb_strtolower(trim($m[1]))] ?? '');
+                    }, $tpl);
+                    return $tpl;
+                };
+
+                $identity = function (array $cols) use ($cdMatchColumns): string {
+                    if (empty($cdMatchColumns)) return '';
+                    $parts = [];
+                    foreach ($cdMatchColumns as $mc) {
+                        $parts[] = $cols[mb_strtolower((string) $mc)] ?? '';
+                    }
+                    return implode("\x1f", $parts);
+                };
+
+                $orDash = fn(string $s): string => $s !== '' ? $s : '-';
+
+                $cdRows = [];
+                foreach ($allKeys as $k) {
+                    $in1 = isset($d1[$k]);
+                    $in2 = isset($d2[$k]);
+
+                    if ($in1 && $in2) {
+                        $sameId = $identity($d1[$k]) === $identity($d2[$k]);
+                        if ($sameId) {
+                            if ($cdShowOnlyDiffs) continue;
+                            $left = $orDash($renderTpl($cdPresent, $k, $d1[$k]));
+                            $right = $orDash($renderTpl($cdPresent, $k, $d2[$k]));
+                            $leftRed = false; $rightRed = false;
+                        } else {
+                            $tpl = $cdDifferent !== '' ? $cdDifferent : $cdPresent;
+                            $left = $orDash($renderTpl($tpl, $k, $d1[$k]));
+                            $right = $orDash($renderTpl($tpl, $k, $d2[$k]));
+                            $leftRed = true; $rightRed = true;
+                        }
+                    } elseif ($in1) {
+                        $left = $orDash($renderTpl($cdPresent, $k, $d1[$k]));
+                        $right = $cdMissing !== '' ? $renderTpl($cdMissing, $k, $d1[$k]) : '';
+                        $leftRed = false; $rightRed = true;
+                    } else {
+                        $left = $cdMissing !== '' ? $renderTpl($cdMissing, $k, $d2[$k]) : '';
+                        $right = $orDash($renderTpl($cdPresent, $k, $d2[$k]));
+                        $leftRed = true; $rightRed = false;
+                    }
+
+                    $cdRows[] = [$left, $right, $leftRed, $rightRed];
+                }
+
+                if (empty($cdRows)) {
+                    continue;
+                }
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $tableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $headerBg = $this->hexToRgb($tableStyle['headerBg'] ?? '#1e293b');
+                $headerColor = $this->hexToRgb($tableStyle['headerColor'] ?? '#ffffff');
+                $borderColor = $this->hexToRgb($tableStyle['borderColor'] ?? '#e2e8f0');
+                $alternateRows = $tableStyle['alternateRows'] ?? true;
+                $alternateBg = $this->hexToRgb($tableStyle['alternateBg'] ?? '#f8fafc');
+                $missingBg = $this->hexToRgb('#fee2e2');
+
+                $cdN1Label = (string) ($block['node1Label'] ?? '');
+                if ($cdN1Label === '') {
+                    $cdN1Label = $cdNode1->getHostname() ?: $cdNode1->getName() ?: $cdNode1->getIpAddress();
+                }
+                $cdN2Label = (string) ($block['node2Label'] ?? '');
+                if ($cdN2Label === '') {
+                    $cdN2Label = $cdNode2->getHostname() ?: $cdNode2->getName() ?: $cdNode2->getIpAddress();
+                }
+
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $colW = $contentW / 2;
+                $minLineH = $cdFontSize * 0.3528 + 3;
+
+                $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                if ($cdShowHeader) {
+                    $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                    $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                    $pdf->SetFont($bodyFont, 'B', $cdFontSize);
+                    $maxH = $minLineH;
+                    $maxH = max($maxH, $pdf->getStringHeight($colW, $cdN1Label) + 2);
+                    $maxH = max($maxH, $pdf->getStringHeight($colW, $cdN2Label) + 2);
+                    $startY = $pdf->GetY();
+                    $pdf->MultiCell($colW, $maxH, $cdN1Label, 1, 'C', true, 0, $mLeft, $startY, true, 0, false, true, $maxH, 'M');
+                    $pdf->MultiCell($colW, $maxH, $cdN2Label, 1, 'C', true, 0, $mLeft + $colW, $startY, true, 0, false, true, $maxH, 'M');
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+
+                $pdf->SetFont($bodyFont, '', $cdFontSize);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                foreach ($cdRows as $ri => $row) {
+                    [$left, $right, $leftRed, $rightRed] = $row;
+                    $maxH = $minLineH;
+                    $maxH = max($maxH, $pdf->getStringHeight($colW, $left) + 2);
+                    $maxH = max($maxH, $pdf->getStringHeight($colW, $right) + 2);
+                    $startY = $pdf->GetY();
+                    if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) {
+                        $pdf->AddPage();
+                        $startY = $pdf->GetY();
+                    }
+                    $altFill = $alternateRows && ($ri % 2 === 1);
+                    if ($leftRed) {
+                        $pdf->SetFillColor($missingBg[0], $missingBg[1], $missingBg[2]);
+                        $fillL = true;
+                    } elseif ($altFill) {
+                        $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                        $fillL = true;
+                    } else {
+                        $fillL = false;
+                    }
+                    $pdf->MultiCell($colW, $maxH, $left, 1, 'L', $fillL, 0, $mLeft, $startY, true, 0, false, true, $maxH, 'M');
+                    if ($rightRed) {
+                        $pdf->SetFillColor($missingBg[0], $missingBg[1], $missingBg[2]);
+                        $fillR = true;
+                    } elseif ($altFill) {
+                        $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                        $fillR = true;
+                    } else {
+                        $fillR = false;
+                    }
+                    $pdf->MultiCell($colW, $maxH, $right, 1, 'L', $fillR, 0, $mLeft + $colW, $startY, true, 0, false, true, $maxH, 'M');
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'comparison_detail';
             }
         }
     }

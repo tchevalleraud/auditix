@@ -54,6 +54,8 @@ import {
   CalendarClock,
   ArrowUpAZ,
   ArrowDownAZ,
+  GitCompare,
+  Columns3,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -461,6 +463,47 @@ export interface ChartInventoryBlock {
   pageBreakBefore?: boolean;
 }
 
+// === Comparison blocks ===
+export interface ComparisonSummaryItem {
+  id: string;
+  title: string;
+  categoryName: string;
+  matchColumns: string[];
+}
+
+export interface ComparisonSummaryBlock {
+  id: string;
+  type: "comparison_summary";
+  node1Id: number | null;
+  node2Id: number | null;
+  node1Label?: string;
+  node2Label?: string;
+  titleHeader?: string;
+  commonHeader?: string;
+  comparisons: ComparisonSummaryItem[];
+  showHeader: boolean;
+  fontSize?: number;
+  pageBreakBefore?: boolean;
+}
+
+export interface ComparisonDetailBlock {
+  id: string;
+  type: "comparison_detail";
+  node1Id: number | null;
+  node2Id: number | null;
+  node1Label?: string;
+  node2Label?: string;
+  categoryName: string;
+  matchColumns: string[];
+  showOnlyDiffs: boolean;
+  presentTemplate: string;
+  missingTemplate: string;
+  differentTemplate: string;
+  showHeader: boolean;
+  fontSize?: number;
+  pageBreakBefore?: boolean;
+}
+
 // === Timeline ===
 export interface TimelineBlock {
   id: string;
@@ -485,7 +528,7 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -633,6 +676,31 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         showLegend: true,
         height: 6,
         rowSpacing: 24,
+        pageBreakBefore: false,
+      };
+    } else if (type === "comparison_summary") {
+      block = {
+        id,
+        type: "comparison_summary",
+        node1Id: null,
+        node2Id: null,
+        comparisons: [],
+        showHeader: true,
+        pageBreakBefore: false,
+      };
+    } else if (type === "comparison_detail") {
+      block = {
+        id,
+        type: "comparison_detail",
+        node1Id: null,
+        node2Id: null,
+        categoryName: "",
+        matchColumns: [],
+        showOnlyDiffs: false,
+        presentTemplate: "-",
+        missingTemplate: "{{ key }} est manquant",
+        differentTemplate: "",
+        showHeader: true,
         pageBreakBefore: false,
       };
     } else {
@@ -843,6 +911,18 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       const n = block.productRangeIds.length;
       return <span className="text-slate-500 text-xs">{t("structure.timelineBlock")} — {t("structure.timelineModeRange")} ({n})</span>;
     }
+    if (block.type === "comparison_summary") {
+      if (block.node1Id && block.node2Id && block.comparisons.length > 0) {
+        return <span className="text-slate-500 text-xs">{t("structure.comparisonSummary")} — {block.comparisons.length} {block.comparisons.length > 1 ? "comparaisons" : "comparaison"}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyComparisonSummary")}</span>;
+    }
+    if (block.type === "comparison_detail") {
+      if (block.node1Id && block.node2Id && block.categoryName) {
+        return <span className="text-slate-500 text-xs">{t("structure.comparisonDetail")} — {block.categoryName}{block.showOnlyDiffs ? " (diffs)" : ""}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyComparisonDetail")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -962,6 +1042,20 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         </span>
       );
     }
+    if (block.type === "comparison_summary") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-pink-100 dark:bg-pink-500/15 px-2 py-0.5 text-[11px] font-bold text-pink-600 dark:text-pink-400">
+          <GitCompare className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "comparison_detail") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-pink-100 dark:bg-pink-500/15 px-2 py-0.5 text-[11px] font-bold text-pink-600 dark:text-pink-400">
+          <Columns3 className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
         P
@@ -1055,6 +1149,14 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 <button onClick={() => { addBlock("timeline"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                   <CalendarClock className="h-4 w-4 text-orange-500" />
                   {t("structure.addTimeline")}
+                </button>
+                <button onClick={() => { addBlock("comparison_summary"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <GitCompare className="h-4 w-4 text-pink-500" />
+                  {t("structure.addComparisonSummary")}
+                </button>
+                <button onClick={() => { addBlock("comparison_detail"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                  <Columns3 className="h-4 w-4 text-pink-500" />
+                  {t("structure.addComparisonDetail")}
                 </button>
               </div>
             )}
@@ -1257,6 +1359,12 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               {editingBlock.type === "timeline" && (
                 <TimelineProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} />
               )}
+              {editingBlock.type === "comparison_summary" && (
+                <ComparisonSummaryProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "comparison_detail" && (
+                <ComparisonDetailProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
             </div>
           </div>
         </div>
@@ -1388,6 +1496,14 @@ function InsertLine({
           <button onClick={() => onInsert("rule_recommendation", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
             <Lightbulb className="h-3.5 w-3.5" />
             {t("structure.addRuleRecommendation")}
+          </button>
+          <button onClick={() => onInsert("comparison_summary", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <GitCompare className="h-3.5 w-3.5" />
+            {t("structure.addComparisonSummary")}
+          </button>
+          <button onClick={() => onInsert("comparison_detail", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
+            <Columns3 className="h-3.5 w-3.5" />
+            {t("structure.addComparisonDetail")}
           </button>
         </div>
       )}
@@ -7390,6 +7506,510 @@ function ChartStyleSection({ sort, colorRules, onSortChange, onRulesChange, show
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Comparison Summary properties ---
+function ComparisonSummaryProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ComparisonSummaryBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setStructure)
+      .catch(() => {});
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAllNodes)
+      .catch(() => {});
+  }, [current]);
+
+  const nodeLabel = (n: NodeItem) => n.hostname || n.name || n.ipAddress;
+
+  const updateField = <K extends keyof ComparisonSummaryBlock>(key: K, value: ComparisonSummaryBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  const addComparison = () => {
+    const item: ComparisonSummaryItem = { id: uid(), title: "", categoryName: "", matchColumns: [] };
+    updateField("comparisons", [...block.comparisons, item]);
+  };
+
+  const updateComparison = (id: string, patch: Partial<ComparisonSummaryItem>) => {
+    updateField(
+      "comparisons",
+      block.comparisons.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    );
+  };
+
+  const removeComparison = (id: string) => {
+    updateField("comparisons", block.comparisons.filter((c) => c.id !== id));
+  };
+
+  const moveComparison = (idx: number, dir: -1 | 1) => {
+    const target = idx + dir;
+    if (target < 0 || target >= block.comparisons.length) return;
+    const arr = [...block.comparisons];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    updateField("comparisons", arr);
+  };
+
+  const categoryColumns = (categoryName: string): string[] => {
+    const cat = structure.find((c) => c.categoryName === categoryName);
+    if (!cat) return [];
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+    return Array.from(labels);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Nodes */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpNode1")}</label>
+          <select
+            value={block.node1Id ?? ""}
+            onChange={(e) => updateField("node1Id", e.target.value ? Number(e.target.value) : null)}
+            className={inputClass}
+          >
+            <option value="">{t("structure.cmpPickNode")}</option>
+            {allNodes.map((n) => (
+              <option key={n.id} value={n.id}>{nodeLabel(n)} ({n.ipAddress})</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.node1Label ?? ""}
+            onChange={(e) => updateField("node1Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpNode2")}</label>
+          <select
+            value={block.node2Id ?? ""}
+            onChange={(e) => updateField("node2Id", e.target.value ? Number(e.target.value) : null)}
+            className={inputClass}
+          >
+            <option value="">{t("structure.cmpPickNode")}</option>
+            {allNodes.map((n) => (
+              <option key={n.id} value={n.id}>{nodeLabel(n)} ({n.ipAddress})</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.node2Label ?? ""}
+            onChange={(e) => updateField("node2Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+      </div>
+
+      {/* Headers */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpTitleHeader")}</label>
+          <input
+            type="text"
+            value={block.titleHeader ?? ""}
+            onChange={(e) => updateField("titleHeader", e.target.value)}
+            placeholder="Comparaison"
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpCommonHeader")}</label>
+          <input
+            type="text"
+            value={block.commonHeader ?? ""}
+            onChange={(e) => updateField("commonHeader", e.target.value)}
+            placeholder="Communs"
+            className={inputClass}
+          />
+        </div>
+      </div>
+
+      {/* Comparisons list */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <label className={labelClass}>{t("structure.cmpComparisons")}</label>
+          <button
+            onClick={addComparison}
+            className="flex items-center gap-1.5 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("structure.cmpAddComparison")}
+          </button>
+        </div>
+        {block.comparisons.length === 0 && (
+          <p className="text-xs text-slate-400 italic">{t("structure.cmpNoComparison")}</p>
+        )}
+        <div className="space-y-2">
+          {block.comparisons.map((c, idx) => {
+            const cols = categoryColumns(c.categoryName);
+            return (
+              <div key={c.id} className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => moveComparison(idx, -1)}
+                    disabled={idx === 0}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => moveComparison(idx, 1)}
+                    disabled={idx === block.comparisons.length - 1}
+                    className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                  <input
+                    type="text"
+                    value={c.title}
+                    onChange={(e) => updateComparison(c.id, { title: e.target.value })}
+                    placeholder={t("structure.cmpItemTitle")}
+                    className={`${inputClass} flex-1`}
+                  />
+                  <button
+                    onClick={() => removeComparison(c.id)}
+                    className="p-1.5 text-slate-400 hover:text-red-500"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={c.categoryName}
+                    onChange={(e) => updateComparison(c.id, { categoryName: e.target.value, matchColumns: [] })}
+                    className={inputClass}
+                  >
+                    <option value="">{t("structure.cmpPickCategory")}</option>
+                    {structure.map((s) => (
+                      <option key={s.categoryName} value={s.categoryName}>{s.categoryName}</option>
+                    ))}
+                  </select>
+                  <div className="space-y-1">
+                    <label className="block text-xs font-medium text-slate-600 dark:text-slate-400">{t("structure.cmpMatchColumns")}</label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {cols.length === 0 && (
+                        <span className="text-xs text-slate-400 italic">{t("structure.cmpMatchColumnsHint")}</span>
+                      )}
+                      {cols.map((col) => {
+                        const active = c.matchColumns.includes(col);
+                        return (
+                          <button
+                            key={col}
+                            onClick={() => {
+                              const next = active
+                                ? c.matchColumns.filter((x) => x !== col)
+                                : [...c.matchColumns, col];
+                              updateComparison(c.id, { matchColumns: next });
+                            }}
+                            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                              active
+                                ? "bg-violet-500 text-white"
+                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                            }`}
+                          >
+                            {col}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Misc */}
+      <div className="flex items-center gap-6">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showHeader}
+            onChange={(e) => updateField("showHeader", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cmpShowHeader")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!block.pageBreakBefore}
+            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.pageBreakBefore")}</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.fontSize")}</span>
+          <input
+            type="number"
+            min={6}
+            max={24}
+            value={block.fontSize ?? ""}
+            onChange={(e) => updateField("fontSize", e.target.value ? Number(e.target.value) : undefined)}
+            placeholder="-"
+            className={`${inputClass} w-20`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Comparison Detail properties ---
+function ComparisonDetailProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ComparisonDetailBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setStructure)
+      .catch(() => {});
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAllNodes)
+      .catch(() => {});
+  }, [current]);
+
+  const nodeLabel = (n: NodeItem) => n.hostname || n.name || n.ipAddress;
+
+  const updateField = <K extends keyof ComparisonDetailBlock>(key: K, value: ComparisonDetailBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  const cat = structure.find((c) => c.categoryName === block.categoryName);
+  const availableCols = (() => {
+    if (!cat) return [];
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+    return Array.from(labels);
+  })();
+
+  return (
+    <div className="space-y-6">
+      {/* Nodes */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpNode1")}</label>
+          <select
+            value={block.node1Id ?? ""}
+            onChange={(e) => updateField("node1Id", e.target.value ? Number(e.target.value) : null)}
+            className={inputClass}
+          >
+            <option value="">{t("structure.cmpPickNode")}</option>
+            {allNodes.map((n) => (
+              <option key={n.id} value={n.id}>{nodeLabel(n)} ({n.ipAddress})</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.node1Label ?? ""}
+            onChange={(e) => updateField("node1Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpNode2")}</label>
+          <select
+            value={block.node2Id ?? ""}
+            onChange={(e) => updateField("node2Id", e.target.value ? Number(e.target.value) : null)}
+            className={inputClass}
+          >
+            <option value="">{t("structure.cmpPickNode")}</option>
+            {allNodes.map((n) => (
+              <option key={n.id} value={n.id}>{nodeLabel(n)} ({n.ipAddress})</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.node2Label ?? ""}
+            onChange={(e) => updateField("node2Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+      </div>
+
+      {/* Category */}
+      <div className="space-y-1.5">
+        <label className={labelClass}>
+          {t("structure.cmpCategory")} <span className="text-red-500">*</span>
+        </label>
+        <select
+          value={block.categoryName}
+          onChange={(e) => updateField("categoryName", e.target.value)}
+          className={`${inputClass} ${block.categoryName === "" ? "border-red-400 dark:border-red-500 ring-1 ring-red-400/20" : ""}`}
+        >
+          <option value="">{t("structure.cmpPickCategory")}</option>
+          {structure.map((s) => (
+            <option key={s.categoryName} value={s.categoryName}>{s.categoryName}</option>
+          ))}
+        </select>
+        {block.categoryName === "" && (
+          <p className="text-xs text-red-500">{t("structure.cmpCategoryRequired")}</p>
+        )}
+      </div>
+
+      {/* Match columns */}
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.cmpMatchColumns")}</label>
+        <div className="flex flex-wrap gap-1.5">
+          {availableCols.length === 0 && (
+            <span className="text-xs text-slate-400 italic">{t("structure.cmpMatchColumnsHint")}</span>
+          )}
+          {availableCols.map((col) => {
+            const active = (block.matchColumns ?? []).includes(col);
+            return (
+              <button
+                key={col}
+                onClick={() => {
+                  const cur = block.matchColumns ?? [];
+                  const next = active ? cur.filter((x) => x !== col) : [...cur, col];
+                  updateField("matchColumns", next);
+                }}
+                className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+                  active
+                    ? "bg-violet-500 text-white"
+                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"
+                }`}
+              >
+                {col}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-500 dark:text-slate-400">{t("structure.cmpDetailMatchHint")}</p>
+      </div>
+
+      {/* Templates */}
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpPresentTemplate")}</label>
+          <input
+            type="text"
+            value={block.presentTemplate}
+            onChange={(e) => updateField("presentTemplate", e.target.value)}
+            placeholder="-"
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpMissingTemplate")}</label>
+          <input
+            type="text"
+            value={block.missingTemplate}
+            onChange={(e) => updateField("missingTemplate", e.target.value)}
+            placeholder="{{ key }} est manquant"
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.cmpDifferentTemplate")}</label>
+          <input
+            type="text"
+            value={block.differentTemplate}
+            onChange={(e) => updateField("differentTemplate", e.target.value)}
+            placeholder="{{ key }} ({{ loop.name }})"
+            className={inputClass}
+            disabled={(block.matchColumns ?? []).length === 0}
+          />
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t("structure.cmpDifferentTemplateHint")}</p>
+        </div>
+        <div className="rounded-md bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 p-3 text-xs text-slate-600 dark:text-slate-400">
+          <p className="font-medium mb-1">{t("structure.cmpTemplateHelp")}</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            <li><code className="font-mono">{`{{ key }}`}</code> — {t("structure.cmpTemplateKey")}</li>
+            <li><code className="font-mono">{`{{ loop.<colonne> }}`}</code> — {t("structure.cmpTemplateLoop")}</li>
+          </ul>
+          {availableCols.length > 0 && (
+            <p className="mt-2">
+              {t("structure.cmpAvailableColumns")} :{" "}
+              {availableCols.map((c, i) => (
+                <span key={c}>
+                  <code className="font-mono">{`{{ loop.${c} }}`}</code>
+                  {i < availableCols.length - 1 ? ", " : ""}
+                </span>
+              ))}
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Misc */}
+      <div className="flex flex-wrap items-center gap-6">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showOnlyDiffs}
+            onChange={(e) => updateField("showOnlyDiffs", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cmpShowOnlyDiffs")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showHeader}
+            onChange={(e) => updateField("showHeader", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cmpShowHeader")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!block.pageBreakBefore}
+            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.pageBreakBefore")}</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.fontSize")}</span>
+          <input
+            type="number"
+            min={6}
+            max={24}
+            value={block.fontSize ?? ""}
+            onChange={(e) => updateField("fontSize", e.target.value ? Number(e.target.value) : undefined)}
+            placeholder="-"
+            className={`${inputClass} w-20`}
+          />
         </div>
       </div>
     </div>
