@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+const INTERNAL_API_URL = process.env.INTERNAL_API_URL ?? "http://nginx:8080";
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -8,7 +10,7 @@ export async function middleware(request: NextRequest) {
   }
 
   try {
-    const res = await fetch(`http://nginx:80/api/me`, {
+    const res = await fetch(`${INTERNAL_API_URL}/api/me`, {
       headers: {
         cookie: request.headers.get("cookie") || "",
       },

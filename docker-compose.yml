@@ -46,6 +46,7 @@ services:
       - frontend-next:/app/.next
     environment:
       APP_ENV: ${APP_ENV:-dev}
+      INTERNAL_API_URL: http://nginx:8080
     restart: unless-stopped
 
   php:
