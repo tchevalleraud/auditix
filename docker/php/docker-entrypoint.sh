@@ -43,10 +43,7 @@ if [ -f /var/www/bin/console ]; then
     done
 
     echo ">> Running database migrations..."
-    php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration 2>/dev/null || {
-        echo ">> Migrations failed, falling back to schema update..."
-        php bin/console doctrine:schema:update --force --no-interaction
-    }
+    php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
 
     echo ">> Creating default user..."
     php bin/console app:create-default-user
