@@ -59,6 +59,15 @@ if [ -f /var/www/bin/console ]; then
             find "$d" \! -user www-data -exec chown www-data:www-data {} + 2>/dev/null || true
         fi
     done
+
+    # Public assets must be readable by the nginx container, which runs with
+    # a different UID than the host owner (worse in rootless Docker where UIDs
+    # are remapped). o+rX is set unconditionally so files added later by
+    # `git pull` under a restrictive umask are still served correctly after
+    # the next php container restart.
+    if [ -d /var/www/public ]; then
+        chmod -R o+rX /var/www/public 2>/dev/null || true
+    fi
 fi
 
 # NGINX management: ensure www-data can write generated config and certificate files
