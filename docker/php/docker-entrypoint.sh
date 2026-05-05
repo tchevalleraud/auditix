@@ -42,6 +42,17 @@ if [ -f /var/www/bin/console ]; then
         sleep 2
     done
 
+    # Detect a truly fresh install (empty schema): the migration history starts
+    # at an ALTER TABLE rather than a CREATE TABLE, so running migrate on an
+    # empty database fails. In that case bootstrap from the current entity
+    # mapping and mark every existing migration as already applied.
+    if ! php bin/console doctrine:query:sql "SELECT 1 FROM node LIMIT 1" > /dev/null 2>&1; then
+        echo ">> Empty schema detected, bootstrapping from entity mapping..."
+        php bin/console doctrine:schema:create --no-interaction
+        php bin/console doctrine:migrations:sync-metadata-storage --no-interaction
+        php bin/console doctrine:migrations:version --add --all --no-interaction
+    fi
+
     echo ">> Running database migrations..."
     php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
 
