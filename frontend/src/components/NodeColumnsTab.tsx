@@ -57,6 +57,7 @@ export const PAGE_SIZES = [5, 10, 15, 25, 50, 100, 200];
 interface InventoryCatalogEntry {
   category: string;
   columns: string[];
+  keys: { key: string; columns: string[] }[];
 }
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
@@ -615,14 +616,19 @@ function InventoryParams({
     return <p className="text-xs text-slate-400">{t("nodeColumns.inventoryNoData")}</p>;
   }
   const cat = typeof params.category === "string" ? params.category : "";
+  const key = typeof params.key === "string" ? params.key : "";
   const col = typeof params.column === "string" ? params.column : "";
-  const cols = inventoryCatalog.find((c) => c.category === cat)?.columns ?? [];
+  const catEntry = inventoryCatalog.find((c) => c.category === cat);
+  const keys = catEntry?.keys ?? [];
+  const cols = key
+    ? (keys.find((k) => k.key === key)?.columns ?? [])
+    : (catEntry?.columns ?? []);
 
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-3 gap-2">
       <select
         value={cat}
-        onChange={(e) => onChange({ category: e.target.value, column: "" })}
+        onChange={(e) => onChange({ category: e.target.value, key: "", column: "" })}
         className={inputClass}
       >
         <option value="">{t("nodeColumns.inventoryCategory")}</option>
@@ -631,9 +637,20 @@ function InventoryParams({
         ))}
       </select>
       <select
+        value={key}
+        disabled={!cat}
+        onChange={(e) => onChange({ category: cat, key: e.target.value, column: col })}
+        className={inputClass}
+      >
+        <option value="">{t("nodeColumns.inventoryAllKeys")}</option>
+        {keys.map((k) => (
+          <option key={k.key} value={k.key}>{k.key}</option>
+        ))}
+      </select>
+      <select
         value={col}
         disabled={!cat}
-        onChange={(e) => onChange({ category: cat, column: e.target.value })}
+        onChange={(e) => onChange({ category: cat, key, column: e.target.value })}
         className={inputClass}
       >
         <option value="">{t("nodeColumns.inventoryColumn")}</option>

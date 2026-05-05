@@ -449,9 +449,10 @@ export function renderCell(node: NodeRow, ref: FieldRef, ctx: CellContext, varia
     case "inventory": {
       const cat = typeof ref.params?.category === "string" ? ref.params.category : "";
       const col = typeof ref.params?.column === "string" ? ref.params.column : "";
+      const entryKey = typeof ref.params?.key === "string" ? ref.params.key : "";
       if (!cat || !col) return dash();
-      const key = `${cat}||${col}`;
-      const values = extras?.inventory?.[key];
+      const idxKey = `${cat}||${entryKey}||${col}`;
+      const values = extras?.inventory?.[idxKey];
       if (!values || values.length === 0) return dash();
       if (values.length === 1) return <span className={textCls}>{values[0]}</span>;
       return <span className={textCls} title={values.join(", ")}>{values[0]} <span className="text-slate-400">+{values.length - 1}</span></span>;
@@ -507,8 +508,9 @@ export function getSortValue(node: NodeRow, ref: FieldRef, extras: NodeExtras | 
     case "inventory": {
       const cat = typeof ref.params?.category === "string" ? ref.params.category : "";
       const col = typeof ref.params?.column === "string" ? ref.params.column : "";
-      const key = `${cat}||${col}`;
-      const values = extras?.inventory?.[key];
+      const entryKey = typeof ref.params?.key === "string" ? ref.params.key : "";
+      const idxKey = `${cat}||${entryKey}||${col}`;
+      const values = extras?.inventory?.[idxKey];
       return values?.[0] || "";
     }
   }

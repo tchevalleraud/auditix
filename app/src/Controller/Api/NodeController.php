@@ -623,7 +623,9 @@ class NodeController extends AbstractController
      * Query params:
      *   - context (required, int)
      *   - fields (optional, comma list): compliance, vulnerability, systemUpdate, inventory
-     *   - inventoryColumns (optional, JSON array): [{"category":"X","column":"Y"}, ...]
+     *   - inventoryColumns (optional, JSON array): [{"category":"X","key":"Y","column":"Z"}, ...]
+     *     The "key" entry is optional; when omitted or empty, all keys for that
+     *     category+column are aggregated.
      */
     #[Route('/extras', methods: ['GET'])]
     public function extras(
@@ -753,9 +755,10 @@ class NodeController extends AbstractController
                     if (!is_array($c)) continue;
                     $cat = $c['category'] ?? null;
                     $col = $c['column'] ?? null;
+                    $key = isset($c['key']) && is_string($c['key']) ? $c['key'] : '';
                     if (!is_string($cat) || !is_string($col)) continue;
-                    $key = $cat . '||' . $col;
-                    $byColKey[$key] = ['category' => $cat, 'column' => $col];
+                    $cacheKey = $cat . '||' . $key . '||' . $col;
+                    $byColKey[$cacheKey] = ['category' => $cat, 'key' => $key, 'column' => $col];
                 }
 
                 if (!empty($byColKey)) {
@@ -782,11 +785,14 @@ class NodeController extends AbstractController
                     $perNodeInv = [];
                     foreach ($rows as $r) {
                         $nid = (int) $r['nid'];
-                        $key = $r['category_name'] . '||' . $r['col_label'];
-                        if (!isset($byColKey[$key])) continue;
-                        if (!isset($perNodeInv[$nid])) $perNodeInv[$nid] = [];
-                        if (!isset($perNodeInv[$nid][$key])) $perNodeInv[$nid][$key] = [];
-                        $perNodeInv[$nid][$key][] = $r['value'];
+                        $exactKey = $r['category_name'] . '||' . $r['entry_key'] . '||' . $r['col_label'];
+                        $allKey = $r['category_name'] . '||||' . $r['col_label'];
+                        foreach ([$exactKey, $allKey] as $k) {
+                            if (!isset($byColKey[$k])) continue;
+                            if (!isset($perNodeInv[$nid])) $perNodeInv[$nid] = [];
+                            if (!isset($perNodeInv[$nid][$k])) $perNodeInv[$nid][$k] = [];
+                            $perNodeInv[$nid][$k][] = $r['value'];
+                        }
                     }
 
                     foreach ($nodes as $node) {

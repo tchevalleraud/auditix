@@ -309,27 +309,44 @@ class NodeColumnsController extends AbstractController
         }
 
         $rows = $em->getConnection()->fetchAllAssociative(
-            'SELECT DISTINCT e.category_name, e.col_label
+            'SELECT DISTINCT e.category_name, e.entry_key, e.col_label
              FROM node_inventory_entry e
              JOIN node n ON n.id = e.node_id
              WHERE n.context_id = :ctx
-             ORDER BY e.category_name ASC, e.col_label ASC',
+             ORDER BY e.category_name ASC, e.entry_key ASC, e.col_label ASC',
             ['ctx' => $context->getId()]
         );
 
         $grouped = [];
         foreach ($rows as $r) {
             $cat = $r['category_name'];
+            $key = $r['entry_key'];
             $col = $r['col_label'];
             if (!isset($grouped[$cat])) {
-                $grouped[$cat] = [];
+                $grouped[$cat] = ['columns' => [], 'keys' => []];
             }
-            $grouped[$cat][] = $col;
+            if (!in_array($col, $grouped[$cat]['columns'], true)) {
+                $grouped[$cat]['columns'][] = $col;
+            }
+            if (!isset($grouped[$cat]['keys'][$key])) {
+                $grouped[$cat]['keys'][$key] = [];
+            }
+            if (!in_array($col, $grouped[$cat]['keys'][$key], true)) {
+                $grouped[$cat]['keys'][$key][] = $col;
+            }
         }
 
         $out = [];
-        foreach ($grouped as $cat => $cols) {
-            $out[] = ['category' => $cat, 'columns' => $cols];
+        foreach ($grouped as $cat => $data) {
+            $keys = [];
+            foreach ($data['keys'] as $k => $cols) {
+                $keys[] = ['key' => $k, 'columns' => $cols];
+            }
+            $out[] = [
+                'category' => $cat,
+                'columns' => $data['columns'],
+                'keys' => $keys,
+            ];
         }
 
         return $this->json($out);

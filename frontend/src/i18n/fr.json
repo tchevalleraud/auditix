@@ -1106,6 +1106,8 @@
     "saveError": "Échec de l'enregistrement",
     "selectField": "Choisir un champ…",
     "inventoryCategory": "Catégorie",
+    "inventoryKey": "Clef",
+    "inventoryAllKeys": "Toutes les clefs",
     "inventoryColumn": "Colonne",
     "inventoryNoData": "Aucune donnée d'inventaire découverte",
     "cat": {

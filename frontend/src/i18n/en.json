@@ -1134,6 +1134,8 @@
     "saveError": "Failed to save",
     "selectField": "Select a field…",
     "inventoryCategory": "Category",
+    "inventoryKey": "Key",
+    "inventoryAllKeys": "All keys",
     "inventoryColumn": "Column",
     "inventoryNoData": "No inventory data discovered yet",
     "cat": {

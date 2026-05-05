@@ -185,9 +185,9 @@ export default function NodesPage() {
 
   // Derive needed extras "fields" + inventory column refs from the columns config
   const extrasNeeded = useMemo(() => {
-    if (!columnsConfig || !catalog) return { fields: [] as string[], inventoryCols: [] as { category: string; column: string }[] };
+    if (!columnsConfig || !catalog) return { fields: [] as string[], inventoryCols: [] as { category: string; key: string; column: string }[] };
     const cats = new Set<string>();
-    const inv: { category: string; column: string }[] = [];
+    const inv: { category: string; key: string; column: string }[] = [];
     const collectField = (ref: FieldRef | null) => {
       if (!ref) return;
       const def = catalog.fields.find((f) => f.key === ref.field);
@@ -205,7 +205,8 @@ export default function NodesPage() {
         cats.add("inventory");
         const c = typeof ref.params?.category === "string" ? ref.params.category : null;
         const col = typeof ref.params?.column === "string" ? ref.params.column : null;
-        if (c && col) inv.push({ category: c, column: col });
+        const k = typeof ref.params?.key === "string" ? ref.params.key : "";
+        if (c && col) inv.push({ category: c, key: k, column: col });
       }
     };
     for (const c of columnsConfig.columns) {
