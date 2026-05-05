@@ -107,6 +107,18 @@
 
 ## Quick start
 
+### One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tchevalleraud/auditix/main/scripts/install.sh | bash
+```
+
+You'll be prompted for an install directory (default `/opt/auditix`). Pin a
+version with `AUDITIX_VERSION=v4.3.0` or pick a branch with `AUDITIX_BRANCH=main`.
+See [docs/UPGRADE.md](docs/UPGRADE.md) for all options.
+
+### Manual install
+
 ```bash
 git clone https://github.com/tchevalleraud/auditix.git
 cd auditix
@@ -121,12 +133,20 @@ Open <http://localhost> and sign in with `admin` / `password`.
 ### Useful commands
 
 ```bash
-make up        # Start everything (build + install on first launch)
-make down      # Stop all services
-make restart   # Restart all services
-make logs      # Tail logs
-make upgrade   # Pull latest, rebuild, migrate, restart workers
+make up           # Start everything (build + install on first launch)
+make down         # Stop all services
+make restart      # Restart all services
+make logs         # Tail logs
+make status       # Compact status table for all services
+make upgrade      # Pull latest, backup, rebuild, migrate, restart workers
+make backup       # Manual backup (database + uploads + reports + collections)
+make restore BACKUP=backups/auditix-*.tar.gz   # Restore from a backup
+make doctor       # Diagnose common issues (containers, schema, migrations…)
+make doctor-fix   # Apply safe auto-fixes detected by doctor
 ```
+
+See [docs/UPGRADE.md](docs/UPGRADE.md) for upgrade paths from older versions
+and recovery procedures.
 
 ---
 
