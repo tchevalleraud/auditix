@@ -70,13 +70,16 @@ class MailServerService
         return $this->decrypt($encrypted);
     }
 
-    public function sendTest(MailServer $server, string $recipient): void
+    /**
+     * Build a fully configured SMTP transport for the given server.
+     *
+     * Centralized so callers (test endpoint, report sender) never duplicate
+     * the encryption/auth wiring.
+     */
+    public function createTransport(MailServer $server): EsmtpTransport
     {
-        if ($server->getHost() === null || $server->getFromEmail() === null) {
-            throw new \RuntimeException('Server is missing required fields (host, fromEmail)');
-        }
-        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
-            throw new \RuntimeException('Invalid recipient email');
+        if ($server->getHost() === null) {
+            throw new \RuntimeException('Server is missing required field (host)');
         }
 
         $tls = match ($server->getEncryption()) {
@@ -86,12 +89,33 @@ class MailServerService
         };
 
         $transport = new EsmtpTransport($server->getHost(), $server->getPort(), $tls);
-        if ($server->getUsername() !== null && $server->getUsername() !== '') {
-            $transport->setUsername($server->getUsername());
-            $password = $this->getDecryptedPassword($server) ?? '';
-            $transport->setPassword($password);
+
+        // Symfony Mailer's autoTls flag defaults to true even when $tls is
+        // false: a server advertising STARTTLS in EHLO still triggers an
+        // opportunistic upgrade. Disable it explicitly when the operator
+        // selected "no encryption" so the wire stays plain SMTP.
+        if ($server->getEncryption() === MailServer::ENCRYPTION_NONE) {
+            $transport->setAutoTls(false);
         }
 
+        if ($server->getUsername() !== null && $server->getUsername() !== '') {
+            $transport->setUsername($server->getUsername());
+            $transport->setPassword($this->getDecryptedPassword($server) ?? '');
+        }
+
+        return $transport;
+    }
+
+    public function sendTest(MailServer $server, string $recipient): void
+    {
+        if ($server->getFromEmail() === null) {
+            throw new \RuntimeException('Server is missing required field (fromEmail)');
+        }
+        if (!filter_var($recipient, FILTER_VALIDATE_EMAIL)) {
+            throw new \RuntimeException('Invalid recipient email');
+        }
+
+        $transport = $this->createTransport($server);
         $mailer = new Mailer($transport);
         $from = $server->getFromName()
             ? new Address($server->getFromEmail(), $server->getFromName())

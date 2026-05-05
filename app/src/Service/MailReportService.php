@@ -11,7 +11,6 @@ use App\Repository\MailReportRepository;
 use App\Service\SystemUpdateScoreCalculator;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Mailer\Mailer;
-use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 use Symfony\Component\Mime\Address;
 use Symfony\Component\Mime\Email;
 
@@ -109,16 +108,7 @@ HTML;
             throw new \RuntimeException('No recipient resolved for this report.');
         }
 
-        $tls = match ($server->getEncryption()) {
-            MailServer::ENCRYPTION_SSL => true,
-            MailServer::ENCRYPTION_NONE => false,
-            default => null,
-        };
-        $transport = new EsmtpTransport((string) $server->getHost(), $server->getPort(), $tls);
-        if ($server->getUsername() !== null && $server->getUsername() !== '') {
-            $transport->setUsername($server->getUsername());
-            $transport->setPassword($this->mailServerService->getDecryptedPassword($server) ?? '');
-        }
+        $transport = $this->mailServerService->createTransport($server);
         $mailer = new Mailer($transport);
 
         $from = $server->getFromName()
