@@ -39,7 +39,6 @@ interface Rule {
   enabled: boolean;
   source: "local" | "ssh";
   command: string | null;
-  tag: string | null;
   folderId: number | null;
   extracts: unknown[];
   createdAt: string;

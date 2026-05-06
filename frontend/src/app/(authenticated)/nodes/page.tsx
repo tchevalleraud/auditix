@@ -544,10 +544,14 @@ export default function NodesPage() {
         nodeIds.forEach((id) => { next[id] = "pending"; });
         return next;
       });
+      const pending = collectTagInput.trim().replace(/,/g, "");
+      const tags = pending && !collectTags.includes(pending)
+        ? [...collectTags, pending]
+        : collectTags;
       await fetch(`/api/collections/collect?context=${current.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeIds, tags: collectTags }),
+        body: JSON.stringify({ nodeIds, tags }),
       });
       setCollectModal(false);
       setCollectTags([]);

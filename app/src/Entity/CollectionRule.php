@@ -33,9 +33,6 @@ class CollectionRule
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $command = null;
 
-    #[ORM\Column(length: 255, nullable: true)]
-    private ?string $tag = null;
-
     #[ORM\ManyToOne(targetEntity: CollectionRuleFolder::class)]
     #[ORM\JoinColumn(nullable: true, onDelete: 'CASCADE')]
     private ?CollectionRuleFolder $folder = null;
@@ -78,8 +75,6 @@ class CollectionRule
     public function setSource(string $v): static { $this->source = $v; return $this; }
     public function getCommand(): ?string { return $this->command; }
     public function setCommand(?string $v): static { $this->command = $v; return $this; }
-    public function getTag(): ?string { return $this->tag; }
-    public function setTag(?string $v): static { $this->tag = $v; return $this; }
     public function getFolder(): ?CollectionRuleFolder { return $this->folder; }
     public function setFolder(?CollectionRuleFolder $v): static { $this->folder = $v; return $this; }
     public function getContext(): Context { return $this->context; }

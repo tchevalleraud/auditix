@@ -491,10 +491,14 @@ export default function NodeDetailPage() {
     if (!current) return;
     setCollecting(true);
     try {
+      const pending = collectTagInput.trim().replace(/,/g, "");
+      const tags = pending && !collectTags.includes(pending)
+        ? [...collectTags, pending]
+        : collectTags;
       await fetch(`/api/collections/collect?context=${current.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ nodeIds: [Number(nodeId)], tags: collectTags }),
+        body: JSON.stringify({ nodeIds: [Number(nodeId)], tags }),
       });
       setCollectModal(false);
       setCollectTags([]);

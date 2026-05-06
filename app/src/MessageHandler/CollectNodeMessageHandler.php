@@ -659,19 +659,8 @@ class CollectNodeMessageHandler
     private function getRuleOutput(CollectionRule $rule, string $baseDir, Collection $collection, Node $node): ?string
     {
         if ($rule->getSource() === CollectionRule::SOURCE_LOCAL) {
-            $ruleTag = $rule->getTag();
             $command = $rule->getCommand();
-
-            // If this rule has a tag, find the collection currently holding that tag for this node.
-            if ($ruleTag) {
-                $tagRow = $this->em->getRepository(CollectionTag::class)->findOneByNodeAndName($node, $ruleTag);
-                if (!$tagRow || $tagRow->getCollection()->getStatus() !== Collection::STATUS_COMPLETED) {
-                    return null;
-                }
-                $storageDir = $this->projectDir . '/var/' . $tagRow->getCollection()->getStoragePath();
-            } else {
-                $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
-            }
+            $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
 
             if (!is_dir($storageDir)) {
                 return null;

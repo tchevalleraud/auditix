@@ -297,6 +297,59 @@ class CollectionController extends AbstractController
         );
     }
 
+    #[Route('/bulk-tags/add', methods: ['POST'])]
+    public function bulkAddTag(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $ids = $data['ids'] ?? [];
+        $tag = trim($data['tag'] ?? '');
+        if (empty($ids) || $tag === '') {
+            return $this->json(['error' => 'ids and tag are required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $collections = $em->getRepository(Collection::class)->findBy(['id' => $ids]);
+        $updated = [];
+        $toExtract = [];
+        foreach ($collections as $collection) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
+            $this->releaseTag($em, $tag, $collection->getNode(), $collection);
+            $collection->addTag($tag);
+            $updated[] = $collection;
+            if ($collection->getStatus() === Collection::STATUS_COMPLETED) {
+                $toExtract[] = $collection->getId();
+            }
+        }
+        $em->flush();
+
+        foreach ($toExtract as $cid) {
+            $this->bus->dispatch(new ProcessInventoryMessage($cid, tagName: $tag));
+        }
+
+        return $this->json(array_map($this->serialize(...), $updated));
+    }
+
+    #[Route('/bulk-tags/remove', methods: ['POST'])]
+    public function bulkRemoveTag(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        $ids = $data['ids'] ?? [];
+        $tag = trim($data['tag'] ?? '');
+        if (empty($ids) || $tag === '') {
+            return $this->json(['error' => 'ids and tag are required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $collections = $em->getRepository(Collection::class)->findBy(['id' => $ids]);
+        $updated = [];
+        foreach ($collections as $collection) {
+            $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
+            $collection->removeTag($tag);
+            $updated[] = $collection;
+        }
+        $em->flush();
+
+        return $this->json(array_map($this->serialize(...), $updated));
+    }
+
     #[Route('/{id}/tags', methods: ['POST'])]
     public function addTag(Collection $collection, Request $request, EntityManagerInterface $em): JsonResponse
     {

@@ -578,7 +578,6 @@ class ManufacturerExportController extends AbstractController
             'enabled' => $rule->isEnabled(),
             'source' => $rule->getSource(),
             'command' => $rule->getCommand(),
-            'tag' => $rule->getTag(),
             'translations' => $rule->getTranslations(),
             'conditionTree' => $rule->getConditionTree(),
             'extracts' => $extracts,
@@ -707,7 +706,6 @@ class ManufacturerExportController extends AbstractController
         $rule->setEnabled($data['enabled'] ?? true);
         $rule->setSource($data['source'] ?? CollectionRule::SOURCE_LOCAL);
         $rule->setCommand($data['command'] ?? null);
-        $rule->setTag($data['tag'] ?? null);
         $rule->setTranslations($data['translations'] ?? null);
         $rule->setConditionTree($data['conditionTree'] ?? null);
         $rule->setFolder($folder);

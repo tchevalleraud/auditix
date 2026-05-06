@@ -56,6 +56,11 @@ export default function CollectionsPage() {
   const [tagModalId, setTagModalId] = useState<number | null>(null);
   const [newTag, setNewTag] = useState("");
 
+  // Bulk tag management
+  const [bulkTagOpen, setBulkTagOpen] = useState(false);
+  const [bulkNewTag, setBulkNewTag] = useState("");
+  const [bulkTagSaving, setBulkTagSaving] = useState(false);
+
   // ZIP import
   const [zipImportOpen, setZipImportOpen] = useState(false);
 
@@ -154,6 +159,49 @@ export default function CollectionsPage() {
     }
   };
 
+  const applyBulk = (updated: CollectionItem[]) => {
+    const byId = new Map(updated.map((c) => [c.id, c]));
+    setCollections((prev) => prev.map((c) => byId.get(c.id) ?? c));
+  };
+
+  const bulkAddTag = async () => {
+    const tag = bulkNewTag.trim();
+    if (!tag || selected.size === 0) return;
+    setBulkTagSaving(true);
+    try {
+      const res = await fetch("/api/collections/bulk-tags/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected), tag }),
+      });
+      if (res.ok) {
+        applyBulk(await res.json());
+        setBulkNewTag("");
+      }
+    } finally {
+      setBulkTagSaving(false);
+    }
+  };
+
+  const bulkRemoveTag = async (tag: string) => {
+    if (selected.size === 0) return;
+    setBulkTagSaving(true);
+    try {
+      const res = await fetch("/api/collections/bulk-tags/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected), tag }),
+      });
+      if (res.ok) applyBulk(await res.json());
+    } finally {
+      setBulkTagSaving(false);
+    }
+  };
+
+  const selectedTagsUnion = Array.from(
+    new Set(collections.filter((c) => selected.has(c.id)).flatMap((c) => c.tags))
+  ).sort();
+
   const fmt = (iso: string | null) => {
     if (!iso) return "\u2014";
     return new Date(iso).toLocaleString(locale, {
@@ -181,6 +229,74 @@ export default function CollectionsPage() {
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("collections.subtitle")}</p>
         </div>
         <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <div className="relative">
+              <button
+                onClick={() => setBulkTagOpen((v) => !v)}
+                className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Tag className="h-4 w-4" />
+                {t("collections.manageTags", { count: String(selected.size) })}
+              </button>
+              {bulkTagOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setBulkTagOpen(false)} />
+                  <div className="absolute right-0 z-20 mt-2 w-80 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-4 space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                        {t("collections.bulkAddTagLabel")}
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={bulkNewTag}
+                          onChange={(e) => setBulkNewTag(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") bulkAddTag(); }}
+                          placeholder={t("collections.addTagPlaceholder")}
+                          className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:border-slate-400"
+                          autoFocus
+                        />
+                        <button
+                          onClick={bulkAddTag}
+                          disabled={!bulkNewTag.trim() || bulkTagSaving}
+                          className="flex items-center gap-1 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                        >
+                          {bulkTagSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                          {t("collections.bulkAdd")}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                        {t("collections.bulkRemoveTagLabel")}
+                      </label>
+                      {selectedTagsUnion.length === 0 ? (
+                        <p className="text-xs text-slate-400 dark:text-slate-500">{t("collections.bulkNoTags")}</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {selectedTagsUnion.map((tag) => (
+                            <span
+                              key={tag}
+                              className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-300"
+                            >
+                              {tag}
+                              <button
+                                onClick={() => bulkRemoveTag(tag)}
+                                disabled={bulkTagSaving}
+                                className="hover:text-red-500 transition-colors disabled:opacity-50"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {selected.size > 0 && (
             <button
               onClick={() => setConfirmDelete(true)}

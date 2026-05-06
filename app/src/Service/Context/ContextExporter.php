@@ -452,7 +452,6 @@ class ContextExporter
             'enabled' => $r->isEnabled(),
             'source' => $r->getSource(),
             'command' => $r->getCommand(),
-            'tag' => $r->getTag(),
             'folder' => $this->refOrNull('collectionRuleFolder', $r->getFolder()?->getId()),
             'translations' => $r->getTranslations(),
             'conditionTree' => $r->getConditionTree(),

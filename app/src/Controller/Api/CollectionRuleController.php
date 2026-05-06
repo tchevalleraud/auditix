@@ -44,7 +44,6 @@ class CollectionRuleController extends AbstractController
             'enabled' => $r->isEnabled(),
             'source' => $r->getSource(),
             'command' => $r->getCommand(),
-            'tag' => $r->getTag(),
             'folderId' => $r->getFolder()?->getId(),
             'extracts' => array_values(array_map(
                 $this->serializeExtract(...),
@@ -304,7 +303,6 @@ class CollectionRuleController extends AbstractController
         $rule->setEnabled($data['enabled'] ?? true);
         $rule->setSource($data['source'] ?? CollectionRule::SOURCE_LOCAL);
         $rule->setCommand($data['command'] ?? null);
-        $rule->setTag($data['tag'] ?? null);
         $rule->setFolder($folder);
         $rule->setContext($context);
 
@@ -341,10 +339,6 @@ class CollectionRuleController extends AbstractController
         }
         if (array_key_exists('command', $data)) {
             $rule->setCommand($data['command'] ?: null);
-        }
-        if (array_key_exists('tag', $data)) {
-            $source = $data['source'] ?? $rule->getSource();
-            $rule->setTag($source === CollectionRule::SOURCE_LOCAL ? ($data['tag'] ?: null) : null);
         }
         if (array_key_exists('folderId', $data)) {
             $folder = $data['folderId'] ? $em->getRepository(CollectionRuleFolder::class)->find($data['folderId']) : null;
@@ -394,28 +388,16 @@ class CollectionRuleController extends AbstractController
     private function testLocal(CollectionRule $rule, Node $node, EntityManagerInterface $em): JsonResponse
     {
         $command = $rule->getCommand();
-        $tag = $rule->getTag();
         $commandSlug = $this->slugify($command);
 
-        // Find the latest collection for this node, optionally filtered by tag
-        $conn = $em->getConnection();
-        $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status';
-        $params = ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED];
-
-        if ($tag) {
-            $sql .= ' AND tags::text LIKE :tag';
-            $params['tag'] = '%"' . $tag . '"%';
-        }
-
-        $sql .= ' ORDER BY completed_at DESC LIMIT 1';
-        $row = $conn->fetchAssociative($sql, $params);
-        $collection = $row ? $em->getRepository(Collection::class)->find($row['id']) : null;
+        $collection = $em->getRepository(Collection::class)->findOneBy(
+            ['node' => $node, 'status' => Collection::STATUS_COMPLETED],
+            ['completedAt' => 'DESC']
+        );
         if (!$collection) {
             return $this->json([
                 'success' => false,
-                'error' => $tag
-                    ? 'No completed collection found for this node with tag "' . $tag . '"'
-                    : 'No completed collection found for this node',
+                'error' => 'No completed collection found for this node',
             ]);
         }
 
@@ -752,7 +734,6 @@ class CollectionRuleController extends AbstractController
         $copy->setEnabled($rule->isEnabled());
         $copy->setSource($rule->getSource());
         $copy->setCommand($rule->getCommand());
-        $copy->setTag($rule->getTag());
         $copy->setFolder($rule->getFolder());
         $copy->setContext($rule->getContext());
         $copy->setTranslations($rule->getTranslations());

@@ -319,7 +319,6 @@ class FolderExportController extends AbstractController
                 'enabled' => $rule->isEnabled(),
                 'source' => $rule->getSource(),
                 'command' => $rule->getCommand(),
-                'tag' => $rule->getTag(),
                 'translations' => $rule->getTranslations(),
                 'conditionTree' => $rule->getConditionTree(),
                 'extracts' => $extracts,
@@ -369,7 +368,6 @@ class FolderExportController extends AbstractController
             $rule->setEnabled($ruleData['enabled'] ?? true);
             $rule->setSource($ruleData['source'] ?? CollectionRule::SOURCE_LOCAL);
             $rule->setCommand($ruleData['command'] ?? null);
-            $rule->setTag($ruleData['tag'] ?? null);
             $rule->setTranslations($ruleData['translations'] ?? null);
             $rule->setConditionTree($ruleData['conditionTree'] ?? null);
             $rule->setFolder($folder);

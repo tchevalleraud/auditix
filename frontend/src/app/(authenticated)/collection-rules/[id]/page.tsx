@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   Monitor,
   Wifi,
-  Tag,
   Pencil,
   Terminal,
   Play,
@@ -124,7 +123,6 @@ interface RuleDetail {
   enabled: boolean;
   source: "local" | "ssh";
   command: string | null;
-  tag: string | null;
   folderId: number | null;
   extracts: ExtractItem[];
   translations: TranslationEntry[] | null;
@@ -193,7 +191,6 @@ export default function CollectionRuleEditPage() {
   // Collect fields
   const [source, setSource] = useState<"local" | "ssh">("local");
   const [command, setCommand] = useState("");
-  const [tag, setTag] = useState("");
   const [savingCollect, setSavingCollect] = useState(false);
   const [savedCollect, setSavedCollect] = useState(false);
 
@@ -291,7 +288,6 @@ export default function CollectionRuleEditPage() {
       setFolderId(data.folderId);
       setSource(data.source);
       setCommand(data.command ?? "");
-      setTag(data.tag ?? "");
       setExtracts(data.extracts ?? []);
     }
     setLoading(false);
@@ -358,7 +354,6 @@ export default function CollectionRuleEditPage() {
       const body = {
         source,
         command: command || null,
-        tag: source === "local" ? (tag || null) : null,
       };
       const res = await fetch(`/api/collection-rules/${ruleId}`, {
         method: "PUT",
@@ -1172,15 +1167,6 @@ export default function CollectionRuleEditPage() {
               <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.commandHelp")}</p>
               <input type="text" value={command} onChange={(e) => setCommand(e.target.value)} placeholder={t("collection_rules.commandPlaceholder")} className={inputCls} />
             </div>
-            {source === "local" && (
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-                  <span className="flex items-center gap-1.5"><Tag className="h-4 w-4" />{t("collection_rules.tagLabel")}</span>
-                </label>
-                <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.tagHelp")}</p>
-                <input type="text" value={tag} onChange={(e) => setTag(e.target.value)} placeholder={t("collection_rules.tagPlaceholder")} className={inputCls} />
-              </div>
-            )}
           </div>
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
             <button onClick={saveCollect} disabled={savingCollect} className={btnPrimaryCls}>

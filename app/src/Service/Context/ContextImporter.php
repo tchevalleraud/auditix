@@ -658,7 +658,6 @@ class ContextImporter
                 ->setEnabled((bool) ($row['enabled'] ?? true))
                 ->setSource($row['source'] ?? CollectionRule::SOURCE_LOCAL)
                 ->setCommand($row['command'] ?? null)
-                ->setTag($row['tag'] ?? null)
                 ->setTranslations($row['translations'] ?? null)
                 ->setConditionTree($row['conditionTree'] ?? null)
                 ->setContext($context);
