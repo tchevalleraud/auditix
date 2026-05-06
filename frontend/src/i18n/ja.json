@@ -496,6 +496,7 @@
     "tabCollections": "収集",
     "tabInventory": "インベントリ",
     "inventoryKey": "キー",
+    "inventoryTag": "タグ",
     "inventoryEmpty": "インベントリデータがありません。データを抽出するにはコレクションを実行してください。",
     "noCollections": "収集なし",
     "collectionPending": "待機中",

@@ -496,6 +496,7 @@
     "tabCollections": "Raccolte",
     "tabInventory": "Inventario",
     "inventoryKey": "Chiave",
+    "inventoryTag": "Tag",
     "inventoryEmpty": "Nessun dato di inventario. Esegui una raccolta per estrarre i dati.",
     "noCollections": "Nessuna raccolta",
     "collectionPending": "In attesa",

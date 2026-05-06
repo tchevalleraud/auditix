@@ -104,6 +104,18 @@ interface InventoryCatData {
   rows: { key: string; values: Record<string, string> }[];
 }
 
+interface InventoryTagItem {
+  id: number;
+  name: string;
+  createdAt: string;
+  collection: {
+    id: number;
+    status: string;
+    completedAt: string | null;
+    lastExtractedAt: string | null;
+  };
+}
+
 export default function NodeDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -167,6 +179,8 @@ export default function NodeDetailPage() {
   const [inventoryData, setInventoryData] = useState<InventoryCatData[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [selectedInventoryCat, setSelectedInventoryCat] = useState(0);
+  const [inventoryTags, setInventoryTags] = useState<InventoryTagItem[]>([]);
+  const [selectedInventoryTag, setSelectedInventoryTag] = useState<string>("latest");
 
   // Monitoring state
   const [monitoringData, setMonitoringData] = useState<SnmpMonitoringResponse | null>(null);
@@ -296,15 +310,28 @@ export default function NodeDetailPage() {
     setCollectionsLoading(false);
   }, [nodeId]);
 
-  const loadInventory = useCallback(async () => {
+  const loadInventoryTags = useCallback(async () => {
+    const res = await fetch(`/api/nodes/${nodeId}/inventory/tags`);
+    if (res.ok) {
+      const tags: InventoryTagItem[] = await res.json();
+      setInventoryTags(tags);
+      // Reset selection if current tag no longer exists
+      if (!tags.some((t) => t.name === selectedInventoryTag)) {
+        setSelectedInventoryTag(tags.find((t) => t.name === "latest")?.name ?? tags[0]?.name ?? "latest");
+      }
+    }
+  }, [nodeId, selectedInventoryTag]);
+
+  const loadInventory = useCallback(async (tagName?: string) => {
     setInventoryLoading(true);
-    const res = await fetch(`/api/nodes/${nodeId}/inventory`);
+    const tag = tagName ?? selectedInventoryTag;
+    const res = await fetch(`/api/nodes/${nodeId}/inventory?tag=${encodeURIComponent(tag)}`);
     if (res.ok) {
       setInventoryData(await res.json());
       setSelectedInventoryCat(0);
     }
     setInventoryLoading(false);
-  }, [nodeId]);
+  }, [nodeId, selectedInventoryTag]);
 
   const loadMonitoring = useCallback(async (silent = false) => {
     if (!silent) setMonitoringLoading(true);
@@ -331,7 +358,7 @@ export default function NodeDetailPage() {
   useEffect(() => { loadCollections(); }, [loadCollections]);
   useEffect(() => {
     if (tab === "summary") { loadMonitoring(true); loadCompliance(); }
-    if (tab === "inventory") loadInventory();
+    if (tab === "inventory") { loadInventoryTags(); loadInventory(); }
     if (tab === "collections") loadCollections();
     if (tab === "compliance") loadCompliance();
     if (tab === "vulnerabilities") loadVulnerabilities();
@@ -1276,6 +1303,34 @@ export default function NodeDetailPage() {
 
       {tab === "inventory" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">
+          {inventoryTags.length > 0 && (
+            <div className="flex items-center gap-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 px-4 py-2">
+              <label className="text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider">{t("nodes.inventoryTag")}</label>
+              <select
+                value={selectedInventoryTag}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSelectedInventoryTag(next);
+                  loadInventory(next);
+                }}
+                className="text-sm rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-slate-700 dark:text-slate-200"
+              >
+                {inventoryTags.map((tg) => (
+                  <option key={tg.id} value={tg.name}>{tg.name}</option>
+                ))}
+              </select>
+              {(() => {
+                const current = inventoryTags.find((t) => t.name === selectedInventoryTag);
+                if (!current) return null;
+                const date = current.collection.completedAt || current.createdAt;
+                return (
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    #{current.collection.id} — {new Date(date).toLocaleString(locale)}
+                  </span>
+                );
+              })()}
+            </div>
+          )}
           {inventoryLoading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />

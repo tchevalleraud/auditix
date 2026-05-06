@@ -155,12 +155,23 @@ class NodeMatchEvaluator
             return null;
         }
 
-        $entry = $this->em->getRepository(NodeInventoryEntry::class)->findOneBy([
-            'node' => $node,
-            'category' => $categoryId,
-            'entryKey' => $key,
-            'colLabel' => $column,
-        ]);
+        $entry = $this->em->createQueryBuilder()
+            ->select('e')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->innerJoin('e.collectionTag', 't')
+            ->where('e.node = :node')
+            ->andWhere('e.category = :cat')
+            ->andWhere('e.entryKey = :key')
+            ->andWhere('e.colLabel = :col')
+            ->andWhere('t.name = :tag')
+            ->setParameter('node', $node)
+            ->setParameter('cat', $categoryId)
+            ->setParameter('key', $key)
+            ->setParameter('col', $column)
+            ->setParameter('tag', 'latest')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
 
         return $entry?->getValue();
     }

@@ -673,6 +673,7 @@
     "tabCollections": "Collectes",
     "tabInventory": "Inventaire",
     "inventoryKey": "Clef",
+    "inventoryTag": "Tag",
     "inventoryEmpty": "Aucune donnee d'inventaire. Lancez une collecte pour extraire les donnees.",
     "noCollections": "Aucune collecte",
     "importCollection": "Import manuel",

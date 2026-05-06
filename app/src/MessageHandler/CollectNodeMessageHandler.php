@@ -8,6 +8,8 @@ use App\Entity\CollectionFolder;
 use App\Entity\CollectionRule;
 use App\Entity\CollectionRuleExtract;
 use App\Entity\CollectionRuleFolder;
+use App\Entity\CollectionTag;
+use App\Doctrine\Filter\LatestInventoryFilter;
 use App\Entity\InventoryCategory;
 use App\Entity\Node;
 use App\Entity\NodeDynamicTag;
@@ -471,55 +473,86 @@ class CollectNodeMessageHandler
         }
     }
 
-    public function processInventoryRules(Collection $collection, Node $node, string $baseDir): void
+    public function processInventoryRules(Collection $collection, Node $node, string $baseDir, ?string $tagName = null): void
     {
         $model = $node->getModel();
         $rules = $this->resolveRules($model);
+
+        if (empty($rules)) {
+            return;
+        }
+
+        // Resolve which tags to process for this collection.
+        $tags = [];
+        if ($tagName !== null) {
+            $t = $collection->getCollectionTag($tagName);
+            if ($t) $tags[] = $t;
+        } else {
+            foreach ($collection->getCollectionTags() as $t) {
+                $tags[] = $t;
+            }
+        }
+
+        if (empty($tags)) {
+            return;
+        }
 
         $this->logger->info('[extract] start', [
             'collectionId' => $collection->getId(),
             'nodeId' => $node->getId(),
             'ip' => $node->getIpAddress(),
             'rulesTotal' => count($rules),
+            'tags' => array_map(fn(CollectionTag $t) => $t->getName(), $tags),
         ]);
 
-        if (empty($rules)) {
-            return;
-        }
+        // The latest_inventory filter scopes reads to the "latest" tag — disable
+        // it so per-tag DELETEs and historical-tag INSERTs work as expected.
+        $filters = $this->em->getFilters();
+        $filterWasEnabled = $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($filterWasEnabled) $filters->disable(LatestInventoryFilter::NAME);
 
-        // Delete existing inventory for this node (full refresh)
+        try {
+            foreach ($tags as $tag) {
+                $this->extractInventoryForTag($collection, $node, $baseDir, $rules, $tag);
+            }
+        } finally {
+            if ($filterWasEnabled) $filters->enable(LatestInventoryFilter::NAME);
+        }
+    }
+
+    /**
+     * Extract inventory entries scoped to a single CollectionTag.
+     * Node-level fields (hostname, discoveredModel, …) and dynamic tags are only
+     * updated when the tag is "latest" — historical snapshots stay isolated.
+     */
+    private function extractInventoryForTag(Collection $collection, Node $node, string $baseDir, array $rules, CollectionTag $tag): void
+    {
+        $isLatest = $tag->getName() === 'latest';
+
+        // Delete previous inventory entries bound to this tag (per-tag refresh).
         $this->em->createQueryBuilder()
             ->delete(NodeInventoryEntry::class, 'e')
-            ->where('e.node = :node')
-            ->setParameter('node', $node)
+            ->where('e.collectionTag = :tag')
+            ->setParameter('tag', $tag)
             ->getQuery()
             ->execute();
 
-        // Purge dynamic tag assignments — they will be recomputed by
-        // collection rules' condition trees below. Manual tag assignments
-        // (node_node_tag) are preserved untouched.
-        $this->em->createQueryBuilder()
-            ->delete(NodeDynamicTag::class, 'd')
-            ->where('d.node = :node')
-            ->setParameter('node', $node)
-            ->getQuery()
-            ->execute();
+        if ($isLatest) {
+            // Dynamic tags are computed from the latest snapshot only.
+            $this->em->createQueryBuilder()
+                ->delete(NodeDynamicTag::class, 'd')
+                ->where('d.node = :node')
+                ->setParameter('node', $node)
+                ->getQuery()
+                ->execute();
+        }
 
-        // Reset dedup index for this node
+        // Reset dedup index for this tag's extraction pass.
         $this->entryIndex = [];
 
         $nodeFieldUpdates = [];
 
         foreach ($rules as $rule) {
-            $this->logger->info('[extract] rule', [
-                'collectionId' => $collection->getId(),
-                'nodeId' => $node->getId(),
-                'ip' => $node->getIpAddress(),
-                'ruleId' => $rule->getId(),
-                'ruleName' => $rule->getName(),
-            ]);
-
-            // Get file content for this rule
             $text = $this->getRuleOutput($rule, $baseDir, $collection, $node);
             if (!$text) {
                 continue;
@@ -529,10 +562,9 @@ class CollectNodeMessageHandler
             $extracts = $rule->getExtracts()->toArray();
 
             foreach ($extracts as $ext) {
-                $this->applyExtract($ext, $text, $node, $rule, $collection);
+                $this->applyExtract($ext, $text, $node, $rule, $tag);
 
-                // If this extract maps to a node field (only non-multiline)
-                if (!$ext->isMultiline() && $ext->getNodeField()) {
+                if ($isLatest && !$ext->isMultiline() && $ext->getNodeField()) {
                     $value = $this->extractNodeFieldValue($ext, $text);
                     if ($value !== null) {
                         $value = $this->applyTranslation($rule, $ext, $value);
@@ -542,23 +574,24 @@ class CollectNodeMessageHandler
             }
         }
 
-        // Apply node field updates
-        foreach ($nodeFieldUpdates as $field => $value) {
-            match ($field) {
-                'hostname' => $node->setHostname($value),
-                'discoveredModel' => $node->setDiscoveredModel($value),
-                'discoveredVersion' => $node->setDiscoveredVersion($value),
-                'productModel' => $node->setProductModel($value),
-                default => null,
-            };
+        if ($isLatest) {
+            foreach ($nodeFieldUpdates as $field => $value) {
+                match ($field) {
+                    'hostname' => $node->setHostname($value),
+                    'discoveredModel' => $node->setDiscoveredModel($value),
+                    'discoveredVersion' => $node->setDiscoveredVersion($value),
+                    'productModel' => $node->setProductModel($value),
+                    default => null,
+                };
+            }
         }
 
-        // Flush extracts so condition tree inventory lookups read fresh data.
         $this->em->flush();
 
-        $this->applyConditionTrees($rules, $node, $collection);
-
-        $this->em->flush();
+        if ($isLatest) {
+            $this->applyConditionTrees($rules, $node, $tag);
+            $this->em->flush();
+        }
     }
 
     /**
@@ -566,7 +599,7 @@ class CollectNodeMessageHandler
      * (set_tag → NodeDynamicTag, set_inventory → NodeInventoryEntry).
      * Tags are deduplicated against manual tags + already-applied dynamic tags.
      */
-    private function applyConditionTrees(array $rules, Node $node, Collection $collection): void
+    private function applyConditionTrees(array $rules, Node $node, CollectionTag $tag): void
     {
         $manualTagIds = [];
         foreach ($node->getTags() as $t) {
@@ -617,7 +650,7 @@ class CollectNodeMessageHandler
                     if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) {
                         continue;
                     }
-                    $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $collection);
+                    $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $tag);
                 }
             }
         }
@@ -626,24 +659,16 @@ class CollectNodeMessageHandler
     private function getRuleOutput(CollectionRule $rule, string $baseDir, Collection $collection, Node $node): ?string
     {
         if ($rule->getSource() === CollectionRule::SOURCE_LOCAL) {
-            $tag = $rule->getTag();
+            $ruleTag = $rule->getTag();
             $command = $rule->getCommand();
 
-            // If this rule has a tag, find the latest tagged collection for this node
-            if ($tag) {
-                $conn = $this->em->getConnection();
-                $sql = 'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1';
-                $row = $conn->fetchAssociative($sql, [
-                    'node' => $node->getId(),
-                    'status' => Collection::STATUS_COMPLETED,
-                    'tag' => '%"' . $tag . '"%',
-                ]);
-                $taggedCollection = $row ? $this->em->getRepository(Collection::class)->find($row['id']) : null;
-                if ($taggedCollection) {
-                    $storageDir = $this->projectDir . '/var/' . $taggedCollection->getStoragePath();
-                } else {
+            // If this rule has a tag, find the collection currently holding that tag for this node.
+            if ($ruleTag) {
+                $tagRow = $this->em->getRepository(CollectionTag::class)->findOneByNodeAndName($node, $ruleTag);
+                if (!$tagRow || $tagRow->getCollection()->getStatus() !== Collection::STATUS_COMPLETED) {
                     return null;
                 }
+                $storageDir = $this->projectDir . '/var/' . $tagRow->getCollection()->getStoragePath();
             } else {
                 $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
             }
@@ -732,25 +757,25 @@ class CollectNodeMessageHandler
         return null;
     }
 
-    private function applyExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection): void
+    private function applyExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, CollectionTag $tag): void
     {
         $regex = $ext->getRegex();
         if (!$regex) return;
 
         if ($ext->getExtractMode() === CollectionRuleExtract::EXTRACT_MODE_BLOCK) {
-            $this->applyBlockExtract($ext, $text, $node, $rule, $collection);
+            $this->applyBlockExtract($ext, $text, $node, $rule, $tag);
             return;
         }
 
         // --- Line mode (default, unchanged) ---
-        $this->applyExtractOnText($ext, $text, $node, $rule, $collection, null);
+        $this->applyExtractOnText($ext, $text, $node, $rule, $tag, null);
     }
 
     /**
      * Block mode: split the text into blocks using blockSeparator, then apply
      * the normal line-by-line extraction within each block individually.
      */
-    private function applyBlockExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection): void
+    private function applyBlockExtract(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, CollectionTag $tag): void
     {
         $separator = $ext->getBlockSeparator();
         if (!$separator) return;
@@ -774,7 +799,7 @@ class CollectNodeMessageHandler
                 $blockKey = trim((string) $matches[$blockKeyGroup][$i][0]);
             }
 
-            $this->applyExtractOnText($ext, $blockText, $node, $rule, $collection, $blockKey);
+            $this->applyExtractOnText($ext, $blockText, $node, $rule, $tag, $blockKey);
         }
     }
 
@@ -786,7 +811,7 @@ class CollectNodeMessageHandler
     /** @var array<string, NodeInventoryEntry> Track persisted entries to avoid duplicate key violations */
     private array $entryIndex = [];
 
-    private function applyExtractOnText(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, Collection $collection, ?string $blockKey): void
+    private function applyExtractOnText(CollectionRuleExtract $ext, string $text, Node $node, CollectionRule $rule, CollectionTag $tag, ?string $blockKey): void
     {
         $regex = $ext->getRegex();
         $hasValueMap = $ext->getValueMap() && count($ext->getValueMap()) > 0;
@@ -828,7 +853,7 @@ class CollectNodeMessageHandler
                     $value = $m[$group] ?? '';
                     $value = $this->applyTranslation($rule, $ext, $value);
 
-                    $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, $label, $value, $rule, $collection);
+                    $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, $label, $value, $rule, $tag);
                 }
             } else {
                 $vg = $ext->getKeyMode() === CollectionRuleExtract::KEY_MODE_EXTRACT
@@ -837,7 +862,7 @@ class CollectNodeMessageHandler
                 $value = $m[$vg] ?? $m[1] ?? $m[0] ?? '';
                 $value = $this->applyTranslation($rule, $ext, $value);
 
-                $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, 'Value#1', $value, $rule, $collection);
+                $this->upsertEntry($node, $ext->getCategory(), $categoryName, $catId, $key, 'Value#1', $value, $rule, $tag);
             }
         }
     }
@@ -845,7 +870,7 @@ class CollectNodeMessageHandler
     private function upsertEntry(
         Node $node, ?InventoryCategory $category, string $categoryName, int $catId,
         string $key, string $label, string $value,
-        CollectionRule $rule, Collection $collection,
+        CollectionRule $rule, CollectionTag $tag,
     ): void {
         $indexKey = "$catId:$key:$label";
         if (isset($this->entryIndex[$indexKey])) {
@@ -863,7 +888,7 @@ class CollectNodeMessageHandler
         $entry->setColLabel($label);
         $entry->setValue($value);
         $entry->setRule($rule);
-        $entry->setCollection($collection);
+        $entry->setCollectionTag($tag);
         $entry->setUpdatedAt(new \DateTimeImmutable());
         $this->em->persist($entry);
         $this->entryIndex[$indexKey] = $entry;

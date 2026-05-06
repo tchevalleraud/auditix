@@ -3,6 +3,7 @@
 namespace App\Controller\Api;
 
 use App\Entity\Collection;
+use App\Entity\CollectionTag;
 use App\Entity\Context;
 use App\Entity\Node;
 use App\Message\CollectNodeMessage;
@@ -38,7 +39,12 @@ class CollectionController extends AbstractController
                 'hostname' => $node->getHostname(),
                 'ipAddress' => $node->getIpAddress(),
             ],
-            'tags' => $c->getTags(),
+            'tags' => $c->getTagNames(),
+            'collectionTags' => array_map(fn(CollectionTag $t) => [
+                'id' => $t->getId(),
+                'name' => $t->getName(),
+                'createdAt' => $t->getCreatedAt()->format('c'),
+            ], $c->getCollectionTags()->toArray()),
             'status' => $c->getStatus(),
             'worker' => $c->getWorker(),
             'commandCount' => $c->getCommandCount(),
@@ -164,14 +170,10 @@ class CollectionController extends AbstractController
 
         foreach ($nodes as $node) {
             $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
-            // Find the latest completed collection with 'latest' tag
-            $row = $em->getConnection()->fetchAssociative(
-                'SELECT id FROM collection WHERE node_id = :node AND status = :status AND tags::text LIKE :tag ORDER BY completed_at DESC LIMIT 1',
-                ['node' => $node->getId(), 'status' => Collection::STATUS_COMPLETED, 'tag' => '%"latest"%']
-            );
-
-            if ($row) {
-                $this->bus->dispatch(new ProcessInventoryMessage((int) $row['id'], chainCompliance: true));
+            $latestTag = $em->getRepository(CollectionTag::class)->findLatestForNode($node);
+            $col = $latestTag?->getCollection();
+            if ($col && $col->getStatus() === Collection::STATUS_COMPLETED) {
+                $this->bus->dispatch(new ProcessInventoryMessage($col->getId(), chainCompliance: true));
                 $dispatched++;
             }
         }
@@ -307,6 +309,12 @@ class CollectionController extends AbstractController
         $this->releaseTag($em, $tag, $collection->getNode(), $collection);
         $collection->addTag($tag);
         $em->flush();
+
+        // Schedule a per-tag extraction so this tag carries its own inventory snapshot.
+        if ($collection->getStatus() === Collection::STATUS_COMPLETED) {
+            $this->bus->dispatch(new ProcessInventoryMessage($collection->getId(), tagName: $tag));
+        }
+
         return $this->json($this->serialize($collection));
     }
 
@@ -314,6 +322,7 @@ class CollectionController extends AbstractController
     public function removeTag(Collection $collection, string $tag, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $collection);
+        // Inventory entries linked to this tag are removed by FK cascade.
         $collection->removeTag($tag);
         $em->flush();
         return $this->json($this->serialize($collection));
@@ -402,13 +411,19 @@ class CollectionController extends AbstractController
 
     private function releaseTag(EntityManagerInterface $em, string $tag, Node $node, ?Collection $except = null): void
     {
-        $all = $em->getRepository(Collection::class)->findBy(['node' => $node]);
-        foreach ($all as $col) {
-            if ($except && $col->getId() === $except->getId()) continue;
-            if (in_array($tag, $col->getTags(), true)) {
-                $col->removeTag($tag);
-            }
-        }
+        $existing = $em->getRepository(CollectionTag::class)->findOneByNodeAndName($node, $tag);
+        if (!$existing) return;
+        if ($except && $existing->getCollection()->getId() === $except->getId()) return;
+        // Direct DELETE so the unique (node_id, name) row is gone before any
+        // new CollectionTag with the same key is INSERTed in the current UOW.
+        // FK cascade removes the related inventory entries.
+        $em->createQueryBuilder()
+            ->delete(CollectionTag::class, 'ct')
+            ->where('ct.id = :id')
+            ->setParameter('id', $existing->getId())
+            ->getQuery()
+            ->execute();
+        $em->detach($existing);
     }
 
     private function deleteDirectory(string $dir): void

@@ -227,12 +227,13 @@ class PublicLabController extends AbstractController
 
         // Release tags and create collections
         foreach ($allNodes as $node) {
-            $existing = $em->getRepository(Collection::class)->findBy(['node' => $node]);
-            foreach ($existing as $c) {
-                if (in_array('latest', $c->getTags(), true)) {
-                    $c->removeTag('latest');
-                }
-            }
+            $em->createQueryBuilder()
+                ->delete(\App\Entity\CollectionTag::class, 'ct')
+                ->where('ct.node = :node AND ct.name = :name')
+                ->setParameter('node', $node)
+                ->setParameter('name', 'latest')
+                ->getQuery()
+                ->execute();
 
             $collection = new Collection();
             $collection->setNode($node);

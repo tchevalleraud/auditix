@@ -309,11 +309,12 @@ class NodeColumnsController extends AbstractController
         }
 
         $rows = $em->getConnection()->fetchAllAssociative(
-            'SELECT DISTINCT e.category_name, e.entry_key, e.col_label
+            "SELECT DISTINCT e.category_name, e.entry_key, e.col_label
              FROM node_inventory_entry e
              JOIN node n ON n.id = e.node_id
-             WHERE n.context_id = :ctx
-             ORDER BY e.category_name ASC, e.entry_key ASC, e.col_label ASC',
+             JOIN collection_tag ct ON ct.id = e.collection_tag_id
+             WHERE n.context_id = :ctx AND ct.name = 'latest'
+             ORDER BY e.category_name ASC, e.entry_key ASC, e.col_label ASC",
             ['ctx' => $context->getId()]
         );
 

@@ -4,14 +4,11 @@ namespace App\Message;
 
 class ProcessInventoryMessage
 {
-    private bool $chainCompliance = false;
-
     public function __construct(
         private readonly int $collectionId,
-        bool $chainCompliance = false,
-    ) {
-        $this->chainCompliance = $chainCompliance;
-    }
+        private readonly bool $chainCompliance = false,
+        private readonly ?string $tagName = null,
+    ) {}
 
     public function getCollectionId(): int
     {
@@ -20,6 +17,11 @@ class ProcessInventoryMessage
 
     public function shouldChainCompliance(): bool
     {
-        return isset($this->chainCompliance) ? $this->chainCompliance : false;
+        return $this->chainCompliance;
+    }
+
+    public function getTagName(): ?string
+    {
+        return $this->tagName;
     }
 }

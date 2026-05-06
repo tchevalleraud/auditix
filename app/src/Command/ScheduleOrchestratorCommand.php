@@ -180,13 +180,16 @@ class ScheduleOrchestratorCommand extends Command
         $context = $schedule->getContext();
 
         foreach ($nodes as $node) {
-            // Release 'latest' tag from previous collections
-            $existing = $this->em->getRepository(Collection::class)->findBy(['node' => $node]);
-            foreach ($existing as $c) {
-                if (in_array('latest', $c->getTags(), true)) {
-                    $c->removeTag('latest');
-                }
-            }
+            // Release 'latest' from any prior collection with a direct DELETE so
+            // the unique (node_id, name) row is gone before the new CollectionTag
+            // INSERT in the same UOW.
+            $this->em->createQueryBuilder()
+                ->delete(\App\Entity\CollectionTag::class, 'ct')
+                ->where('ct.node = :node AND ct.name = :name')
+                ->setParameter('node', $node)
+                ->setParameter('name', 'latest')
+                ->getQuery()
+                ->execute();
 
             $collection = new Collection();
             $collection->setNode($node);

@@ -5,6 +5,7 @@ namespace App\Service;
 use App\Entity\Collection;
 use App\Entity\CollectionCommand;
 use App\Entity\CollectionFolder;
+use App\Entity\CollectionTag;
 use App\Entity\Context;
 use App\Entity\Node;
 use Doctrine\ORM\EntityManagerInterface;
@@ -305,12 +306,17 @@ class CollectionImporter
 
     private function releaseTag(string $tag, Node $node, ?Collection $except = null): void
     {
-        $all = $this->em->getRepository(Collection::class)->findBy(['node' => $node]);
-        foreach ($all as $col) {
-            if ($except && $col->getId() === $except->getId()) continue;
-            if (in_array($tag, $col->getTags(), true)) {
-                $col->removeTag($tag);
-            }
-        }
+        $existing = $this->em->getRepository(CollectionTag::class)->findOneByNodeAndName($node, $tag);
+        if (!$existing) return;
+        if ($except && $existing->getCollection()->getId() === $except->getId()) return;
+        // Direct DELETE so the unique (node_id, name) row is gone before any
+        // new CollectionTag with the same key is INSERTed in the current UOW.
+        $this->em->createQueryBuilder()
+            ->delete(CollectionTag::class, 'ct')
+            ->where('ct.id = :id')
+            ->setParameter('id', $existing->getId())
+            ->getQuery()
+            ->execute();
+        $this->em->detach($existing);
     }
 }

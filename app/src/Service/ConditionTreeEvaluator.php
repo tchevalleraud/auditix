@@ -158,9 +158,22 @@ class ConditionTreeEvaluator
         if (!$category) return null;
 
         $col = $column ?: 'Value#1';
-        $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
-            'node' => $node, 'category' => $category, 'entryKey' => $key, 'colLabel' => $col,
-        ]);
+        $entries = $this->em->createQueryBuilder()
+            ->select('e')
+            ->from(NodeInventoryEntry::class, 'e')
+            ->innerJoin('e.collectionTag', 't')
+            ->where('e.node = :node')
+            ->andWhere('e.category = :cat')
+            ->andWhere('e.entryKey = :key')
+            ->andWhere('e.colLabel = :col')
+            ->andWhere('t.name = :tag')
+            ->setParameter('node', $node)
+            ->setParameter('cat', $category)
+            ->setParameter('key', $key)
+            ->setParameter('col', $col)
+            ->setParameter('tag', 'latest')
+            ->getQuery()
+            ->getResult();
 
         $values = array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
         return empty($values) ? null : (count($values) === 1 ? $values[0] : implode(', ', $values));

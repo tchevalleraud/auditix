@@ -496,6 +496,7 @@
     "tabCollections": "Recopilaciones",
     "tabInventory": "Inventario",
     "inventoryKey": "Clave",
+    "inventoryTag": "Etiqueta",
     "inventoryEmpty": "Sin datos de inventario. Ejecute una recopilación para extraer datos.",
     "noCollections": "Sin recopilaciones",
     "collectionPending": "Pendiente",

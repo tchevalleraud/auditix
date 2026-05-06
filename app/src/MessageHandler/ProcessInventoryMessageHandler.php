@@ -47,7 +47,7 @@ class ProcessInventoryMessageHandler
 
         $t0 = microtime(true);
         try {
-            $this->collectHandler->processInventoryRules($collection, $node, $baseDir);
+            $this->collectHandler->processInventoryRules($collection, $node, $baseDir, $message->getTagName());
             $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
             $collection->setLastExtractedAt(new \DateTimeImmutable());
             $this->em->flush();

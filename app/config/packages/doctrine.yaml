@@ -24,6 +24,10 @@ doctrine:
                 dir: '%kernel.project_dir%/src/Entity'
                 prefix: 'App\Entity'
                 alias: App
+        filters:
+            latest_inventory:
+                class: App\Doctrine\Filter\LatestInventoryFilter
+                enabled: true
         controller_resolver:
             auto_mapping: false
 

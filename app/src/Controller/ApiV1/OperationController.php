@@ -361,12 +361,14 @@ class OperationController extends AbstractController
 
     private function releaseTag(EntityManagerInterface $em, string $tag, Node $node): void
     {
-        $collections = $em->getRepository(Collection::class)->findBy(['node' => $node]);
-        foreach ($collections as $collection) {
-            $tags = $collection->getTags();
-            if (in_array($tag, $tags, true)) {
-                $collection->setTags(array_values(array_filter($tags, fn(string $t) => $t !== $tag)));
-            }
-        }
+        // Direct DELETE bypasses the UOW so the unique (node_id, name) row is
+        // gone before any new CollectionTag is INSERTed in the same flush.
+        $em->createQueryBuilder()
+            ->delete(\App\Entity\CollectionTag::class, 'ct')
+            ->where('ct.node = :node AND ct.name = :name')
+            ->setParameter('node', $node)
+            ->setParameter('name', $tag)
+            ->getQuery()
+            ->execute();
     }
 }

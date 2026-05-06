@@ -472,10 +472,10 @@ class TopologyMapController extends AbstractController
         $createdLinks = [];
 
         foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
-            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                'node' => $sourceDevice->getNode(),
-                'category' => $categoryId,
-            ]);
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findLatestForNode(
+                $sourceDevice->getNode(),
+                ['category' => $categoryId]
+            );
 
             $byKey = [];
             foreach ($entries as $entry) {
@@ -546,8 +546,7 @@ class TopologyMapController extends AbstractController
             foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
                 $node = $sourceDevice->getNode();
                 if (!$node) continue;
-                $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                    'node' => $node,
+                $entries = $em->getRepository(NodeInventoryEntry::class)->findLatestForNode($node, [
                     'category' => $areaCatId,
                     'colLabel' => $areaCol,
                 ]);
@@ -564,10 +563,10 @@ class TopologyMapController extends AbstractController
         $directedEdges = [];
 
         foreach ($deviceByNodeId as $nodeId => $sourceDevice) {
-            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                'node' => $sourceDevice->getNode(),
-                'category' => $categoryId,
-            ]);
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findLatestForNode(
+                $sourceDevice->getNode(),
+                ['category' => $categoryId]
+            );
 
             $byKey = [];
             foreach ($entries as $entry) {
@@ -794,8 +793,7 @@ class TopologyMapController extends AbstractController
                 $node = $d->getNode();
                 if (!$node) continue;
                 foreach ($invRuleColumns as $rc) {
-                    $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                        'node' => $node,
+                    $entries = $em->getRepository(NodeInventoryEntry::class)->findLatestForNode($node, [
                         'category' => $rc['categoryId'],
                         'colLabel' => $rc['column'],
                     ]);
@@ -863,8 +861,7 @@ class TopologyMapController extends AbstractController
                     foreach ($devices as $d) {
                         $node = $d->getNode();
                         if (!$node) continue;
-                        $areaEntries = $em->getRepository(NodeInventoryEntry::class)->findBy([
-                            'node' => $node,
+                        $areaEntries = $em->getRepository(NodeInventoryEntry::class)->findLatestForNode($node, [
                             'category' => $areaCatId,
                             'colLabel' => $areaCol,
                         ]);
@@ -1079,8 +1076,11 @@ class TopologyMapController extends AbstractController
             $qb = $em->createQueryBuilder()
                 ->select('DISTINCT e.entryKey')
                 ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
                 ->where('e.node = :node')
+                ->andWhere('t.name = :tag')
                 ->setParameter('node', $node)
+                ->setParameter('tag', 'latest')
                 ->orderBy('e.entryKey', 'ASC');
 
             if ($categoryId) {

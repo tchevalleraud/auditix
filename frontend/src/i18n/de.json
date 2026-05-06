@@ -496,6 +496,7 @@
     "tabCollections": "Sammlungen",
     "tabInventory": "Inventar",
     "inventoryKey": "Schlüssel",
+    "inventoryTag": "Tag",
     "inventoryEmpty": "Keine Inventardaten. Führen Sie eine Sammlung durch, um Daten zu extrahieren.",
     "noCollections": "Keine Sammlungen",
     "collectionPending": "Ausstehend",

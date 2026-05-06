@@ -26,7 +26,9 @@ class AuditEntityResolver
             <<<'SQL'
                 SELECT n.name, n.ip_address,
                        (SELECT inv.value FROM node_inventory_entry inv
+                        INNER JOIN collection_tag ct ON ct.id = inv.collection_tag_id
                         WHERE inv.node_id = n.id
+                          AND ct.name = 'latest'
                           AND inv.entry_key = 'SysName'
                           AND inv.col_label = 'Value#1'
                         LIMIT 1) AS sys_name

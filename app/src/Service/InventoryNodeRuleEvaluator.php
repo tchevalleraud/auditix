@@ -91,12 +91,23 @@ class InventoryNodeRuleEvaluator
             $col = (string) ($rule['colLabel'] ?? '');
             $value = (string) ($rule['value'] ?? '');
             if ($cat === '' || $key === '' || $col === '') return false;
-            $entry = $this->em->getRepository(NodeInventoryEntry::class)->findOneBy([
-                'node' => $node,
-                'categoryName' => $cat,
-                'entryKey' => $key,
-                'colLabel' => $col,
-            ]);
+            $entry = $this->em->createQueryBuilder()
+                ->select('e')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
+                ->where('e.node = :node')
+                ->andWhere('e.categoryName = :cat')
+                ->andWhere('e.entryKey = :key')
+                ->andWhere('e.colLabel = :col')
+                ->andWhere('t.name = :tag')
+                ->setParameter('node', $node)
+                ->setParameter('cat', $cat)
+                ->setParameter('key', $key)
+                ->setParameter('col', $col)
+                ->setParameter('tag', 'latest')
+                ->setMaxResults(1)
+                ->getQuery()
+                ->getOneOrNullResult();
             $cellVal = $entry?->getValue() ?? '';
             return $this->compareString($cellVal, $op, $value);
         }

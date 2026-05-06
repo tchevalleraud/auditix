@@ -2,7 +2,9 @@
 
 namespace App\Controller\Api;
 
+use App\Doctrine\Filter\LatestInventoryFilter;
 use App\Entity\Collection;
+use App\Entity\CollectionTag;
 use App\Entity\CompliancePolicy;
 use App\Entity\ComplianceResult;
 use App\Entity\Context;
@@ -283,14 +285,54 @@ class NodeController extends AbstractController
         rmdir($dir);
     }
 
-    #[Route('/{id}/inventory', methods: ['GET'])]
-    public function inventory(Node $node, EntityManagerInterface $em): JsonResponse
+    #[Route('/{id}/inventory/tags', methods: ['GET'])]
+    public function inventoryTags(Node $node, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
-        $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(
-            ['node' => $node],
-            ['categoryName' => 'ASC', 'entryKey' => 'ASC', 'colLabel' => 'ASC']
-        );
+        $tags = $em->getRepository(CollectionTag::class)->findByNode($node);
+
+        return $this->json(array_map(function (CollectionTag $t) {
+            $col = $t->getCollection();
+            return [
+                'id' => $t->getId(),
+                'name' => $t->getName(),
+                'createdAt' => $t->getCreatedAt()->format('c'),
+                'collection' => [
+                    'id' => $col->getId(),
+                    'status' => $col->getStatus(),
+                    'completedAt' => $col->getCompletedAt()?->format('c'),
+                    'lastExtractedAt' => $col->getLastExtractedAt()?->format('c'),
+                ],
+            ];
+        }, $tags));
+    }
+
+    #[Route('/{id}/inventory', methods: ['GET'])]
+    public function inventory(Node $node, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
+        $tagName = trim((string) $request->query->get('tag', 'latest'));
+        if ($tagName === '') $tagName = 'latest';
+
+        $tag = $em->getRepository(CollectionTag::class)->findOneByNodeAndName($node, $tagName);
+        if (!$tag) {
+            return $this->json([]);
+        }
+
+        // Bypass the global "latest only" filter: this endpoint scopes by the
+        // explicitly requested CollectionTag, which may be a historical snapshot.
+        $filters = $em->getFilters();
+        $hadFilter = $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+        try {
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(
+                ['collectionTag' => $tag],
+                ['categoryName' => 'ASC', 'entryKey' => 'ASC', 'colLabel' => 'ASC']
+            );
+        } finally {
+            if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+        }
 
         // Group by category → key → colLabel
         $categories = [];
@@ -765,11 +807,13 @@ class NodeController extends AbstractController
                     $catNames = array_unique(array_column($byColKey, 'category'));
                     $colLabels = array_unique(array_column($byColKey, 'column'));
                     $rows = $em->getConnection()->fetchAllAssociative(
-                        'SELECT e.node_id AS nid, e.category_name, e.col_label, e.entry_key, e.value
+                        "SELECT e.node_id AS nid, e.category_name, e.col_label, e.entry_key, e.value
                          FROM node_inventory_entry e
+                         INNER JOIN collection_tag ct ON ct.id = e.collection_tag_id
                          WHERE e.node_id IN (:ids)
+                           AND ct.name = 'latest'
                            AND e.category_name IN (:cats)
-                           AND e.col_label IN (:cols)',
+                           AND e.col_label IN (:cols)",
                         [
                             'ids' => $nodeIds,
                             'cats' => array_values($catNames),

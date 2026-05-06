@@ -701,6 +701,7 @@
     "tabCollections": "Collections",
     "tabInventory": "Inventory",
     "inventoryKey": "Key",
+    "inventoryTag": "Tag",
     "inventoryEmpty": "No inventory data. Run a collection to extract data.",
     "noCollections": "No collections yet",
     "importCollection": "Manual import",
