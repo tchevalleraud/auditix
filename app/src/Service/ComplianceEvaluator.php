@@ -423,9 +423,9 @@ class ComplianceEvaluator
         }
     }
 
-    public function getInventoryValue(?int $categoryId, ?string $key, ?string $column, Node $node): ?string
+    public function getInventoryValue(?int $categoryId, ?string $key, ?string $column, Node $node, string $tagName = 'latest'): ?string
     {
-        return $this->conditionTree->getInventoryValue($categoryId, $key, $column, $node);
+        return $this->conditionTree->getInventoryValue($categoryId, $key, $column, $node, $tagName);
     }
 
     /**

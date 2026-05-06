@@ -35,8 +35,31 @@ class ComplianceRuleController extends AbstractController
             'conditionTree' => $r->getConditionTree(),
             'multiRowMessages' => $r->getMultiRowMessages(),
             'folderId' => $r->getFolder()?->getId(),
+            'hasInventoryCompare' => $this->hasInventoryCompare($r->getConditionTree()),
             'createdAt' => $r->getCreatedAt()->format('c'),
         ];
+    }
+
+    private function hasInventoryCompare(?array $tree): bool
+    {
+        if (!$tree || empty($tree['blocks'] ?? [])) return false;
+        return $this->blocksHaveInventoryCompare($tree['blocks']);
+    }
+
+    private function blocksHaveInventoryCompare(array $blocks): bool
+    {
+        foreach ($blocks as $block) {
+            foreach (($block['conditions'] ?? []) as $cond) {
+                $op = $cond['operator'] ?? '';
+                if ($op === 'compare_inventory_equals' || $op === 'compare_inventory_not_equals') {
+                    return true;
+                }
+            }
+            if (!empty($block['children']) && $this->blocksHaveInventoryCompare($block['children'])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function serializeFolder(ComplianceRuleFolder $f, EntityManagerInterface $em): array
@@ -429,27 +452,53 @@ class ComplianceRuleController extends AbstractController
             foreach ($block['conditions'] ?? [] as $condIdx => $cond) {
                 $condDebug = ['index' => $condIdx, 'condition' => $cond, 'details' => []];
                 $type = $cond['type'] ?? 'source';
+                $operator = $cond['operator'] ?? '';
+                $isCompareInventory = $type === 'inventory' && in_array($operator, ['compare_inventory_equals', 'compare_inventory_not_equals'], true);
+
                 if ($type === 'inventory') {
                     $catId = $cond['inventoryCategoryId'] ?? null;
                     $invKey = $cond['inventoryKey'] ?? null;
                     $col = $cond['inventoryColumn'] ?? null;
-                    $val = $node ? $this->evaluator->getInventoryValue($catId, $invKey, $col, $node) : null;
-                    $key = sprintf('inventory:%s/%s/%s', $catId ?? '?', $invKey ?? '?', $col ?: 'Value#1');
+                    $tag = $cond['inventoryTag'] ?? 'latest';
+                    $val = $node ? $this->evaluator->getInventoryValue($catId, $invKey, $col, $node, $tag) : null;
+                    $key = sprintf('inventory[%s]:%s/%s/%s', $tag, $catId ?? '?', $invKey ?? '?', $col ?: 'Value#1');
                 } else {
                     $source = $cond['source'] ?? '';
                     $field = $cond['field'] ?? '$value';
                     $key = $source ? "$source.$field" : $field;
                     $val = $fields[$key] ?? null;
                 }
-                $pass = $this->evaluator->compareValue($val, $cond['operator'] ?? '', $cond['value'] ?? null);
-                $condDebug['result'] = $pass;
-                $condDebug['details'][] = [
-                    'field' => $key,
-                    'value' => is_array($val) ? json_encode($val) : $val,
-                    'operator' => $cond['operator'] ?? '',
-                    'expected' => $cond['value'] ?? null,
-                    'pass' => $pass,
-                ];
+
+                if ($isCompareInventory) {
+                    $compareTag = $cond['compareTag'] ?? null;
+                    $other = ($node && $compareTag) ? $this->evaluator->getInventoryValue(
+                        $cond['inventoryCategoryId'] ?? null,
+                        $cond['inventoryKey'] ?? null,
+                        $cond['inventoryColumn'] ?? null,
+                        $node,
+                        $compareTag
+                    ) : null;
+                    $pass = $this->evaluator->evaluateSingleCondition($cond, $fields, $node);
+                    $condDebug['result'] = $pass;
+                    $condDebug['details'][] = [
+                        'field' => $key,
+                        'value' => is_array($val) ? json_encode($val) : $val,
+                        'operator' => $operator,
+                        'expected' => $compareTag ? sprintf('inventory[%s]', $compareTag) : null,
+                        'compareValue' => is_array($other) ? json_encode($other) : $other,
+                        'pass' => $pass,
+                    ];
+                } else {
+                    $pass = $this->evaluator->compareValue($val, $operator, $cond['value'] ?? null);
+                    $condDebug['result'] = $pass;
+                    $condDebug['details'][] = [
+                        'field' => $key,
+                        'value' => is_array($val) ? json_encode($val) : $val,
+                        'operator' => $operator,
+                        'expected' => $cond['value'] ?? null,
+                        'pass' => $pass,
+                    ];
+                }
                 $blockDebug['conditions'][] = $condDebug;
             }
 
@@ -495,7 +544,7 @@ class ComplianceRuleController extends AbstractController
 
     private function validateBlocks(array $blocks): void
     {
-        $validOperators = ['equals', 'not_equals', 'exists', 'not_exists', 'contains', 'not_contains', 'matches', 'greater_than', 'less_than', 'is_empty', 'is_not_empty'];
+        $validOperators = ['equals', 'not_equals', 'exists', 'not_exists', 'contains', 'not_contains', 'matches', 'greater_than', 'less_than', 'is_empty', 'is_not_empty', 'compare_inventory_equals', 'compare_inventory_not_equals'];
         $validStatuses = ['compliant', 'non_compliant', 'error', 'not_applicable'];
         $validSeverities = ['info', 'low', 'medium', 'high', 'critical'];
 

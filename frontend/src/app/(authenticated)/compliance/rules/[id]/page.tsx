@@ -78,6 +78,8 @@ interface ConditionItem {
   inventoryCategoryId?: number | null;
   inventoryKey?: string;
   inventoryColumn?: string;
+  inventoryTag?: string;
+  compareTag?: string;
   // Common
   operator: string;
   value: string | null;
@@ -132,12 +134,13 @@ interface BlockListProps {
   parentPath: number[];
   depth: number;
   t: (key: string) => string;
-  operators: { key: string; noValue: boolean }[];
+  operators: { key: string; noValue: boolean; compareInventory?: boolean; inventoryOnly?: boolean }[];
   statuses: { key: ConditionResult["status"]; color: string }[];
   severities: { key: NonNullable<ConditionResult["severity"]>; color: string }[];
   sourceFieldOptions: { source: string; field: string; label: string }[];
   categories: CategoryItem[];
   inventoryStructure: InventoryStructure[];
+  inventoryTags: string[];
   nodes: NodeItem[];
   nodeTags: NodeTagItem[];
   inputCls: string;
@@ -150,7 +153,7 @@ interface BlockListProps {
   onDuplicate: (path: number[]) => void;
 }
 
-function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, sourceFieldOptions, categories, inventoryStructure, nodes, nodeTags, inputCls, makeEmptyCondition, onUpdate, onRemove, onAddSibling, onAddNestedIf, onReorder, onDuplicate }: BlockListProps) {
+function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, sourceFieldOptions, categories, inventoryStructure, inventoryTags, nodes, nodeTags, inputCls, makeEmptyCondition, onUpdate, onRemove, onAddSibling, onAddNestedIf, onReorder, onDuplicate }: BlockListProps) {
   const getInventoryKeys = (catId: number | null | undefined): string[] => {
     if (!catId) return [];
     const cat = inventoryStructure.find((c) => c.categoryId === catId);
@@ -182,12 +185,16 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
       parts.push(`${cond.source || "?"}.${ cond.field || "$value"}`);
     } else {
       const cat = inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId);
-      parts.push(`${cat?.categoryName || "?"} / ${cond.inventoryKey || "?"}`);
+      const tag = cond.inventoryTag || "latest";
+      parts.push(`${cat?.categoryName || "?"} / ${cond.inventoryKey || "?"} @${tag}`);
       if (cond.inventoryColumn && cond.inventoryColumn !== "Value#1") parts.push(`[${cond.inventoryColumn}]`);
     }
     const opLabel = cond.operator.replace(/_/g, " ");
     parts.push(opLabel);
-    if (cond.value !== null && cond.value !== undefined && !["exists", "not_exists", "is_empty", "is_not_empty"].includes(cond.operator)) {
+    const isCompare = cond.operator === "compare_inventory_equals" || cond.operator === "compare_inventory_not_equals";
+    if (isCompare) {
+      parts.push(`@${cond.compareTag || "?"}`);
+    } else if (cond.value !== null && cond.value !== undefined && !["exists", "not_exists", "is_empty", "is_not_empty"].includes(cond.operator)) {
       parts.push(`"${cond.value}"`);
     }
     return parts.join("  ");
@@ -316,8 +323,17 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                             ? `${cond.source || "?"}.${cond.field || "$value"}`
                             : `${inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId)?.categoryName || "?"} / ${cond.inventoryKey || "?"}`}
                         </span>
+                        {condType === "inventory" && (
+                          <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            @{cond.inventoryTag || "latest"}
+                          </span>
+                        )}
                         <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">{cond.operator.replace(/_/g, " ")}</span>
-                        {cond.value !== null && cond.value !== undefined && !noValueOps.has(cond.operator) && (
+                        {(cond.operator === "compare_inventory_equals" || cond.operator === "compare_inventory_not_equals") ? (
+                          <span className="rounded-full bg-emerald-50 dark:bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                            @{cond.compareTag || "?"}
+                          </span>
+                        ) : cond.value !== null && cond.value !== undefined && !noValueOps.has(cond.operator) && (
                           <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{cond.value}&quot;</span>
                         )}
                         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
@@ -370,7 +386,7 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Type</span>
-                            <select value={condType} onChange={(e) => { const nt = e.target.value as "source" | "inventory"; if (nt === "inventory") updateCond({ type: "inventory", inventoryCategoryId: inventoryStructure[0]?.categoryId || null, inventoryKey: "", inventoryColumn: "Value#1", source: undefined, field: undefined }); else updateCond({ type: "source", source: sourceFieldOptions[0]?.source || "", field: sourceFieldOptions[0]?.field || "$value", inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined }); }} className={`${smallInput} w-[110px]`}>
+                            <select value={condType} onChange={(e) => { const nt = e.target.value as "source" | "inventory"; if (nt === "inventory") updateCond({ type: "inventory", inventoryCategoryId: inventoryStructure[0]?.categoryId || null, inventoryKey: "", inventoryColumn: "Value#1", inventoryTag: "latest", source: undefined, field: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); else updateCond({ type: "source", source: sourceFieldOptions[0]?.source || "", field: sourceFieldOptions[0]?.field || "$value", inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined, inventoryTag: undefined, compareTag: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); }} className={`${smallInput} w-[110px]`}>
                               <option value="source">{t("compliance_rules.conditionTypeSource")}</option>
                               <option value="inventory">{t("compliance_rules.conditionTypeInventory")}</option>
                             </select>
@@ -412,6 +428,12 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                                   </select>
                                 </div>
                               )}
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Tag</span>
+                                <select value={cond.inventoryTag || "latest"} onChange={(e) => updateCond({ inventoryTag: e.target.value })} className={`${smallInput} max-w-[140px] font-mono`}>
+                                  {(inventoryTags.length > 0 ? inventoryTags : ["latest"]).map((tg) => <option key={tg} value={tg}>{tg}</option>)}
+                                </select>
+                              </div>
                             </>
                           )}
                         </div>
@@ -419,12 +441,24 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                         {/* Row 3: Operator + Value */}
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Test</span>
-                          <select value={cond.operator} onChange={(e) => updateCond({ operator: e.target.value, value: noValueOps.has(e.target.value) ? null : cond.value })} className={`${smallInput} min-w-[140px]`}>
-                            {operators.map((o) => <option key={o.key} value={o.key}>{t(`compliance_rules.operator_${o.key}`)}</option>)}
+                          <select value={cond.operator} onChange={(e) => { const op = operators.find((o) => o.key === e.target.value); updateCond({ operator: e.target.value, value: op?.noValue ? null : cond.value }); }} className={`${smallInput} min-w-[140px]`}>
+                            {operators.filter((o) => !o.inventoryOnly || condType === "inventory").map((o) => <option key={o.key} value={o.key}>{t(`compliance_rules.operator_${o.key}`)}</option>)}
                           </select>
-                          {!noValueOps.has(cond.operator) && (
-                            <input type="text" value={cond.value ?? ""} onChange={(e) => updateCond({ value: e.target.value })} placeholder="..." className={`${smallInput} flex-1 font-mono`} />
-                          )}
+                          {(() => {
+                            const opMeta = operators.find((o) => o.key === cond.operator);
+                            if (opMeta?.compareInventory) {
+                              return (
+                                <select value={cond.compareTag || ""} onChange={(e) => updateCond({ compareTag: e.target.value })} className={`${smallInput} flex-1 font-mono`}>
+                                  <option value="">--</option>
+                                  {(inventoryTags.length > 0 ? inventoryTags : ["latest"]).map((tg) => <option key={tg} value={tg}>{tg}</option>)}
+                                </select>
+                              );
+                            }
+                            if (!noValueOps.has(cond.operator)) {
+                              return <input type="text" value={cond.value ?? ""} onChange={(e) => updateCond({ value: e.target.value })} placeholder="..." className={`${smallInput} flex-1 font-mono`} />;
+                            }
+                            return null;
+                          })()}
                         </div>
 
                         {/* Close button */}
@@ -462,6 +496,7 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                   sourceFieldOptions={sourceFieldOptions}
                   categories={categories}
                   inventoryStructure={inventoryStructure}
+                  inventoryTags={inventoryTags}
                   nodes={nodes}
                   nodeTags={nodeTags}
                   inputCls={inputCls}
@@ -660,6 +695,7 @@ export default function ComplianceRuleEditPage() {
   const [savedSource, setSavedSource] = useState(false);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [inventoryStructure, setInventoryStructure] = useState<InventoryStructure[]>([]);
+  const [inventoryTags, setInventoryTags] = useState<string[]>([]);
   const [nodeTags, setNodeTags] = useState<NodeTagItem[]>([]);
 
   // Test
@@ -721,6 +757,12 @@ export default function ComplianceRuleEditPage() {
     if (res.ok) setInventoryStructure(await res.json());
   }, [current]);
 
+  const loadInventoryTags = useCallback(async () => {
+    if (!current) return;
+    const res = await fetch(`/api/inventory-categories/tags?context=${current.id}`);
+    if (res.ok) setInventoryTags(await res.json());
+  }, [current]);
+
   const loadNodes = useCallback(async () => {
     if (!current) return;
     const res = await fetch(`/api/nodes?context=${current.id}`);
@@ -758,9 +800,10 @@ export default function ComplianceRuleEditPage() {
     }
     if (activeTab === "conditions") {
       loadInventoryStructure();
+      loadInventoryTags();
       if (current) fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setNodeTags);
     }
-  }, [activeTab, loadCategories, loadNodes, loadInventoryStructure]);
+  }, [activeTab, loadCategories, loadNodes, loadInventoryStructure, loadInventoryTags]);
 
   const saveGeneral = async () => {
     if (!name.trim()) return;
@@ -854,7 +897,7 @@ export default function ComplianceRuleEditPage() {
     return !q || (n.name && n.name.toLowerCase().includes(q)) || n.ipAddress.includes(q) || (n.hostname && n.hostname.toLowerCase().includes(q));
   });
 
-  const operators = [
+  const operators: { key: string; noValue: boolean; compareInventory?: boolean; inventoryOnly?: boolean }[] = [
     { key: "equals", noValue: false },
     { key: "not_equals", noValue: false },
     { key: "contains", noValue: false },
@@ -866,6 +909,8 @@ export default function ComplianceRuleEditPage() {
     { key: "not_exists", noValue: true },
     { key: "is_empty", noValue: true },
     { key: "is_not_empty", noValue: true },
+    { key: "compare_inventory_equals", noValue: true, compareInventory: true, inventoryOnly: true },
+    { key: "compare_inventory_not_equals", noValue: true, compareInventory: true, inventoryOnly: true },
   ];
 
   const statuses: { key: ConditionResult["status"]; color: string }[] = [
@@ -910,7 +955,7 @@ export default function ComplianceRuleEditPage() {
     if (sourceFieldOptions.length > 0) {
       return { type: "source", source: sourceFieldOptions[0].source, field: sourceFieldOptions[0].field, operator: "equals", value: "" };
     }
-    return { type: "inventory", inventoryCategoryId: null, inventoryKey: "", inventoryColumn: "Value#1", operator: "equals", value: "" };
+    return { type: "inventory", inventoryCategoryId: null, inventoryKey: "", inventoryColumn: "Value#1", inventoryTag: "latest", operator: "equals", value: "" };
   };
 
   const makeEmptyBlock = (type: ConditionBlock["type"]): ConditionBlock => ({
@@ -1498,6 +1543,7 @@ export default function ComplianceRuleEditPage() {
                     sourceFieldOptions={sourceFieldOptions}
                     categories={categories}
                     inventoryStructure={inventoryStructure}
+                    inventoryTags={inventoryTags}
                     nodes={nodes}
                     nodeTags={nodeTags}
                     inputCls={inputCls}
@@ -1846,21 +1892,37 @@ export default function ComplianceRuleEditPage() {
                               </span>
                             )}
                           </div>
-                          {!block.skipped && block.conditions?.map((cond: any, ci: number) => (
-                            <div key={ci} className="border-t border-slate-100 dark:border-slate-800 px-3 py-1.5 flex items-center gap-2">
-                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cond.result ? "bg-emerald-500" : "bg-red-500"}`} />
-                              <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300">
-                                {cond.condition.source}.{cond.condition.field}
-                              </span>
-                              <span className="text-[10px] text-slate-400">{cond.condition.operator}</span>
-                              <span className="text-[11px] font-mono text-blue-600 dark:text-blue-400">&quot;{cond.condition.value}&quot;</span>
-                              <span className="text-[10px] text-slate-400">→</span>
-                              <span className="text-[11px] font-mono text-slate-500">&quot;{String(cond.details[0]?.value ?? "null")}&quot;</span>
-                              <span className={`ml-auto text-[9px] font-bold ${cond.result ? "text-emerald-600" : "text-red-600"}`}>
-                                {cond.result ? "✓" : "✗"}
-                              </span>
-                            </div>
-                          ))}
+                          {!block.skipped && block.conditions?.map((cond: any, ci: number) => {
+                            const det = cond.details?.[0] ?? {};
+                            const isInventory = (cond.condition.type ?? "source") === "inventory";
+                            const op = cond.condition.operator ?? "";
+                            const isCompareInv = op === "compare_inventory_equals" || op === "compare_inventory_not_equals";
+                            const fieldLabel = det.field ?? (isInventory
+                              ? `inventory[${cond.condition.inventoryTag || "latest"}]:${cond.condition.inventoryCategoryId ?? "?"}/${cond.condition.inventoryKey ?? "?"}/${cond.condition.inventoryColumn || "Value#1"}`
+                              : `${cond.condition.source ?? ""}.${cond.condition.field ?? "$value"}`);
+                            const leftVal = det.value ?? null;
+                            const rightVal = isCompareInv ? (det.compareValue ?? null) : cond.condition.value;
+                            const rightLabel = isCompareInv ? (det.expected ?? `inventory[${cond.condition.compareTag || "?"}]`) : null;
+                            return (
+                              <div key={ci} className="border-t border-slate-100 dark:border-slate-800 px-3 py-1.5 flex items-center gap-2 flex-wrap">
+                                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${cond.result ? "bg-emerald-500" : "bg-red-500"}`} />
+                                <span className="text-[11px] font-mono text-slate-600 dark:text-slate-300">{fieldLabel}</span>
+                                <span className="text-[11px] font-mono text-slate-500">= &quot;{String(leftVal ?? "null")}&quot;</span>
+                                <span className="text-[10px] text-slate-400">{op}</span>
+                                {isCompareInv ? (
+                                  <>
+                                    <span className="text-[11px] font-mono text-blue-600 dark:text-blue-400">{rightLabel}</span>
+                                    <span className="text-[11px] font-mono text-slate-500">= &quot;{String(rightVal ?? "null")}&quot;</span>
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] font-mono text-blue-600 dark:text-blue-400">&quot;{String(rightVal ?? "")}&quot;</span>
+                                )}
+                                <span className={`ml-auto text-[9px] font-bold ${cond.result ? "text-emerald-600" : "text-red-600"}`}>
+                                  {cond.result ? "✓" : "✗"}
+                                </span>
+                              </div>
+                            );
+                          })}
                           {/* Nested children blocks */}
                           {block.children && block.children.length > 0 && (
                             <div className="border-t border-slate-200 dark:border-slate-700 pl-4 pr-2 py-2 space-y-2 bg-slate-50/50 dark:bg-slate-800/30 border-l-2 border-l-blue-300 dark:border-l-blue-600 ml-2 mr-2 mb-2 mt-1 rounded">

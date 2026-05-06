@@ -2,6 +2,7 @@
 
 namespace App\Controller\Api;
 
+use App\Doctrine\Filter\LatestInventoryFilter;
 use App\Entity\Context;
 use App\Entity\InventoryCategory;
 use App\Entity\NodeInventoryEntry;
@@ -269,6 +270,42 @@ class InventoryCategoryController extends AbstractController
         }
 
         return $result;
+    }
+
+    #[Route('/tags', methods: ['GET'], priority: 10)]
+    public function tags(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $contextId = $request->query->getInt('context');
+        if (!$contextId) {
+            return $this->json([]);
+        }
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) {
+            return $this->json([]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
+        $filters = $em->getFilters();
+        $hadFilter = $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+        try {
+            $rows = $em->createQueryBuilder()
+                ->select('DISTINCT t.name AS name')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
+                ->innerJoin('e.node', 'n')
+                ->where('n.context = :context')
+                ->setParameter('context', $context)
+                ->orderBy('t.name', 'ASC')
+                ->getQuery()
+                ->getArrayResult();
+        } finally {
+            if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+        }
+
+        return $this->json(array_map(fn(array $r) => $r['name'], $rows));
     }
 
     #[Route('/structure', methods: ['GET'], priority: 10)]

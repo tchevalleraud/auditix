@@ -25,6 +25,7 @@ import {
   Upload,
   CheckCircle2,
   Tag,
+  GitCompare,
 } from "lucide-react";
 
 interface Rule {
@@ -34,6 +35,7 @@ interface Rule {
   description: string | null;
   enabled: boolean;
   folderId: number | null;
+  hasInventoryCompare?: boolean;
   createdAt: string;
 }
 
@@ -544,6 +546,11 @@ function ComplianceRuleRow({ rule, depth, t, onToggle, deleteConfirm, onDelete, 
             <code className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded px-2 py-0.5 font-mono">{rule.identifier}</code>
           )}
           <Link href={`/compliance/rules/${rule.id}`} className={`text-sm font-medium hover:underline ${rule.enabled ? "text-slate-900 dark:text-slate-100" : "text-slate-400 dark:text-slate-500 line-through"}`}>{rule.name}</Link>
+          {rule.hasInventoryCompare && (
+            <span title={t("compliance_rules.hasInventoryCompare")} className="inline-flex items-center rounded-full bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 text-amber-600 dark:text-amber-400 ring-1 ring-inset ring-amber-200 dark:ring-amber-500/30">
+              <GitCompare className="h-3 w-3" />
+            </span>
+          )}
           {!rule.enabled && (
             <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-200 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-700">{t("compliance_rules.disabled")}</span>
           )}
