@@ -3,41 +3,61 @@
 namespace App\Controller\Api;
 
 use App\Entity\Collection;
+use App\Entity\CompliancePolicy;
+use App\Entity\ComplianceResult;
 use App\Entity\Context;
+use App\Entity\Node;
 use App\Security\Voter\ContextAccessVoter;
 use App\Service\ComplianceEvaluator;
+use App\Service\NodeFilterService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Routing\Attribute\Route;
 
 #[Route('/api/contexts/{id}/dashboard')]
 class DashboardController extends AbstractController
 {
+    public function __construct(
+        private readonly NodeFilterService $filterService,
+    ) {}
+
     #[Route('', methods: ['GET'])]
-    public function index(Context $context, EntityManagerInterface $em): JsonResponse
+    public function index(Context $context, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
         $contextId = $context->getId();
+        $filters = $this->filterService->parseFromRequest($request);
+        $hasFilters = !$this->filterService->isEmpty($filters);
 
         // --- Nodes ---
-        $nodeTotal = (int) $em->createQuery('SELECT COUNT(n) FROM App\Entity\Node n WHERE n.context = :ctx')
-            ->setParameter('ctx', $contextId)->getSingleScalarResult();
+        $nodeTotal = (int) $this->nodeBaseQuery($em, $contextId, $filters)
+            ->select('COUNT(n)')
+            ->getQuery()->getSingleScalarResult();
 
-        $nodeReachable = (int) $em->createQuery('SELECT COUNT(n) FROM App\Entity\Node n WHERE n.context = :ctx AND n.isReachable = true')
-            ->setParameter('ctx', $contextId)->getSingleScalarResult();
+        $nodeReachable = (int) $this->nodeBaseQuery($em, $contextId, $filters, 'r')
+            ->select('COUNT(n)')
+            ->andWhere('n.isReachable = true')
+            ->getQuery()->getSingleScalarResult();
 
-        $nodeUnreachable = (int) $em->createQuery('SELECT COUNT(n) FROM App\Entity\Node n WHERE n.context = :ctx AND n.isReachable = false')
-            ->setParameter('ctx', $contextId)->getSingleScalarResult();
+        $nodeUnreachable = (int) $this->nodeBaseQuery($em, $contextId, $filters, 'u')
+            ->select('COUNT(n)')
+            ->andWhere('n.isReachable = false')
+            ->getQuery()->getSingleScalarResult();
 
         $nodeUnknown = $nodeTotal - $nodeReachable - $nodeUnreachable;
 
         // Nodes by manufacturer (top 5)
-        $nodesByManufacturer = $em->createQuery(
-            'SELECT e.name AS name, COUNT(n) AS total FROM App\Entity\Node n JOIN n.manufacturer e WHERE n.context = :ctx GROUP BY e.name ORDER BY total DESC'
-        )->setParameter('ctx', $contextId)->setMaxResults(5)->getResult();
+        $nodesByManufacturer = $this->nodeBaseQuery($em, $contextId, $filters, 'mfr')
+            ->select('e.name AS name, COUNT(n) AS total')
+            ->innerJoin('n.manufacturer', 'e')
+            ->groupBy('e.name')
+            ->orderBy('total', 'DESC')
+            ->setMaxResults(5)
+            ->getQuery()->getResult();
 
-        // --- Collections ---
+        // --- Collections / inventory / rules / etc. (NOT filtered — context-scoped only) ---
         $collectionTotal = (int) $em->createQuery('SELECT COUNT(c) FROM App\Entity\Collection c WHERE c.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
 
@@ -50,40 +70,31 @@ class DashboardController extends AbstractController
             $collectionStatusMap[$row['status']] = (int) $row['total'];
         }
 
-        // Recent collections (last 10)
         $recentCollections = $em->createQuery(
             'SELECT c.id, c.status, c.commandCount, c.completedCount, c.createdAt, c.startedAt, c.completedAt, c.error, n.ipAddress AS nodeIp, n.name AS nodeName
              FROM App\Entity\Collection c JOIN c.node n
              WHERE c.context = :ctx ORDER BY c.createdAt DESC'
         )->setParameter('ctx', $contextId)->setMaxResults(10)->getResult();
 
-        // --- Collection Rules ---
         $ruleTotal = (int) $em->createQuery('SELECT COUNT(r) FROM App\Entity\CollectionRule r WHERE r.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
-
         $ruleEnabled = (int) $em->createQuery('SELECT COUNT(r) FROM App\Entity\CollectionRule r WHERE r.context = :ctx AND r.enabled = true')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
 
-        // --- Tags ---
         $tagCount = (int) $em->createQuery('SELECT COUNT(t) FROM App\Entity\NodeTag t WHERE t.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
-
-        // --- Profiles ---
         $profileCount = (int) $em->createQuery('SELECT COUNT(p) FROM App\Entity\Profile p WHERE p.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
-
-        // --- Models ---
         $modelCount = (int) $em->createQuery('SELECT COUNT(m) FROM App\Entity\DeviceModel m WHERE m.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
-
-        // --- Manufacturers ---
         $manufacturerCount = (int) $em->createQuery('SELECT COUNT(e) FROM App\Entity\Editor e WHERE e.context = :ctx')
             ->setParameter('ctx', $contextId)->getSingleScalarResult();
 
         // --- Compliance ---
-        $compliance = $this->buildComplianceSection($contextId, $nodeTotal, $em);
+        $compliance = $this->buildComplianceSection($contextId, $nodeTotal, $filters, $em);
 
         return $this->json([
+            'filtered' => $hasFilters,
             'nodes' => [
                 'total' => $nodeTotal,
                 'reachable' => $nodeReachable,
@@ -140,22 +151,40 @@ class DashboardController extends AbstractController
         ]);
     }
 
+    private function nodeBaseQuery(EntityManagerInterface $em, int $contextId, array $filters, string $suffix = '')
+    {
+        $qb = $em->createQueryBuilder()
+            ->from(Node::class, 'n')
+            ->where('n.context = :ctx')
+            ->setParameter('ctx', $contextId);
+        $this->filterService->applyToQuery($qb, 'n', $filters, $suffix);
+        return $qb;
+    }
+
+    private function complianceResultQuery(EntityManagerInterface $em, int $contextId, array $filters, string $suffix = '')
+    {
+        $qb = $em->createQueryBuilder()
+            ->from(ComplianceResult::class, 'cr')
+            ->innerJoin('cr.node', 'n')
+            ->where('n.context = :ctx')
+            ->setParameter('ctx', $contextId);
+        $this->filterService->applyToQuery($qb, 'n', $filters, $suffix);
+        return $qb;
+    }
+
     /**
      * @return array<string,mixed>
      */
-    private function buildComplianceSection(int $contextId, int $totalNodes, EntityManagerInterface $em): array
+    private function buildComplianceSection(int $contextId, int $totalNodes, array $filters, EntityManagerInterface $em): array
     {
-        // Distinct nodes that have at least one compliance result
-        $evaluatedNodes = (int) $em->createQuery(
-            'SELECT COUNT(DISTINCT IDENTITY(cr.node)) FROM App\Entity\ComplianceResult cr
-             JOIN cr.node n WHERE n.context = :ctx'
-        )->setParameter('ctx', $contextId)->getSingleScalarResult();
+        $evaluatedNodes = (int) $this->complianceResultQuery($em, $contextId, $filters, 'cev')
+            ->select('COUNT(DISTINCT IDENTITY(cr.node))')
+            ->getQuery()->getSingleScalarResult();
 
-        // Counts by status
-        $statusRows = $em->createQuery(
-            'SELECT cr.status AS status, COUNT(cr.id) AS total FROM App\Entity\ComplianceResult cr
-             JOIN cr.node n WHERE n.context = :ctx GROUP BY cr.status'
-        )->setParameter('ctx', $contextId)->getArrayResult();
+        $statusRows = $this->complianceResultQuery($em, $contextId, $filters, 'cst')
+            ->select('cr.status AS status, COUNT(cr.id) AS total')
+            ->groupBy('cr.status')
+            ->getQuery()->getArrayResult();
 
         $byStatus = [
             'compliant' => 0,
@@ -170,12 +199,12 @@ class DashboardController extends AbstractController
             }
         }
 
-        // Counts by severity (non_compliant only)
-        $sevRows = $em->createQuery(
-            'SELECT cr.severity AS severity, COUNT(cr.id) AS total FROM App\Entity\ComplianceResult cr
-             JOIN cr.node n WHERE n.context = :ctx AND cr.status = :nc
-             GROUP BY cr.severity'
-        )->setParameters(['ctx' => $contextId, 'nc' => 'non_compliant'])->getArrayResult();
+        $sevRows = $this->complianceResultQuery($em, $contextId, $filters, 'csv')
+            ->select('cr.severity AS severity, COUNT(cr.id) AS total')
+            ->andWhere('cr.status = :nc')
+            ->setParameter('nc', 'non_compliant')
+            ->groupBy('cr.severity')
+            ->getQuery()->getArrayResult();
 
         $bySeverity = ['critical' => 0, 'high' => 0, 'medium' => 0, 'low' => 0, 'info' => 0];
         foreach ($sevRows as $row) {
@@ -199,10 +228,10 @@ class DashboardController extends AbstractController
         }
 
         // Node distribution by cached grade
-        $gradeRows = $em->createQuery(
-            'SELECT n.score AS grade, COUNT(n.id) AS total FROM App\Entity\Node n
-             WHERE n.context = :ctx GROUP BY n.score'
-        )->setParameter('ctx', $contextId)->getArrayResult();
+        $gradeRows = $this->nodeBaseQuery($em, $contextId, $filters, 'grd')
+            ->select('n.score AS grade, COUNT(n.id) AS total')
+            ->groupBy('n.score')
+            ->getQuery()->getArrayResult();
 
         $byGrade = ['A' => 0, 'B' => 0, 'C' => 0, 'D' => 0, 'E' => 0, 'F' => 0, 'unrated' => 0];
         foreach ($gradeRows as $row) {
@@ -215,17 +244,19 @@ class DashboardController extends AbstractController
         }
 
         // Top 5 unhealthy nodes (most non_compliant results)
-        $topUnhealthyRows = $em->createQuery(
-            'SELECT n.id, n.name, n.ipAddress, n.score AS grade,
-                    COUNT(cr.id) AS violations,
-                    SUM(CASE WHEN cr.severity = :crit THEN 1 ELSE 0 END) AS criticalCount
-             FROM App\Entity\ComplianceResult cr
-             JOIN cr.node n
-             WHERE n.context = :ctx AND cr.status = :nc
-             GROUP BY n.id, n.name, n.ipAddress, n.score
-             ORDER BY violations DESC'
-        )->setParameters(['ctx' => $contextId, 'nc' => 'non_compliant', 'crit' => 'critical'])
-         ->setMaxResults(5)->getArrayResult();
+        $topUnhealthyRows = $this->complianceResultQuery($em, $contextId, $filters, 'unh')
+            ->select(
+                'n.id, n.name, n.ipAddress, n.score AS grade,
+                 COUNT(cr.id) AS violations,
+                 SUM(CASE WHEN cr.severity = :crit THEN 1 ELSE 0 END) AS criticalCount'
+            )
+            ->andWhere('cr.status = :nc')
+            ->setParameter('nc', 'non_compliant')
+            ->setParameter('crit', 'critical')
+            ->groupBy('n.id, n.name, n.ipAddress, n.score')
+            ->orderBy('violations', 'DESC')
+            ->setMaxResults(5)
+            ->getQuery()->getArrayResult();
 
         $topUnhealthyNodes = array_map(fn($r) => [
             'id' => (int) $r['id'],
@@ -237,19 +268,22 @@ class DashboardController extends AbstractController
         ], $topUnhealthyRows);
 
         // Top 5 violated rules
-        $topRulesRows = $em->createQuery(
-            'SELECT r.id, r.identifier, r.name,
-                    COUNT(cr.id) AS violationCount,
-                    SUM(CASE WHEN cr.severity = :crit THEN 1 ELSE 0 END) AS criticalCount,
-                    SUM(CASE WHEN cr.severity = :high THEN 1 ELSE 0 END) AS highCount
-             FROM App\Entity\ComplianceResult cr
-             JOIN cr.rule r
-             JOIN cr.node n
-             WHERE n.context = :ctx AND cr.status = :nc
-             GROUP BY r.id, r.identifier, r.name
-             ORDER BY violationCount DESC'
-        )->setParameters(['ctx' => $contextId, 'nc' => 'non_compliant', 'crit' => 'critical', 'high' => 'high'])
-         ->setMaxResults(5)->getArrayResult();
+        $topRulesRows = $this->complianceResultQuery($em, $contextId, $filters, 'tvr')
+            ->select(
+                'r.id, r.identifier, r.name,
+                 COUNT(cr.id) AS violationCount,
+                 SUM(CASE WHEN cr.severity = :crit THEN 1 ELSE 0 END) AS criticalCount,
+                 SUM(CASE WHEN cr.severity = :high THEN 1 ELSE 0 END) AS highCount'
+            )
+            ->innerJoin('cr.rule', 'r')
+            ->andWhere('cr.status = :nc')
+            ->setParameter('nc', 'non_compliant')
+            ->setParameter('crit', 'critical')
+            ->setParameter('high', 'high')
+            ->groupBy('r.id, r.identifier, r.name')
+            ->orderBy('violationCount', 'DESC')
+            ->setMaxResults(5)
+            ->getQuery()->getArrayResult();
 
         $topViolatedRules = array_map(fn($r) => [
             'id' => (int) $r['id'],
@@ -261,10 +295,9 @@ class DashboardController extends AbstractController
         ], $topRulesRows);
 
         // Last evaluated timestamp
-        $lastEvaluatedRaw = $em->createQuery(
-            'SELECT MAX(cr.evaluatedAt) FROM App\Entity\ComplianceResult cr
-             JOIN cr.node n WHERE n.context = :ctx'
-        )->setParameter('ctx', $contextId)->getSingleScalarResult();
+        $lastEvaluatedRaw = $this->complianceResultQuery($em, $contextId, $filters, 'lev')
+            ->select('MAX(cr.evaluatedAt)')
+            ->getQuery()->getSingleScalarResult();
 
         $lastEvaluatedAt = null;
         if ($lastEvaluatedRaw) {
@@ -275,7 +308,7 @@ class DashboardController extends AbstractController
             }
         }
 
-        // Active enabled policies count
+        // Active enabled policies count (not node-scoped, no filter applied)
         $policyCount = (int) $em->createQuery(
             'SELECT COUNT(p) FROM App\Entity\CompliancePolicy p WHERE p.context = :ctx AND p.enabled = true'
         )->setParameter('ctx', $contextId)->getSingleScalarResult();
@@ -305,20 +338,9 @@ class DashboardController extends AbstractController
         }
 
         $conn = $em->getConnection();
+        $totalRanges = (int) $conn->fetchOne('SELECT COUNT(*) FROM product_range WHERE context_id = ?', [$contextId]);
+        $nodesWithRange = (int) $conn->fetchOne('SELECT COUNT(*) FROM node WHERE context_id = ? AND product_model IS NOT NULL', [$contextId]);
 
-        // Total product ranges
-        $totalRanges = (int) $conn->fetchOne(
-            'SELECT COUNT(*) FROM product_range WHERE context_id = ?',
-            [$contextId]
-        );
-
-        // Nodes with a productModel field set
-        $nodesWithRange = (int) $conn->fetchOne(
-            'SELECT COUNT(*) FROM node WHERE context_id = ? AND product_model IS NOT NULL',
-            [$contextId]
-        );
-
-        // Distribution by system update grade
         $gradeRows = $conn->fetchAllAssociative(
             'SELECT system_update_score AS grade, COUNT(*) AS cnt FROM node
              WHERE context_id = ? AND system_update_score IS NOT NULL
@@ -332,7 +354,6 @@ class DashboardController extends AbstractController
             }
         }
 
-        // Nodes past end-of-life (match node.product_model against product_range names)
         $pastEol = (int) $conn->fetchOne(
             'SELECT COUNT(*) FROM node n
              WHERE n.context_id = ? AND n.product_model IS NOT NULL
@@ -345,7 +366,6 @@ class DashboardController extends AbstractController
             [$contextId]
         );
 
-        // Nodes past end-of-support
         $pastEos = (int) $conn->fetchOne(
             'SELECT COUNT(*) FROM node n
              WHERE n.context_id = ? AND n.product_model IS NOT NULL
@@ -378,7 +398,6 @@ class DashboardController extends AbstractController
         }
 
         $conn = $em->getConnection();
-
         $total = (int) $conn->fetchOne('SELECT COUNT(*) FROM cve WHERE context_id = ?', [$contextId]);
 
         $sevRows = $conn->fetchAllAssociative(

@@ -9,10 +9,17 @@ import { useI18n } from "@/components/I18nProvider";
 import { Loader2, LayoutDashboard, Pencil, Plus, RotateCcw, Check } from "lucide-react";
 import WidgetCard from "@/components/dashboard/WidgetCard";
 import WidgetCatalog from "@/components/dashboard/WidgetCatalog";
-import { getWidgetComponent, getWidgetIcon } from "@/components/dashboard/widgets";
+import DashboardSwitcher, { type DashboardSummary } from "@/components/dashboard/DashboardSwitcher";
+import SectionTitleBlock, { type SectionTitleConfig } from "@/components/dashboard/SectionTitleBlock";
+import FilterEditor from "@/components/dashboard/FilterEditor";
+import { useFilteredDashboardData } from "@/components/dashboard/useFilteredDashboardData";
+import { isFilterableWidget, countActiveFilters, type WidgetFilters } from "@/components/dashboard/widgetFilters";
+import { getWidgetComponent, getWidgetIcon, getWidgetTitle } from "@/components/dashboard/widgets";
 import { WIDGET_REGISTRY, DEFAULT_LAYOUT, FAKE_DATA, type WidgetInstance } from "@/components/dashboard/widgetRegistry";
 
-// GridLayout imported from react-grid-layout v1
+interface Dashboard extends DashboardSummary {
+  widgets: WidgetInstance[];
+}
 
 export default function Dashboard() {
   const { current } = useAppContext();
@@ -20,9 +27,12 @@ export default function Dashboard() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const [currentDashboardId, setCurrentDashboardId] = useState<number | null>(null);
   const [widgets, setWidgets] = useState<WidgetInstance[]>([...DEFAULT_LAYOUT]);
   const [editing, setEditing] = useState(false);
   const [catalogOpen, setCatalogOpen] = useState(false);
+  const [filterEditingFor, setFilterEditingFor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [configLoaded, setConfigLoaded] = useState(false);
   const [gridWidth, setGridWidth] = useState(1200);
@@ -37,7 +47,6 @@ export default function Dashboard() {
       if (el) setGridWidth(el.clientWidth);
     };
     measure();
-    // Re-measure after a tick (layout may not be ready on first render)
     const t = setTimeout(measure, 100);
     window.addEventListener("resize", measure);
     return () => { clearTimeout(t); window.removeEventListener("resize", measure); };
@@ -55,20 +64,28 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, [current]);
 
-  // Load user's widget config
+  // Load dashboards list for the current context
   useEffect(() => {
     if (!current) return;
     setConfigLoaded(false);
-    fetch(`/api/dashboard-config?context=${current.id}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((d) => {
-        if (d?.widgets && Array.isArray(d.widgets) && d.widgets.length > 0) {
-          setWidgets(d.widgets);
+    fetch(`/api/contexts/${current.id}/dashboards`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((list: Dashboard[]) => {
+        setDashboards(list);
+        const def = list.find((d) => d.isDefault) ?? list[0] ?? null;
+        if (def) {
+          setCurrentDashboardId(def.id);
+          setWidgets(def.widgets.length > 0 ? def.widgets : [...DEFAULT_LAYOUT]);
         } else {
+          setCurrentDashboardId(null);
           setWidgets([...DEFAULT_LAYOUT]);
         }
       })
-      .catch(() => setWidgets([...DEFAULT_LAYOUT]))
+      .catch(() => {
+        setDashboards([]);
+        setCurrentDashboardId(null);
+        setWidgets([...DEFAULT_LAYOUT]);
+      })
       .finally(() => setConfigLoaded(true));
   }, [current]);
 
@@ -93,18 +110,19 @@ export default function Dashboard() {
     return () => { es.close(); if (timer) clearTimeout(timer); };
   }, [current, data?.monitoring, silentRefresh]);
 
-  // Save config
-  const saveConfig = async (w: WidgetInstance[]) => {
-    if (!current) return;
+  // Save the current dashboard layout
+  const saveCurrentDashboard = useCallback(async (w: WidgetInstance[]) => {
+    if (!currentDashboardId) return;
     setSaving(true);
     try {
-      await fetch(`/api/dashboard-config?context=${current.id}`, {
+      await fetch(`/api/dashboards/${currentDashboardId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ widgets: w }),
       });
+      setDashboards((prev) => prev.map((d) => (d.id === currentDashboardId ? { ...d, widgets: w } : d)));
     } finally { setSaving(false); }
-  };
+  }, [currentDashboardId]);
 
   // Layout change handler
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -124,8 +142,7 @@ export default function Dashboard() {
     if (!def) return;
     const newId = `w_${Date.now()}`;
     const newWidget: WidgetInstance = { i: newId, type, x: 0, y: Infinity, w: def.defaultW, h: def.defaultH };
-    const updated = [...widgets, newWidget];
-    setWidgets(updated);
+    setWidgets((prev) => [...prev, newWidget]);
     setCatalogOpen(false);
   };
 
@@ -134,20 +151,106 @@ export default function Dashboard() {
     setWidgets((prev) => prev.filter((w) => w.i !== id));
   };
 
+  // Update widget config (used by section-title and other configurable widgets)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const updateWidgetConfig = (id: string, config: Record<string, any>) => {
+    setWidgets((prev) => prev.map((w) => (w.i === id ? { ...w, config } : w)));
+  };
+
   // Toggle editing
   const toggleEditing = () => {
-    if (editing) {
-      // Save when exiting edit mode
-      saveConfig(widgets);
-    }
+    if (editing) saveCurrentDashboard(widgets);
     setEditing(!editing);
   };
 
   // Reset layout
   const resetLayout = () => {
-    setWidgets(DEFAULT_LAYOUT);
-    saveConfig(DEFAULT_LAYOUT);
+    setWidgets([...DEFAULT_LAYOUT]);
+    if (currentDashboardId) saveCurrentDashboard([...DEFAULT_LAYOUT]);
   };
+
+  // Switch dashboard (saves current first if editing)
+  const switchDashboard = async (id: number) => {
+    if (id === currentDashboardId) return;
+    if (editing && currentDashboardId) await saveCurrentDashboard(widgets);
+    const target = dashboards.find((d) => d.id === id);
+    if (!target) return;
+    setCurrentDashboardId(id);
+    setWidgets(target.widgets.length > 0 ? target.widgets : [...DEFAULT_LAYOUT]);
+  };
+
+  const createDashboard = async (name: string) => {
+    if (!current) return;
+    if (editing && currentDashboardId) await saveCurrentDashboard(widgets);
+    const res = await fetch(`/api/contexts/${current.id}/dashboards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, widgets: [] }),
+    });
+    if (!res.ok) return;
+    const created: Dashboard = await res.json();
+    created.widgets = created.widgets ?? [];
+    setDashboards((prev) => [...prev, created]);
+    setCurrentDashboardId(created.id);
+    setWidgets([...DEFAULT_LAYOUT]);
+  };
+
+  const renameDashboard = async (id: number, name: string) => {
+    const res = await fetch(`/api/dashboards/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) return;
+    setDashboards((prev) => prev.map((d) => (d.id === id ? { ...d, name } : d)));
+  };
+
+  const duplicateDashboard = async () => {
+    if (!current || !currentDashboardId) return;
+    const cur = dashboards.find((d) => d.id === currentDashboardId);
+    if (!cur) return;
+    const name = `${cur.name} ${t("dashboard.switcher.duplicateSuffix")}`;
+    const res = await fetch(`/api/contexts/${current.id}/dashboards`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, widgets }),
+    });
+    if (!res.ok) return;
+    const created: Dashboard = await res.json();
+    created.widgets = created.widgets ?? [];
+    setDashboards((prev) => [...prev, created]);
+    setCurrentDashboardId(created.id);
+    setWidgets(created.widgets.length > 0 ? created.widgets : [...widgets]);
+  };
+
+  const deleteDashboard = async (id: number) => {
+    if (!current) return;
+    const res = await fetch(`/api/dashboards/${id}`, { method: "DELETE" });
+    if (!res.ok) return;
+    const list: Dashboard[] = await fetch(`/api/contexts/${current.id}/dashboards`).then((r) => r.json());
+    setDashboards(list);
+    const def = list.find((d) => d.isDefault) ?? list[0] ?? null;
+    if (def) {
+      setCurrentDashboardId(def.id);
+      setWidgets(def.widgets.length > 0 ? def.widgets : [...DEFAULT_LAYOUT]);
+    } else {
+      setCurrentDashboardId(null);
+      setWidgets([...DEFAULT_LAYOUT]);
+    }
+  };
+
+  const setDefaultDashboard = async (id: number) => {
+    const res = await fetch(`/api/dashboards/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isDefault: true }),
+    });
+    if (!res.ok) return;
+    setDashboards((prev) => prev.map((d) => ({ ...d, isDefault: d.id === id })));
+  };
+
+  // Hooks must run on every render — keep before any early return
+  const getDataForWidget = useFilteredDashboardData(widgets, current?.id ?? null, data);
 
   if (!current) {
     return (
@@ -174,15 +277,29 @@ export default function Dashboard() {
     return { i: w.i, x: w.x, y: w.y, w: w.w, h: w.h, minW: def?.minW ?? 2, minH: def?.minH ?? 1 };
   });
 
+  const filterEditingWidget = filterEditingFor ? widgets.find((w) => w.i === filterEditingFor) : null;
+
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t("dashboard.title")}</h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("dashboard.subtitle", { name: current.name })}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <DashboardSwitcher
+            dashboards={dashboards}
+            currentId={currentDashboardId}
+            editing={editing}
+            onSelect={switchDashboard}
+            onCreate={createDashboard}
+            onRename={renameDashboard}
+            onDuplicate={duplicateDashboard}
+            onDelete={deleteDashboard}
+            onSetDefault={setDefaultDashboard}
+            t={t}
+          />
           {editing && (
             <>
               <button onClick={() => setCatalogOpen(true)} className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
@@ -227,17 +344,37 @@ export default function Dashboard() {
         {...(editing ? {} : { isDraggable: false, isResizable: false })}
       >
         {widgets.map((widget) => {
+          if (widget.type === "section-title") {
+            return (
+              <div key={widget.i} className="h-full">
+                <SectionTitleBlock
+                  config={(widget.config as SectionTitleConfig) ?? {}}
+                  editing={editing}
+                  onChange={(cfg) => updateWidgetConfig(widget.i, cfg)}
+                  onRemove={() => removeWidget(widget.i)}
+                  t={t}
+                />
+              </div>
+            );
+          }
           const Comp = getWidgetComponent(widget.type);
           const icon = getWidgetIcon(widget.type);
+          const isCompact = widget.type.startsWith("kpi-");
+          const filterable = isFilterableWidget(widget.type);
+          const filterCount = filterable ? countActiveFilters(widget.config?.filters as WidgetFilters | undefined) : undefined;
+          const widgetData = getDataForWidget(widget) ?? data;
           return (
             <div key={widget.i} className="h-full">
               <WidgetCard
-                title={t(`dashboard.w_${widget.type}`)}
+                title={getWidgetTitle(widget.type, t)}
                 icon={icon}
                 editing={editing}
                 onRemove={() => removeWidget(widget.i)}
+                compact={isCompact}
+                filterCount={filterCount}
+                onConfigureFilters={filterable ? () => setFilterEditingFor(widget.i) : undefined}
               >
-                {Comp ? <Comp data={editing ? { ...FAKE_DATA, ...data } : data} t={t} /> : <p className="text-xs text-slate-400">Unknown widget: {widget.type}</p>}
+                {Comp ? <Comp data={editing ? { ...FAKE_DATA, ...widgetData } : widgetData} t={t} /> : <p className="text-xs text-slate-400">Unknown widget: {widget.type}</p>}
               </WidgetCard>
             </div>
           );
@@ -251,6 +388,23 @@ export default function Dashboard() {
           onAdd={addWidget}
           onClose={() => setCatalogOpen(false)}
           existingTypes={widgets.map((w) => w.type)}
+          t={t}
+        />
+      )}
+
+      {/* Filter editor modal */}
+      {filterEditingWidget && (
+        <FilterEditor
+          contextId={current.id}
+          widgetTitle={getWidgetTitle(filterEditingWidget.type, t)}
+          value={(filterEditingWidget.config?.filters as WidgetFilters) ?? {}}
+          onChange={(filters) => {
+            const cleanFilters = countActiveFilters(filters) > 0 ? filters : undefined;
+            const nextConfig = { ...(filterEditingWidget.config ?? {}), filters: cleanFilters };
+            if (cleanFilters === undefined) delete nextConfig.filters;
+            updateWidgetConfig(filterEditingWidget.i, nextConfig);
+          }}
+          onClose={() => setFilterEditingFor(null)}
           t={t}
         />
       )}

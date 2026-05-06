@@ -6,8 +6,9 @@ import {
 } from "recharts";
 import {
   Server, FileSearch, ShieldCheck, ShieldAlert, AlertCircle, AlertTriangle, Activity,
-  Tags, KeyRound, Box, Cpu, Network, FileText, Zap, ArrowRight,
+  Tags, KeyRound, Box, Cpu, Network, FileText, Zap, ArrowRight, Layers,
 } from "lucide-react";
+import { KPI_DEFS, type KpiDef } from "../widgetRegistry";
 
 // ---- Shared types ----
 
@@ -47,14 +48,32 @@ function KpiTile({ icon: Icon, label, value, accent }: { icon: typeof Server; la
     teal: "bg-teal-50 dark:bg-teal-500/10 text-teal-600 dark:text-teal-400",
   };
   return (
-    <div className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <div className={`flex h-6 w-6 items-center justify-center rounded-md ${map[accent] ?? map.blue}`}>
+    <div className="rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2 flex flex-col justify-center min-h-0 min-w-0 overflow-hidden">
+      <div className="flex items-center gap-2 min-w-0">
+        <div className={`flex h-6 w-6 items-center justify-center rounded-md shrink-0 ${map[accent] ?? map.blue}`}>
           <Icon className="h-3.5 w-3.5" />
         </div>
         <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 truncate uppercase tracking-wider">{label}</span>
       </div>
-      <p className="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100">{value}</p>
+      <p className="mt-1 text-xl font-bold text-slate-900 dark:text-slate-100 truncate leading-tight">{value}</p>
+    </div>
+  );
+}
+
+// Responsive grid for composite summary widgets — stacks vertically when narrow,
+// spreads horizontally when the container is wide enough for N items side by side.
+function SummaryGrid({ count, children, className }: { count: number; children: React.ReactNode; className?: string }) {
+  const map: Record<number, string> = {
+    2: "grid-cols-1 @[10rem]:grid-cols-2",
+    3: "grid-cols-1 @[14rem]:grid-cols-3",
+    4: "grid-cols-1 @[10rem]:grid-cols-2 @[20rem]:grid-cols-4",
+    5: "grid-cols-1 @[10rem]:grid-cols-2 @[22rem]:grid-cols-5",
+    6: "grid-cols-1 @[10rem]:grid-cols-2 @[14rem]:grid-cols-3 @[26rem]:grid-cols-6",
+  };
+  const cols = map[count] ?? "grid-cols-2";
+  return (
+    <div className={`grid h-full gap-2 auto-rows-fr ${cols} ${className ?? ""}`}>
+      {children}
     </div>
   );
 }
@@ -125,13 +144,15 @@ export function ComplianceHeroWidget({ data, t }: WidgetProps) {
         </div>
         <p className="mt-1 text-[10px] text-slate-400">{t("dashboard.globalScore")}</p>
       </div>
-      <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-2 content-start">
-        <KpiTile icon={ShieldCheck} label={t("dashboard.compliantResults")} value={c.byStatus.compliant} accent="emerald" />
-        <KpiTile icon={ShieldAlert} label={t("dashboard.violations")} value={c.byStatus.non_compliant} accent="red" />
-        <KpiTile icon={AlertCircle} label={t("dashboard.criticalViolations")} value={c.bySeverity.critical} accent="rose" />
-        <KpiTile icon={Server} label={t("dashboard.evaluatedNodes")} value={`${c.evaluatedNodes}/${c.totalNodes}`} accent="blue" />
-        <KpiTile icon={FileSearch} label={t("dashboard.activePolicies")} value={c.enabledPolicies} accent="violet" />
-        <KpiTile icon={AlertTriangle} label={t("dashboard.errors")} value={c.byStatus.error} accent="amber" />
+      <div className="flex-1 min-w-0">
+        <div className="grid h-full gap-2 auto-rows-fr grid-cols-2">
+          <KpiTile icon={ShieldCheck} label={t("dashboard.compliantResults")} value={c.byStatus.compliant} accent="emerald" />
+          <KpiTile icon={ShieldAlert} label={t("dashboard.violations")} value={c.byStatus.non_compliant} accent="red" />
+          <KpiTile icon={AlertCircle} label={t("dashboard.criticalViolations")} value={c.bySeverity.critical} accent="rose" />
+          <KpiTile icon={Server} label={t("dashboard.evaluatedNodes")} value={`${c.evaluatedNodes}/${c.totalNodes}`} accent="blue" />
+          <KpiTile icon={FileSearch} label={t("dashboard.activePolicies")} value={c.enabledPolicies} accent="violet" />
+          <KpiTile icon={AlertTriangle} label={t("dashboard.errors")} value={c.byStatus.error} accent="amber" />
+        </div>
       </div>
     </div>
   );
@@ -141,7 +162,7 @@ export function ComplianceKpisWidget({ data, t }: WidgetProps) {
   const c = data.compliance;
   if (!c) return null;
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <div className="grid h-full gap-2 auto-rows-fr grid-cols-3">
       <KpiTile icon={ShieldCheck} label={t("dashboard.compliantResults")} value={c.byStatus.compliant} accent="emerald" />
       <KpiTile icon={ShieldAlert} label={t("dashboard.violations")} value={c.byStatus.non_compliant} accent="red" />
       <KpiTile icon={AlertCircle} label={t("dashboard.criticalViolations")} value={c.bySeverity.critical} accent="rose" />
@@ -253,12 +274,12 @@ export function NodesKpiWidget({ data, t }: WidgetProps) {
 
 export function NodesSummaryWidget({ data, t }: WidgetProps) {
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <SummaryGrid count={4}>
       <KpiTile icon={Server} label={t("dashboard.nodes")} value={data.nodes?.total ?? 0} accent="blue" />
       <KpiTile icon={Activity} label={t("dashboard.reachable")} value={data.nodes?.reachable ?? 0} accent="emerald" />
       <KpiTile icon={AlertCircle} label={t("dashboard.unreachable")} value={data.nodes?.unreachable ?? 0} accent="red" />
       <KpiTile icon={Server} label={t("dashboard.unknown")} value={data.nodes?.unknown ?? 0} accent="amber" />
-    </div>
+    </SummaryGrid>
   );
 }
 
@@ -306,11 +327,11 @@ export function NodesManufacturersWidget({ data, t }: WidgetProps) {
 export function TopologySummaryWidget({ data, t }: WidgetProps) {
   const topo = data.topology ?? { maps: 0, devices: 0, links: 0 };
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <SummaryGrid count={3}>
       <KpiTile icon={Network} label={t("dashboard.topoMaps")} value={topo.maps} accent="violet" />
       <KpiTile icon={Server} label={t("dashboard.topoDevices")} value={topo.devices} accent="blue" />
       <KpiTile icon={Activity} label={t("dashboard.topoLinks")} value={topo.links} accent="teal" />
-    </div>
+    </SummaryGrid>
   );
 }
 
@@ -318,7 +339,7 @@ export function TopologySummaryWidget({ data, t }: WidgetProps) {
 
 export function CollectionsSummaryWidget({ data, t }: WidgetProps) {
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <div className="grid h-full gap-2 auto-rows-fr grid-cols-2">
       <KpiTile icon={FileSearch} label={t("dashboard.rules")} value={`${data.rules?.enabled ?? 0}/${data.rules?.total ?? 0}`} accent="amber" />
       <KpiTile icon={Box} label={t("dashboard.manufacturers")} value={data.inventory?.manufacturers ?? 0} accent="blue" />
       <KpiTile icon={Cpu} label={t("dashboard.models")} value={data.inventory?.models ?? 0} accent="violet" />
@@ -329,22 +350,22 @@ export function CollectionsSummaryWidget({ data, t }: WidgetProps) {
 
 export function CollectionsRecentWidget({ data, t }: WidgetProps) {
   return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs h-full content-start">
-      <Link href="/manufacturers" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Box className="h-3.5 w-3.5" />{t("dashboard.manufacturers")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.manufacturers ?? 0}</span>
+    <div className="grid h-full gap-x-3 gap-y-1.5 text-xs auto-rows-fr items-center grid-cols-1 @[14rem]:grid-cols-2 @[28rem]:grid-cols-4">
+      <Link href="/manufacturers" className="flex items-center justify-between group min-w-0">
+        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Box className="h-3.5 w-3.5 shrink-0" />{t("dashboard.manufacturers")}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.manufacturers ?? 0}</span>
       </Link>
-      <Link href="/models" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Cpu className="h-3.5 w-3.5" />{t("dashboard.models")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.models ?? 0}</span>
+      <Link href="/models" className="flex items-center justify-between group min-w-0">
+        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Cpu className="h-3.5 w-3.5 shrink-0" />{t("dashboard.models")}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.models ?? 0}</span>
       </Link>
-      <Link href="/profiles" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><KeyRound className="h-3.5 w-3.5" />{t("dashboard.profiles")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.profiles ?? 0}</span>
+      <Link href="/profiles" className="flex items-center justify-between group min-w-0">
+        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><KeyRound className="h-3.5 w-3.5 shrink-0" />{t("dashboard.profiles")}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.profiles ?? 0}</span>
       </Link>
-      <Link href="/tags" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Tags className="h-3.5 w-3.5" />{t("dashboard.tags")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.tags ?? 0}</span>
+      <Link href="/tags" className="flex items-center justify-between group min-w-0">
+        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Tags className="h-3.5 w-3.5 shrink-0" />{t("dashboard.tags")}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.tags ?? 0}</span>
       </Link>
     </div>
   );
@@ -352,26 +373,28 @@ export function CollectionsRecentWidget({ data, t }: WidgetProps) {
 
 export function CollectionsInventoryWidget({ data, t }: WidgetProps) {
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs h-full content-start">
-      <Link href="/manufacturers" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Box className="h-3.5 w-3.5" />{t("dashboard.manufacturers")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.manufacturers ?? 0}</span>
-      </Link>
-      <Link href="/models" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Cpu className="h-3.5 w-3.5" />{t("dashboard.models")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.models ?? 0}</span>
-      </Link>
-      <Link href="/profiles" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><KeyRound className="h-3.5 w-3.5" />{t("dashboard.profiles")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.profiles ?? 0}</span>
-      </Link>
-      <Link href="/tags" className="flex items-center justify-between group">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><Tags className="h-3.5 w-3.5" />{t("dashboard.tags")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.inventory?.tags ?? 0}</span>
-      </Link>
-      <Link href="/collection-rules" className="flex items-center justify-between group col-span-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200"><FileSearch className="h-3.5 w-3.5" />{t("dashboard.rules")}</span>
-        <span className="font-semibold text-slate-900 dark:text-slate-100">{data.rules?.enabled ?? 0}<span className="text-slate-400">/{data.rules?.total ?? 0}</span></span>
+    <div className="flex flex-col h-full gap-2 text-xs">
+      <div className="flex-1 min-h-0 grid gap-x-4 gap-y-2 auto-rows-fr items-center grid-cols-1 @[14rem]:grid-cols-2 @[28rem]:grid-cols-4">
+        <Link href="/manufacturers" className="flex items-center justify-between group min-w-0">
+          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Box className="h-3.5 w-3.5 shrink-0" />{t("dashboard.manufacturers")}</span>
+          <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.manufacturers ?? 0}</span>
+        </Link>
+        <Link href="/models" className="flex items-center justify-between group min-w-0">
+          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Cpu className="h-3.5 w-3.5 shrink-0" />{t("dashboard.models")}</span>
+          <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.models ?? 0}</span>
+        </Link>
+        <Link href="/profiles" className="flex items-center justify-between group min-w-0">
+          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><KeyRound className="h-3.5 w-3.5 shrink-0" />{t("dashboard.profiles")}</span>
+          <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.profiles ?? 0}</span>
+        </Link>
+        <Link href="/tags" className="flex items-center justify-between group min-w-0">
+          <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><Tags className="h-3.5 w-3.5 shrink-0" />{t("dashboard.tags")}</span>
+          <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.inventory?.tags ?? 0}</span>
+        </Link>
+      </div>
+      <Link href="/collection-rules" className="flex items-center justify-between group pt-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
+        <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-slate-200 truncate"><FileSearch className="h-3.5 w-3.5 shrink-0" />{t("dashboard.rules")}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-100 ml-2 shrink-0">{data.rules?.enabled ?? 0}<span className="text-slate-400">/{data.rules?.total ?? 0}</span></span>
       </Link>
     </div>
   );
@@ -382,10 +405,10 @@ export function CollectionsInventoryWidget({ data, t }: WidgetProps) {
 export function ReportsSummaryWidget({ data, t }: WidgetProps) {
   const reports = data.reports ?? { total: 0, generated: 0 };
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <SummaryGrid count={2}>
       <KpiTile icon={FileText} label={t("dashboard.reportsTotal")} value={reports.total} accent="rose" />
       <KpiTile icon={FileText} label={t("dashboard.reportsGenerated")} value={reports.generated} accent="emerald" />
-    </div>
+    </SummaryGrid>
   );
 }
 
@@ -394,10 +417,10 @@ export function ReportsSummaryWidget({ data, t }: WidgetProps) {
 export function AutomationsSummaryWidget({ data, t }: WidgetProps) {
   const auto = data.automations ?? { schedulers: 0, active: 0 };
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <SummaryGrid count={2}>
       <KpiTile icon={Zap} label={t("dashboard.schedulers")} value={auto.schedulers} accent="teal" />
       <KpiTile icon={Activity} label={t("dashboard.activeJobs")} value={auto.active} accent="amber" />
-    </div>
+    </SummaryGrid>
   );
 }
 
@@ -407,12 +430,12 @@ export function VulnerabilitySummaryWidget({ data, t }: WidgetProps) {
   const v = data.vulnerabilities;
   if (!v || !v.enabled) return <div className="flex flex-col items-center justify-center h-full"><ShieldAlert className="h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" /><p className="text-xs text-slate-400">Disabled</p></div>;
   return (
-    <div className="grid grid-cols-2 gap-2 h-full content-start">
+    <SummaryGrid count={4}>
       <KpiTile icon={ShieldAlert} label={t("dashboard.w_vulnerability-summary")} value={v.total} accent="red" />
       <KpiTile icon={AlertCircle} label={t("dashboard.severityCritical")} value={v.bySeverity?.critical ?? 0} accent="rose" />
       <KpiTile icon={AlertTriangle} label={t("dashboard.severityHigh")} value={v.bySeverity?.high ?? 0} accent="amber" />
       <KpiTile icon={ShieldCheck} label={t("dashboard.severityMedium")} value={v.bySeverity?.medium ?? 0} accent="blue" />
-    </div>
+    </SummaryGrid>
   );
 }
 
@@ -456,9 +479,79 @@ export function VulnerabilityTopCvesWidget({ data, t }: WidgetProps) {
   );
 }
 
+// ---- SECTION TITLE PREVIEW (for catalog only — real rendering is in SectionTitleBlock) ----
+
+export function SectionTitlePreview({ t }: WidgetProps) {
+  return (
+    <div className="relative h-full flex items-center gap-2.5 rounded-lg overflow-hidden">
+      <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 rounded-l" />
+      <div className="ml-2 flex h-7 w-7 items-center justify-center rounded-md bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 shrink-0">
+        <Layers className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">{t("dashboard.sectionTitle.defaultText")}</p>
+        <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">{t("dashboard.sectionTitle.subtitlePlaceholder")}</p>
+      </div>
+    </div>
+  );
+}
+
+// ---- INDIVIDUAL KPI WIDGET ----
+
+const KPI_ICONS = { Server, Activity, AlertCircle, AlertTriangle, ShieldCheck, ShieldAlert, FileSearch, FileText, Network, Box, Cpu, KeyRound, Tags, Zap } as const;
+
+const ACCENT_BG: Record<string, string> = {
+  emerald: "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  red: "bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400",
+  rose: "bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400",
+  blue: "bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  violet: "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  amber: "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  teal: "bg-teal-50 dark:bg-teal-500/10 text-teal-600 dark:text-teal-400",
+};
+
+const ACCENT_TEXT: Record<string, string> = {
+  emerald: "text-emerald-600 dark:text-emerald-400",
+  red: "text-red-600 dark:text-red-400",
+  rose: "text-rose-600 dark:text-rose-400",
+  blue: "text-blue-600 dark:text-blue-400",
+  violet: "text-violet-600 dark:text-violet-400",
+  amber: "text-amber-600 dark:text-amber-400",
+  teal: "text-teal-600 dark:text-teal-400",
+};
+
+function makeKpiSingleWidget(def: KpiDef): React.ComponentType<WidgetProps> {
+  const KpiSingle = function KpiSingle({ data, t }: WidgetProps) {
+    return (
+      <div className="@container flex h-full w-full flex-col items-center justify-center gap-1 min-w-0 overflow-hidden text-center">
+        <span className="text-[9px] @[8rem]:text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider truncate max-w-full leading-tight">
+          {t(`dashboard.${def.labelKey}`)}
+        </span>
+        <p className={`text-xl @[8rem]:text-2xl @[12rem]:text-3xl font-bold truncate max-w-full leading-tight tabular-nums ${ACCENT_TEXT[def.accent] ?? ACCENT_TEXT.blue}`}>
+          {def.getValue(data)}
+        </p>
+      </div>
+    );
+  };
+  KpiSingle.displayName = `KpiSingle(${def.id})`;
+  return KpiSingle;
+}
+
+const KPI_WIDGET_COMPONENTS: Record<string, React.ComponentType<WidgetProps>> = Object.fromEntries(
+  KPI_DEFS.map((def) => [`kpi-${def.id}`, makeKpiSingleWidget(def)]),
+);
+
+const KPI_WIDGET_ICONS: Record<string, React.ReactNode> = Object.fromEntries(
+  KPI_DEFS.map((def) => {
+    const Icon = KPI_ICONS[def.icon];
+    return [`kpi-${def.id}`, <Icon key={def.id} className="h-3.5 w-3.5" />];
+  }),
+);
+
 // ---- WIDGET RENDERER ----
 
 const WIDGET_COMPONENTS: Record<string, React.ComponentType<WidgetProps>> = {
+  "section-title": SectionTitlePreview,
   "compliance-score": ComplianceScoreWidget,
   "compliance-hero": ComplianceHeroWidget,
   "compliance-kpis": ComplianceKpisWidget,
@@ -479,9 +572,11 @@ const WIDGET_COMPONENTS: Record<string, React.ComponentType<WidgetProps>> = {
   "vulnerability-summary": VulnerabilitySummaryWidget,
   "vulnerability-severity-chart": VulnerabilitySeverityChartWidget,
   "vulnerability-top-cves": VulnerabilityTopCvesWidget,
+  ...KPI_WIDGET_COMPONENTS,
 };
 
 const WIDGET_ICONS: Record<string, React.ReactNode> = {
+  "section-title": <Layers className="h-3.5 w-3.5" />,
   "compliance-score": <ShieldCheck className="h-3.5 w-3.5" />,
   "compliance-hero": <ShieldCheck className="h-3.5 w-3.5" />,
   "compliance-kpis": <ShieldCheck className="h-3.5 w-3.5" />,
@@ -502,7 +597,19 @@ const WIDGET_ICONS: Record<string, React.ReactNode> = {
   "vulnerability-summary": <ShieldAlert className="h-3.5 w-3.5" />,
   "vulnerability-severity-chart": <ShieldAlert className="h-3.5 w-3.5" />,
   "vulnerability-top-cves": <ShieldAlert className="h-3.5 w-3.5" />,
+  ...KPI_WIDGET_ICONS,
 };
 
 export function getWidgetComponent(type: string) { return WIDGET_COMPONENTS[type] ?? null; }
 export function getWidgetIcon(type: string) { return WIDGET_ICONS[type] ?? <Box className="h-3.5 w-3.5" />; }
+
+// Resolve the i18n title for a widget — KPI widgets reuse the metric label,
+// composite widgets follow the dashboard.w_<type> pattern.
+export function getWidgetTitle(type: string, t: T): string {
+  if (type.startsWith("kpi-")) {
+    const id = type.slice(4);
+    const def = KPI_DEFS.find((d) => d.id === id);
+    if (def) return t(`dashboard.${def.labelKey}`);
+  }
+  return t(`dashboard.w_${type}`);
+}

@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
-import { ArrowLeft, Loader2, Search, CircleUser, Check, UserPlus, UserMinus, Download } from "lucide-react";
+import { ArrowLeft, Loader2, Search, CircleUser, Check, UserPlus, UserMinus, Download, LayoutDashboard, Star } from "lucide-react";
 
 interface ContextUser {
   id: number;
@@ -14,6 +14,12 @@ interface ContextUser {
   lastName: string | null;
   roles: string[];
   avatar: string | null;
+}
+
+interface DashboardSummary {
+  id: number;
+  name: string;
+  isDefault: boolean;
 }
 
 export default function EditContextPage() {
@@ -37,6 +43,11 @@ export default function EditContextPage() {
   const [memberSearch, setMemberSearch] = useState("");
   const [membersSaving, setMembersSaving] = useState(false);
   const [membersSuccess, setMembersSuccess] = useState(false);
+
+  // Dashboards
+  const [dashboards, setDashboards] = useState<DashboardSummary[]>([]);
+  const [dashboardSaving, setDashboardSaving] = useState(false);
+  const [dashboardSaved, setDashboardSaved] = useState(false);
 
   const contextId = params.id as string;
 
@@ -70,6 +81,34 @@ export default function EditContextPage() {
   useEffect(() => {
     loadMembers();
   }, [loadMembers]);
+
+  const loadDashboards = useCallback(async () => {
+    const res = await fetch(`/api/contexts/${contextId}/dashboards`);
+    if (res.ok) setDashboards(await res.json());
+  }, [contextId]);
+
+  useEffect(() => {
+    loadDashboards();
+  }, [loadDashboards]);
+
+  const setDefaultDashboard = async (id: number) => {
+    setDashboardSaving(true);
+    setDashboardSaved(false);
+    try {
+      const res = await fetch(`/api/dashboards/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDefault: true }),
+      });
+      if (res.ok) {
+        setDashboards((prev) => prev.map((d) => ({ ...d, isDefault: d.id === id })));
+        setDashboardSaved(true);
+        setTimeout(() => setDashboardSaved(false), 3000);
+      }
+    } finally {
+      setDashboardSaving(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -320,6 +359,56 @@ export default function EditContextPage() {
               <span className="text-sm text-emerald-600 dark:text-emerald-400">{t("models.saved")}</span>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Default Dashboard */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <LayoutDashboard className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+            {t("admin_contexts.defaultDashboard")}
+          </h2>
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            {t("admin_contexts.defaultDashboardDescription")}
+          </p>
+        </div>
+        <div className="p-6">
+          {dashboards.length === 0 ? (
+            <p className="text-sm text-slate-400 dark:text-slate-500">{t("admin_contexts.noDashboards")}</p>
+          ) : (
+            <div className="space-y-2">
+              {dashboards.map((d) => (
+                <label
+                  key={d.id}
+                  className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+                    d.isDefault
+                      ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
+                      : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="default-dashboard"
+                    checked={d.isDefault}
+                    onChange={() => setDefaultDashboard(d.id)}
+                    disabled={dashboardSaving}
+                    className="h-4 w-4 text-slate-900 dark:text-white"
+                  />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-200 flex-1">{d.name}</span>
+                  {d.isDefault && (
+                    <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                      <Star className="h-3.5 w-3.5 fill-amber-500" />
+                      {t("dashboard.switcher.default")}
+                    </span>
+                  )}
+                </label>
+              ))}
+              {dashboardSaved && (
+                <p className="pt-1 text-sm text-emerald-600 dark:text-emerald-400">{t("models.saved")}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
