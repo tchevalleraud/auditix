@@ -428,10 +428,19 @@ class ComplianceRuleController extends AbstractController
 
             foreach ($block['conditions'] ?? [] as $condIdx => $cond) {
                 $condDebug = ['index' => $condIdx, 'condition' => $cond, 'details' => []];
-                $source = $cond['source'] ?? '';
-                $field = $cond['field'] ?? '$value';
-                $key = $source ? "$source.$field" : $field;
-                $val = $fields[$key] ?? null;
+                $type = $cond['type'] ?? 'source';
+                if ($type === 'inventory') {
+                    $catId = $cond['inventoryCategoryId'] ?? null;
+                    $invKey = $cond['inventoryKey'] ?? null;
+                    $col = $cond['inventoryColumn'] ?? null;
+                    $val = $node ? $this->evaluator->getInventoryValue($catId, $invKey, $col, $node) : null;
+                    $key = sprintf('inventory:%s/%s/%s', $catId ?? '?', $invKey ?? '?', $col ?: 'Value#1');
+                } else {
+                    $source = $cond['source'] ?? '';
+                    $field = $cond['field'] ?? '$value';
+                    $key = $source ? "$source.$field" : $field;
+                    $val = $fields[$key] ?? null;
+                }
                 $pass = $this->evaluator->compareValue($val, $cond['operator'] ?? '', $cond['value'] ?? null);
                 $condDebug['result'] = $pass;
                 $condDebug['details'][] = [

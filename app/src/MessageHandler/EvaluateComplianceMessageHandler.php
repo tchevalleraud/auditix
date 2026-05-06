@@ -105,7 +105,11 @@ class EvaluateComplianceMessageHandler
         // Use a direct SQL query to avoid ORM cache issues with concurrent workers
         $conn = $this->em->getConnection();
         $rows = $conn->fetchAllAssociative(
-            'SELECT status, severity, COUNT(*) as cnt FROM compliance_result WHERE node_id = :nodeId GROUP BY status, severity',
+            'SELECT cr.status, cr.severity, COUNT(*) as cnt
+             FROM compliance_result cr
+             INNER JOIN compliance_policy cp ON cp.id = cr.policy_id
+             WHERE cr.node_id = :nodeId AND cp.enabled = true
+             GROUP BY cr.status, cr.severity',
             ['nodeId' => $node->getId()]
         );
 

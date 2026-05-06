@@ -428,6 +428,40 @@ class ComplianceEvaluator
         return $this->conditionTree->getInventoryValue($categoryId, $key, $column, $node);
     }
 
+    /**
+     * Recompute and persist the compliance grade for a node, considering only
+     * results that belong to enabled policies. Caller must flush.
+     */
+    public function recalculateComplianceGrade(Node $node): string
+    {
+        $rows = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT cr.status, cr.severity, COUNT(*) as cnt
+             FROM compliance_result cr
+             INNER JOIN compliance_policy cp ON cp.id = cr.policy_id
+             WHERE cr.node_id = :nodeId AND cp.enabled = true
+             GROUP BY cr.status, cr.severity',
+            ['nodeId' => $node->getId()]
+        );
+
+        $penalty = 0;
+        $scorable = 0;
+        foreach ($rows as $row) {
+            $st = $row['status'];
+            $cnt = (int) $row['cnt'];
+            if ($st === 'skipped' || $st === 'not_applicable') continue;
+            $scorable += $cnt;
+            if ($st === 'non_compliant') {
+                $penalty += (self::SEVERITY_WEIGHTS[$row['severity'] ?? 'info'] ?? 0) * $cnt;
+            } elseif ($st === 'error') {
+                $penalty += (self::SEVERITY_WEIGHTS['critical'] ?? 10) * $cnt;
+            }
+        }
+
+        $grade = self::calculateGrade($scorable, $penalty);
+        $node->setComplianceScore($grade);
+        return $grade;
+    }
+
     // ---- Condition evaluation (delegated to ConditionTreeEvaluator) ----
 
     public function evaluateBlocks(array $blocks, array $fields, ?Node $node = null): ?array

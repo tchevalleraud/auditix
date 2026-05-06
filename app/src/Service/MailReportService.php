@@ -669,6 +669,7 @@ TILE;
             ->leftJoin('r.policy', 'policy')
             ->andWhere('r.node = :node')
             ->andWhere("r.status IN ('non_compliant', 'error')")
+            ->andWhere('policy.enabled = true')
             ->setParameter('node', $node)
             ->orderBy("CASE r.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 WHEN 'info' THEN 4 ELSE 5 END", 'ASC')
             ->setMaxResults((int) ($b['limit'] ?? 5))

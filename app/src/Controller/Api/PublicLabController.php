@@ -49,6 +49,7 @@ class PublicLabController extends AbstractController
     {
         $nodeStatus = [];
         foreach ($policies as $policy) {
+            if (!$policy->isEnabled()) continue;
             $results = $em->getRepository(ComplianceResult::class)->findBy(['policy' => $policy]);
             foreach ($results as $result) {
                 if (!$result->getRule()->isEnabled()) {

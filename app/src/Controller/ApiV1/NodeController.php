@@ -578,7 +578,14 @@ class NodeController extends AbstractController
 
     private function buildComplianceResponse(Node $node, EntityManagerInterface $em): JsonResponse
     {
-        $results = $em->getRepository(ComplianceResult::class)->findBy(['node' => $node]);
+        $results = $em->createQueryBuilder()
+            ->select('cr')
+            ->from(ComplianceResult::class, 'cr')
+            ->innerJoin('cr.policy', 'p')
+            ->where('cr.node = :node')
+            ->andWhere('p.enabled = true')
+            ->setParameter('node', $node)
+            ->getQuery()->getResult();
 
         $policyMap = [];
         foreach ($results as $r) {

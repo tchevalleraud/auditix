@@ -166,7 +166,9 @@ class DashboardController extends AbstractController
         $qb = $em->createQueryBuilder()
             ->from(ComplianceResult::class, 'cr')
             ->innerJoin('cr.node', 'n')
+            ->innerJoin('cr.policy', 'cp')
             ->where('n.context = :ctx')
+            ->andWhere('cp.enabled = true')
             ->setParameter('ctx', $contextId);
         $this->filterService->applyToQuery($qb, 'n', $filters, $suffix);
         return $qb;

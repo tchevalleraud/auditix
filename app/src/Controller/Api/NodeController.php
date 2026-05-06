@@ -509,7 +509,14 @@ class NodeController extends AbstractController
 
         if (empty($nodeIds)) return $this->json(new \stdClass());
 
-        $results = $em->getRepository(ComplianceResult::class)->findBy(['node' => $nodeIds]);
+        $results = $em->createQueryBuilder()
+            ->select('cr')
+            ->from(ComplianceResult::class, 'cr')
+            ->innerJoin('cr.policy', 'p')
+            ->where('cr.node IN (:nodes)')
+            ->andWhere('p.enabled = true')
+            ->setParameter('nodes', $nodeIds)
+            ->getQuery()->getResult();
 
         $stats = [];
         foreach ($results as $r) {
@@ -593,9 +600,14 @@ class NodeController extends AbstractController
     public function compliance(Node $node, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
-        $results = $em->getRepository(ComplianceResult::class)->findBy(
-            ['node' => $node],
-        );
+        $results = $em->createQueryBuilder()
+            ->select('cr')
+            ->from(ComplianceResult::class, 'cr')
+            ->innerJoin('cr.policy', 'p')
+            ->where('cr.node = :node')
+            ->andWhere('p.enabled = true')
+            ->setParameter('node', $node)
+            ->getQuery()->getResult();
 
         // Group by policy
         $policyMap = [];
@@ -703,7 +715,8 @@ class NodeController extends AbstractController
             $rows = $em->getConnection()->fetchAllAssociative(
                 'SELECT cr.node_id AS nid, cr.status, COUNT(*) AS cnt
                  FROM compliance_result cr
-                 WHERE cr.node_id IN (:ids) AND cr.status <> :skipped
+                 INNER JOIN compliance_policy cp ON cp.id = cr.policy_id
+                 WHERE cr.node_id IN (:ids) AND cr.status <> :skipped AND cp.enabled = true
                  GROUP BY cr.node_id, cr.status',
                 ['ids' => $nodeIds, 'skipped' => 'skipped'],
                 ['ids' => \Doctrine\DBAL\ArrayParameterType::INTEGER]

@@ -10,6 +10,7 @@ use App\Entity\Context;
 use App\Entity\Node;
 use App\Entity\NodeTag;
 use App\Message\EvaluateComplianceMessage;
+use App\Message\RecalculateNodeScoreMessage;
 use App\Security\Voter\ContextAccessVoter;
 use App\Service\ComplianceEvaluator;
 use App\Service\NodeMatchEvaluator;
@@ -100,8 +101,13 @@ class CompliancePolicyController extends AbstractController
     }
 
     #[Route('/{id}', methods: ['PUT'])]
-    public function update(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
-    {
+    public function update(
+        CompliancePolicy $policy,
+        Request $request,
+        EntityManagerInterface $em,
+        ComplianceEvaluator $evaluator,
+        MessageBusInterface $bus,
+    ): JsonResponse {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
 
@@ -113,11 +119,31 @@ class CompliancePolicyController extends AbstractController
             $policy->setDescription($data['description']);
         }
 
+        $enabledChanged = false;
         if (array_key_exists('enabled', $data)) {
-            $policy->setEnabled((bool) $data['enabled']);
+            $newEnabled = (bool) $data['enabled'];
+            if ($newEnabled !== $policy->isEnabled()) {
+                $policy->setEnabled($newEnabled);
+                $enabledChanged = true;
+            }
         }
 
         $em->flush();
+
+        if ($enabledChanged) {
+            $rows = $em->getConnection()->fetchAllAssociative(
+                'SELECT DISTINCT node_id FROM compliance_result WHERE policy_id = :pid',
+                ['pid' => $policy->getId()]
+            );
+            foreach ($rows as $row) {
+                $nodeId = (int) $row['node_id'];
+                $node = $em->getRepository(Node::class)->find($nodeId);
+                if (!$node) continue;
+                $evaluator->recalculateComplianceGrade($node);
+                $bus->dispatch(new RecalculateNodeScoreMessage($nodeId));
+            }
+            $em->flush();
+        }
 
         return $this->json($this->serialize($policy));
     }
