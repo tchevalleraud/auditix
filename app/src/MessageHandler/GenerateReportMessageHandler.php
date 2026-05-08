@@ -3296,6 +3296,182 @@ class GenerateReportMessageHandler
 
                 $prevType = 'rule_recommendation';
 
+            } elseif ($type === 'compliance_recommendations') {
+                $crPolicyIds = array_values(array_filter(array_map('intval', $block['policyIds'] ?? []), fn($x) => $x > 0));
+                $crRuleIds = array_values(array_filter(array_map('intval', $block['ruleIds'] ?? []), fn($x) => $x > 0));
+                $crScope = (string) ($block['scope'] ?? 'all');
+                $crNodeTagIds = array_values(array_filter(array_map('intval', $block['nodeTagIds'] ?? []), fn($x) => $x > 0));
+                $crNodeIds = array_values(array_filter(array_map('intval', $block['nodeIds'] ?? []), fn($x) => $x > 0));
+                $crShowReco = !empty($block['showRecommendation']);
+                $crRecoFormat = ($block['recommendationFormat'] ?? 'text') === 'cli' ? 'cli' : 'text';
+                $crPageBreak = !empty($block['pageBreakBefore']);
+                $crFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
+
+                if (empty($crPolicyIds) && empty($crRuleIds)) {
+                    continue;
+                }
+
+                $crLocale = $report ? $report->getLocale() : 'en';
+                $crCl = self::COMPLIANCE_LABELS[$crLocale] ?? self::COMPLIANCE_LABELS['en'];
+
+                // Build query
+                $crQb = $this->em->createQueryBuilder()
+                    ->select('cr', 'r', 'p', 'n')
+                    ->from(\App\Entity\ComplianceResult::class, 'cr')
+                    ->innerJoin('cr.rule', 'r')
+                    ->innerJoin('cr.policy', 'p')
+                    ->innerJoin('cr.node', 'n')
+                    ->where('p.enabled = true')
+                    ->andWhere('cr.status IN (:statuses)')
+                    ->setParameter('statuses', ['non_compliant', 'error']);
+
+                if (!empty($crPolicyIds)) {
+                    $crQb->andWhere('p.id IN (:policyIds)')->setParameter('policyIds', $crPolicyIds);
+                }
+                if (!empty($crRuleIds)) {
+                    $crQb->andWhere('r.id IN (:ruleIds)')->setParameter('ruleIds', $crRuleIds);
+                }
+                if ($crScope === 'device' && !empty($crNodeIds)) {
+                    $crQb->andWhere('n.id IN (:nodeIds)')->setParameter('nodeIds', $crNodeIds);
+                } elseif ($crScope === 'tag' && !empty($crNodeTagIds)) {
+                    $crQb->innerJoin('n.tags', 'nt')->andWhere('nt.id IN (:tagIds)')->setParameter('tagIds', $crNodeTagIds);
+                } elseif ($crScope === 'device' || $crScope === 'tag') {
+                    // Filter selected but empty → no results
+                    continue;
+                }
+
+                /** @var \App\Entity\ComplianceResult[] $crResults */
+                $crResults = $crQb->getQuery()->getResult();
+
+                if (empty($crResults)) {
+                    continue;
+                }
+
+                // Sort by severity desc (critical first), errors weighted as critical
+                $crSevOrder = ['critical' => 5, 'high' => 4, 'medium' => 3, 'low' => 2, 'info' => 1];
+                usort($crResults, function ($a, $b) use ($crSevOrder) {
+                    $sa = $a->getStatus() === 'error' ? 5 : ($crSevOrder[$a->getSeverity() ?? 'info'] ?? 1);
+                    $sb = $b->getStatus() === 'error' ? 5 : ($crSevOrder[$b->getSeverity() ?? 'info'] ?? 1);
+                    if ($sa !== $sb) return $sb - $sa;
+                    $na = $a->getNode()->getHostname() ?? $a->getNode()->getName() ?? $a->getNode()->getIpAddress() ?? '';
+                    $nb = $b->getNode()->getHostname() ?? $b->getNode()->getName() ?? $b->getNode()->getIpAddress() ?? '';
+                    return strnatcasecmp($na, $nb);
+                });
+
+                if ($crPageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $crContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+
+                // Severity badge colors (RGB tuples)
+                $crSevColors = [
+                    'critical' => [239, 68, 68],
+                    'high' => [249, 115, 22],
+                    'medium' => [234, 179, 8],
+                    'low' => [59, 130, 246],
+                    'info' => [148, 163, 184],
+                    'error' => [239, 68, 68],
+                ];
+
+                foreach ($crResults as $crRes) {
+                    $crNode = $crRes->getNode();
+                    $crRule = $crRes->getRule();
+                    $crStatus = $crRes->getStatus();
+                    $crSev = $crStatus === 'error' ? 'error' : ($crRes->getSeverity() ?? 'info');
+                    $crColor = $crSevColors[$crSev] ?? $crSevColors['info'];
+                    $crSevLabel = $crStatus === 'error' ? ($crCl['error'] ?? 'Error') : ($crCl['sev_' . $crSev] ?? $crSev);
+
+                    $crNodeLabel = $crNode->getHostname() ?: ($crNode->getName() ?: $crNode->getIpAddress());
+                    $crRuleTitle = trim(($crRule->getIdentifier() ? '[' . $crRule->getIdentifier() . '] ' : '') . $crRule->getName());
+                    $crLong = (string) ($crRes->getMessageLong() ?? '');
+                    if ($crLong === '') $crLong = (string) ($crRes->getMessage() ?? '');
+
+                    $crBoxStartY = $pdf->GetY();
+
+                    // Severity ribbon (left vertical bar)
+                    $crBarW = 1.2;
+                    // Header line: severity badge + node + rule title
+                    $crBadgeW = 22;
+                    $crBadgeH = $crFontSize * 0.3528 + 1.5;
+                    $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
+                    $pdf->SetTextColor(255, 255, 255);
+                    $pdf->SetFont($bodyFont, 'B', $crFontSize - 1);
+                    $pdf->Rect($mLeft, $crBoxStartY, $crBadgeW, $crBadgeH, 'F');
+                    $pdf->SetXY($mLeft, $crBoxStartY);
+                    $pdf->Cell($crBadgeW, $crBadgeH, strtoupper($crSevLabel), 0, 0, 'C');
+
+                    // Title to the right of the badge
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, 'B', $crFontSize);
+                    $pdf->SetXY($mLeft + $crBadgeW + 2, $crBoxStartY);
+                    $pdf->Cell($crContentW - $crBadgeW - 2, $crBadgeH, $crNodeLabel . ' — ' . $crRuleTitle, 0, 1, 'L');
+
+                    // Long description (HTML rendering)
+                    $pdf->SetFont($bodyFont, '', $crFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    if ($crLong !== '') {
+                        // If plain text (no tags), wrap in paragraph and escape
+                        if (!preg_match('/<[a-z][^>]*>/i', $crLong)) {
+                            $crLong = '<p>' . nl2br(htmlspecialchars($crLong, ENT_QUOTES | ENT_HTML5, 'UTF-8')) . '</p>';
+                        }
+                        $pdf->writeHTMLCell($crContentW, 0, $mLeft, $pdf->GetY() + 0.5, $crLong, 0, 1, false, true, 'L', true);
+                    }
+
+                    // Optional recommendation
+                    if ($crShowReco) {
+                        $crReco = (string) ($crRes->getRecommendation() ?? '');
+                        if ($crReco !== '') {
+                            if ($crRecoFormat === 'cli') {
+                                $crCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
+                                $crCliFont = $this->mapFont($crCliStyle['font'] ?? 'Consolas');
+                                $crCliBg = $this->hexToRgb($crCliStyle['bgColor'] ?? '#f1f5f9');
+                                $crCliText = $this->hexToRgb($crCliStyle['textColor'] ?? '#1e293b');
+                                $crCliBorder = $this->hexToRgb($crCliStyle['borderColor'] ?? '#e2e8f0');
+                                $crCliPadding = (float) ($crCliStyle['padding'] ?? 3);
+                                $crLines = explode("\n", $crReco);
+                                $crLineH = $crFontSize * 0.3528 * 1.4;
+                                $crBodyH = ($crCliPadding * 2) + (count($crLines) * $crLineH);
+                                $crStartY = $pdf->GetY() + 1;
+                                if ($crStartY + $crBodyH > $pdf->getPageHeight() - $mBottom) {
+                                    $pdf->AddPage();
+                                    $crStartY = $pdf->GetY();
+                                }
+                                $pdf->SetDrawColor($crCliBorder[0], $crCliBorder[1], $crCliBorder[2]);
+                                $pdf->SetFillColor($crCliBg[0], $crCliBg[1], $crCliBg[2]);
+                                $pdf->Rect($mLeft, $crStartY, $crContentW, $crBodyH, 'DF');
+                                $pdf->SetFont($crCliFont, '', $crFontSize);
+                                $pdf->SetTextColor($crCliText[0], $crCliText[1], $crCliText[2]);
+                                $crCurY = $crStartY + $crCliPadding;
+                                foreach ($crLines as $crLine) {
+                                    $pdf->SetXY($mLeft + $crCliPadding, $crCurY);
+                                    $pdf->Cell($crContentW - ($crCliPadding * 2), $crLineH, $crLine, 0, 0, 'L');
+                                    $crCurY += $crLineH;
+                                }
+                                $pdf->SetY($crStartY + $crBodyH);
+                            } else {
+                                $pdf->Ln(0.5);
+                                $crRecoEsc = nl2br(htmlspecialchars($crReco, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                                $pdf->writeHTMLCell($crContentW, 0, $mLeft, $pdf->GetY(), '<i>' . $crRecoEsc . '</i>', 0, 1, false, true, 'L', true);
+                            }
+                        }
+                    }
+
+                    // Severity ribbon over full block height
+                    $crBoxEndY = $pdf->GetY();
+                    $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
+                    $pdf->Rect($mLeft - 1.8, $crBoxStartY, $crBarW, $crBoxEndY - $crBoxStartY, 'F');
+
+                    $pdf->Ln(2);
+                }
+
+                $prevType = 'compliance_recommendations';
+
             } elseif ($type === 'chart_static') {
                 $chKind = (string) ($block['chartKind'] ?? 'bar');
                 $chTitle = (string) ($block['title'] ?? '');

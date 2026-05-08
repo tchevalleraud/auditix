@@ -85,14 +85,12 @@ class ComplianceEvaluator
             return ['status' => 'not_applicable', 'severity' => null, 'message' => null];
         }
 
-        // Resolve recommendation template variables
-        if (!empty($evaluation['recommendation'])) {
-            $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
-            $evaluation['recommendation'] = $this->resolveTemplate(
-                $evaluation['recommendation'],
-                $fields,
-                $expectedValues
-            );
+        // Resolve template variables on message, messageLong and recommendation
+        $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
+        foreach (['message', 'messageLong', 'recommendation'] as $key) {
+            if (!empty($evaluation[$key]) && is_string($evaluation[$key])) {
+                $evaluation[$key] = $this->resolveTemplate($evaluation[$key], $fields, $expectedValues, $node);
+            }
         }
 
         return $evaluation;
@@ -154,10 +152,17 @@ class ComplianceEvaluator
         $result = $worst ?? ['status' => 'not_applicable', 'severity' => null, 'message' => null];
         $result['multiRowResults'] = $rowResults;
 
-        // Use multiRowMessages for the global message if configured
+        // Use multiRowMessages for the global message if configured.
+        // Backwards-compat: legacy format = string per status; new format = ['short' => ..., 'long' => ...]
         $multiRowMessages = $rule->getMultiRowMessages();
         if (!empty($multiRowMessages) && isset($multiRowMessages[$result['status']])) {
-            $result['message'] = $multiRowMessages[$result['status']];
+            $entry = $multiRowMessages[$result['status']];
+            if (is_array($entry)) {
+                if (!empty($entry['short'])) $result['message'] = $entry['short'];
+                if (!empty($entry['long'])) $result['messageLong'] = $entry['long'];
+            } else {
+                $result['message'] = $entry;
+            }
         } else {
             // Build a summary message from per-row results
             $summary = [];
@@ -170,10 +175,12 @@ class ComplianceEvaluator
             $result['message'] = implode("\n", $summary);
         }
 
-        // Resolve recommendation template
-        if (!empty($result['recommendation'])) {
-            $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
-            $result['recommendation'] = $this->resolveTemplate($result['recommendation'], $fields, $expectedValues);
+        // Resolve template on message, messageLong and recommendation
+        $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
+        foreach (['message', 'messageLong', 'recommendation'] as $key) {
+            if (!empty($result[$key]) && is_string($result[$key])) {
+                $result[$key] = $this->resolveTemplate($result[$key], $fields, $expectedValues, $node);
+            }
         }
 
         return $result;
@@ -553,20 +560,70 @@ class ComplianceEvaluator
 
     /**
      * Resolve {{variable}} placeholders in a template string.
-     * Supports: {{source.field}} for actual values, {{expected.field}} for expected values from sibling conditions.
+     * Supported namespaces:
+     *   - {{source.field}}                              from data sources collected at eval time
+     *   - {{expected.field}}                            from sibling conditions targeting this node
+     *   - {{node.name|ip|hostname|manufacturer|model|tags}}
+     *   - {{inventory.<categoryName>.<entryKey>.<column>[?tag=<tagName>]}}
      */
-    private function resolveTemplate(string $template, array $fields, array $expectedValues): string
+    private function resolveTemplate(string $template, array $fields, array $expectedValues, ?Node $node = null): string
     {
-        return preg_replace_callback('/\{\{(.+?)\}\}/', function ($m) use ($fields, $expectedValues) {
+        return preg_replace_callback('/\{\{(.+?)\}\}/', function ($m) use ($fields, $expectedValues, $node) {
             $var = trim($m[1]);
-            // Check expected values first (from sibling conditions targeting this node)
+
             if (str_starts_with($var, 'expected.')) {
-                $key = substr($var, 9); // remove "expected."
+                $key = substr($var, 9);
                 return $expectedValues[$key] ?? $m[0];
             }
-            // Then check source fields
+
+            if ($node && str_starts_with($var, 'node.')) {
+                return $this->resolveNodeVar(substr($var, 5), $node) ?? $m[0];
+            }
+
+            if ($node && str_starts_with($var, 'inventory.')) {
+                return $this->resolveInventoryVar(substr($var, 10), $node) ?? $m[0];
+            }
+
             return isset($fields[$var]) ? (string)$fields[$var] : $m[0];
         }, $template);
+    }
+
+    private function resolveNodeVar(string $path, Node $node): ?string
+    {
+        return match ($path) {
+            'name' => $node->getName(),
+            'ip', 'ipAddress' => $node->getIpAddress(),
+            'hostname' => $node->getHostname(),
+            'manufacturer' => $node->getManufacturer()?->getName(),
+            'model' => $node->getModel()?->getName(),
+            'tags' => implode(', ', array_map(fn($t) => $t->getName(), $node->getTags()->toArray())),
+            default => null,
+        };
+    }
+
+    /**
+     * Path format: <categoryName>.<entryKey>.<column>[?tag=<tagName>]
+     * Spaces are accepted in names. Tag defaults to "latest".
+     */
+    private function resolveInventoryVar(string $path, Node $node): ?string
+    {
+        $tagName = 'latest';
+        if (str_contains($path, '?')) {
+            [$path, $query] = explode('?', $path, 2);
+            parse_str($query, $params);
+            if (!empty($params['tag'])) $tagName = (string) $params['tag'];
+        }
+
+        $parts = explode('.', $path);
+        if (count($parts) < 2) return null;
+        $categoryName = trim($parts[0]);
+        $entryKey = trim($parts[1]);
+        $column = isset($parts[2]) ? trim(implode('.', array_slice($parts, 2))) : 'Value#1';
+
+        $category = $this->em->getRepository(InventoryCategory::class)->findOneBy(['name' => $categoryName]);
+        if (!$category) return null;
+
+        return $this->getInventoryValue($category->getId(), $entryKey, $column, $node, $tagName);
     }
 
     /**

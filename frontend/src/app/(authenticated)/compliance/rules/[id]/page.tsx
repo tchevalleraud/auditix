@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
@@ -34,7 +34,16 @@ import {
   Rows3,
   Pencil,
   Copy,
+  Bold,
+  Italic,
+  Underline as UnderlineIcon,
+  List as ListIcon,
+  ListOrdered,
+  Variable,
 } from "lucide-react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import UnderlineExt from "@tiptap/extension-underline";
 
 interface DataSource {
   name: string;
@@ -48,6 +57,8 @@ interface DataSource {
   multiRow?: boolean;
 }
 
+interface MultiRowMessageEntry { short: string; long?: string }
+
 interface RuleDetail {
   id: number;
   identifier: string | null;
@@ -56,7 +67,7 @@ interface RuleDetail {
   enabled: boolean;
   dataSources: DataSource[];
   conditionTree: ConditionTree | null;
-  multiRowMessages: Record<string, string> | null;
+  multiRowMessages: Record<string, string | MultiRowMessageEntry> | null;
   folderId: number | null;
   createdAt: string;
 }
@@ -91,6 +102,7 @@ interface ConditionItem {
 interface ConditionResult {
   status: "compliant" | "non_compliant" | "error" | "not_applicable";
   message: string;
+  messageLong?: string;
   severity?: "info" | "low" | "medium" | "high" | "critical";
   recommendation?: string;
 }
@@ -128,6 +140,335 @@ const severityColors: Record<string, string> = {
   high: "bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-500/20 dark:text-orange-300 dark:border-orange-500/30",
   critical: "bg-red-100 text-red-700 border-red-300 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30",
 };
+
+// --- Variable picker (hierarchical menu inserting {{...}} placeholders) ---
+
+interface VariablePickerProps {
+  open: boolean;
+  onClose: () => void;
+  onPick: (variable: string) => void;
+  inventoryStructure: InventoryStructure[];
+  inventoryTags: string[];
+  sourceFieldOptions: { source: string; field: string; label: string }[];
+  t: (key: string) => string;
+  className?: string;
+}
+
+const NODE_VAR_KEYS = ["name", "ip", "hostname", "manufacturer", "model", "tags"] as const;
+
+function VariablePicker({ open, onClose, onPick, inventoryStructure, inventoryTags, sourceFieldOptions, t, className }: VariablePickerProps) {
+  const [step, setStep] = useState<"root" | "node" | "tag" | "category" | "key" | "column" | "source" | "expected">("root");
+  const [tag, setTag] = useState<string>("latest");
+  const [category, setCategory] = useState<string | null>(null);
+  const [entryKey, setEntryKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setStep("root");
+      setTag("latest");
+      setCategory(null);
+      setEntryKey(null);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const pick = (variable: string) => {
+    onPick(variable);
+    onClose();
+  };
+
+  const tagSuffix = tag && tag !== "latest" ? `?tag=${tag}` : "";
+  const tagOptions = Array.from(new Set(["latest", ...inventoryTags]));
+
+  return (
+    <div className={`absolute z-30 w-72 max-h-80 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg ${className ?? ""}`}>
+      {step === "root" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("node")} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between">
+            <span>{t("compliance_rules.varNode")}</span>
+            <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+          </button>
+          <button type="button" onClick={() => setStep("tag")} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between">
+            <span>{t("compliance_rules.varInventory")}</span>
+            <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+          </button>
+          <button type="button" onClick={() => setStep("source")} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between">
+            <span>{t("compliance_rules.varSource")}</span>
+            <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+          </button>
+          <button type="button" onClick={() => setStep("expected")} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between">
+            <span>{t("compliance_rules.varExpected")}</span>
+            <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+          </button>
+        </div>
+      )}
+
+      {step === "node" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("root")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          {NODE_VAR_KEYS.map((k) => (
+            <button key={k} type="button" onClick={() => pick(`{{node.${k}}}`)} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 font-mono">
+              {`node.${k}`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "tag" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("root")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          <div className="px-3 py-1.5 text-[10px] font-semibold uppercase text-slate-400">{t("compliance_rules.varInventoryTag")}</div>
+          {tagOptions.map((tg) => (
+            <button
+              key={tg}
+              type="button"
+              onClick={() => { setTag(tg); setStep("category"); }}
+              className={`w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between ${tag === tg ? "bg-slate-50 dark:bg-slate-800" : ""}`}
+            >
+              <span className="font-mono">{tg}</span>
+              <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "category" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("tag")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")} <span className="text-slate-300 dark:text-slate-600">— {t("compliance_rules.varInventoryTag")}: {tag}</span></button>
+          {inventoryStructure.length === 0 && (
+            <div className="px-3 py-2 text-slate-400">{t("compliance_rules.noInventoryCategories")}</div>
+          )}
+          {inventoryStructure.map((cat) => (
+            <button key={cat.categoryName} type="button" onClick={() => { setCategory(cat.categoryName); setStep("key"); }} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between">
+              <span>{cat.categoryName}</span>
+              <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400" />
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "key" && category && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => { setStep("category"); setEntryKey(null); }} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          {(inventoryStructure.find((c) => c.categoryName === category)?.entries || []).map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              onClick={() => {
+                if (entry.columns.length <= 1) {
+                  pick(`{{inventory.${category}.${entry.key}${tagSuffix}}}`);
+                } else {
+                  setEntryKey(entry.key);
+                  setStep("column");
+                }
+              }}
+              className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-between"
+            >
+              <span className="truncate">{entry.key}</span>
+              {entry.columns.length > 1 && <ChevronDown className="h-3 w-3 -rotate-90 text-slate-400 shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "column" && category && entryKey && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("key")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          {(inventoryStructure.find((c) => c.categoryName === category)?.entries.find((e) => e.key === entryKey)?.columns || []).map((col) => (
+            <button key={col} type="button" onClick={() => pick(`{{inventory.${category}.${entryKey}.${col}${tagSuffix}}}`)} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 font-mono">
+              {col}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "source" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("root")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          {sourceFieldOptions.length === 0 && (
+            <div className="px-3 py-2 text-slate-400">{t("compliance_rules.varNoSource")}</div>
+          )}
+          {sourceFieldOptions.map((opt) => (
+            <button key={opt.label} type="button" onClick={() => pick(`{{${opt.source}.${opt.field}}}`)} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 font-mono">
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {step === "expected" && (
+        <div className="py-1 text-xs">
+          <button type="button" onClick={() => setStep("root")} className="w-full px-3 py-1.5 text-left text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">← {t("common.back")}</button>
+          <p className="px-3 py-1.5 text-[10px] text-slate-400">{t("compliance_rules.varExpectedHelp")}</p>
+          {sourceFieldOptions.length === 0 && (
+            <div className="px-3 py-2 text-slate-400">{t("compliance_rules.varNoSource")}</div>
+          )}
+          {sourceFieldOptions.map((opt) => (
+            <button key={opt.label} type="button" onClick={() => pick(`{{expected.${opt.source}.${opt.field}}}`)} className="w-full px-3 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-800 font-mono">
+              {`expected.${opt.source}.${opt.field}`}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Rich description editor (TipTap WYSIWYG with variable insertion) ---
+
+interface RichDescriptionEditorProps {
+  value: string;
+  onChange: (html: string) => void;
+  placeholder?: string;
+  inventoryStructure: InventoryStructure[];
+  inventoryTags: string[];
+  sourceFieldOptions: { source: string; field: string; label: string }[];
+  t: (key: string) => string;
+}
+
+function RichDescriptionEditor({ value, onChange, placeholder, inventoryStructure, inventoryTags, sourceFieldOptions, t }: RichDescriptionEditorProps) {
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ heading: false, codeBlock: false, code: false, blockquote: false, horizontalRule: false }),
+      UnderlineExt,
+    ],
+    content: value || "",
+    onUpdate: ({ editor: ed }) => {
+      const html = ed.getHTML();
+      onChange(html === "<p></p>" ? "" : html);
+    },
+    editorProps: {
+      attributes: {
+        class: "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[80px] px-3 py-2 text-xs",
+      },
+    },
+  });
+
+  const [varMenuOpen, setVarMenuOpen] = useState(false);
+
+  const insert = (text: string) => {
+    if (!editor) return;
+    editor.chain().focus().insertContent(text).run();
+  };
+
+  if (!editor) return null;
+
+  const btn = (active: boolean, onClick: () => void, children: React.ReactNode, title: string) => (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`p-1.5 rounded transition-colors ${active ? "bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-slate-100" : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 relative">
+      <div className="flex items-center gap-0.5 border-b border-slate-200 dark:border-slate-700 px-1.5 py-1">
+        {btn(editor.isActive("bold"), () => editor.chain().focus().toggleBold().run(), <Bold className="h-3.5 w-3.5" />, t("compliance_rules.fmtBold"))}
+        {btn(editor.isActive("italic"), () => editor.chain().focus().toggleItalic().run(), <Italic className="h-3.5 w-3.5" />, t("compliance_rules.fmtItalic"))}
+        {btn(editor.isActive("underline"), () => editor.chain().focus().toggleUnderline().run(), <UnderlineIcon className="h-3.5 w-3.5" />, t("compliance_rules.fmtUnderline"))}
+        <span className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+        {btn(editor.isActive("bulletList"), () => editor.chain().focus().toggleBulletList().run(), <ListIcon className="h-3.5 w-3.5" />, t("compliance_rules.fmtBulletList"))}
+        {btn(editor.isActive("orderedList"), () => editor.chain().focus().toggleOrderedList().run(), <ListOrdered className="h-3.5 w-3.5" />, t("compliance_rules.fmtOrderedList"))}
+        <span className="mx-1 h-4 w-px bg-slate-200 dark:bg-slate-700" />
+        <button
+          type="button"
+          onClick={() => setVarMenuOpen((v) => !v)}
+          className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          title={t("compliance_rules.insertVariable")}
+        >
+          <Variable className="h-3.5 w-3.5" />
+          {t("compliance_rules.insertVariable")}
+        </button>
+      </div>
+      <VariablePicker
+        open={varMenuOpen}
+        onClose={() => setVarMenuOpen(false)}
+        onPick={insert}
+        inventoryStructure={inventoryStructure}
+        inventoryTags={inventoryTags}
+        sourceFieldOptions={sourceFieldOptions}
+        t={t}
+        className="top-9 right-2"
+      />
+      <EditorContent editor={editor} placeholder={placeholder} />
+    </div>
+  );
+}
+
+// --- Plain textarea with variable insertion (used for recommendation field) ---
+
+interface VariableTextareaProps {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  rows?: number;
+  inventoryStructure: InventoryStructure[];
+  inventoryTags: string[];
+  sourceFieldOptions: { source: string; field: string; label: string }[];
+  t: (key: string) => string;
+  className?: string;
+}
+
+function VariableTextarea({ value, onChange, placeholder, rows = 3, inventoryStructure, inventoryTags, sourceFieldOptions, t, className }: VariableTextareaProps) {
+  const [open, setOpen] = useState(false);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const insertAtCursor = (text: string) => {
+    const el = taRef.current;
+    if (!el) {
+      onChange(value + text);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + text + value.slice(end);
+    onChange(next);
+    requestAnimationFrame(() => {
+      el.focus();
+      const pos = start + text.length;
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center justify-end mb-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 px-1.5 py-1 rounded text-[10px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        >
+          <Variable className="h-3.5 w-3.5" />
+          {t("compliance_rules.insertVariable")}
+        </button>
+      </div>
+      <VariablePicker
+        open={open}
+        onClose={() => setOpen(false)}
+        onPick={insertAtCursor}
+        inventoryStructure={inventoryStructure}
+        inventoryTags={inventoryTags}
+        sourceFieldOptions={sourceFieldOptions}
+        t={t}
+        className="top-7 right-0"
+      />
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        rows={rows}
+        className={className}
+      />
+    </div>
+  );
+}
 
 interface BlockListProps {
   blocks: ConditionBlock[];
@@ -581,21 +922,42 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                     </div>
                   )}
 
-                  <input
-                    type="text"
-                    value={msg}
-                    onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, message: e.target.value } }))}
-                    placeholder={t("compliance_rules.resultMessagePlaceholder")}
-                    className={`${smallInput} w-full`}
-                  />
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.resultMessageShort")}</label>
+                    <input
+                      type="text"
+                      value={msg}
+                      onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, message: e.target.value } }))}
+                      placeholder={t("compliance_rules.resultMessagePlaceholder")}
+                      className={`${smallInput} w-full`}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.resultMessageLong")}</label>
+                    <RichDescriptionEditor
+                      value={block.result.messageLong || ""}
+                      onChange={(html) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, messageLong: html || undefined } }))}
+                      placeholder={t("compliance_rules.resultMessageLongPlaceholder")}
+                      inventoryStructure={inventoryStructure}
+                      inventoryTags={inventoryTags}
+                      sourceFieldOptions={sourceFieldOptions}
+                      t={t}
+                    />
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("compliance_rules.resultMessageLongHelp")}</p>
+                  </div>
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.recommendation")}</label>
-                    <textarea
+                    <VariableTextarea
                       value={block.result.recommendation || ""}
-                      onChange={(e) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, recommendation: e.target.value || undefined } }))}
+                      onChange={(v) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, recommendation: v || undefined } }))}
                       placeholder={t("compliance_rules.recommendationPlaceholder")}
                       rows={3}
+                      inventoryStructure={inventoryStructure}
+                      inventoryTags={inventoryTags}
+                      sourceFieldOptions={sourceFieldOptions}
+                      t={t}
                       className={`${smallInput} w-full font-mono text-xs resize-none`}
                     />
                     <p className="text-[10px] text-slate-400 dark:text-slate-500">{t("compliance_rules.recommendationHelp")}</p>
@@ -718,7 +1080,7 @@ export default function ComplianceRuleEditPage() {
   const [evalResult, setEvalResult] = useState<Record<string, unknown> | null>(null);
 
   // Multi-row messages
-  const [multiRowMessages, setMultiRowMessages] = useState<Record<string, string>>({});
+  const [multiRowMessages, setMultiRowMessages] = useState<Record<string, MultiRowMessageEntry>>({});
   const [showMultiRowModal, setShowMultiRowModal] = useState(false);
   const [savingMultiRow, setSavingMultiRow] = useState(false);
 
@@ -740,7 +1102,14 @@ export default function ComplianceRuleEditPage() {
       setFolderId(data.folderId);
       setDataSources(data.dataSources || []);
       setConditionTree(data.conditionTree || null);
-      setMultiRowMessages(data.multiRowMessages || {});
+      // Backwards-compat: legacy format = { status: string }; new format = { status: { short, long } }
+      const raw = data.multiRowMessages || {};
+      const normalized: Record<string, MultiRowMessageEntry> = {};
+      for (const [k, v] of Object.entries(raw)) {
+        if (typeof v === "string") normalized[k] = { short: v };
+        else if (v && typeof v === "object") normalized[k] = { short: (v as MultiRowMessageEntry).short || "", long: (v as MultiRowMessageEntry).long };
+      }
+      setMultiRowMessages(normalized);
     }
     setLoading(false);
   }, [ruleId]);
@@ -1611,24 +1980,42 @@ export default function ComplianceRuleEditPage() {
               </button>
             </div>
             <div className="space-y-4">
-              {(["compliant", "non_compliant", "error", "not_applicable"] as const).map((status) => (
-                <div key={status} className={`p-4 rounded-lg border ${statusColors[status]}`}>
-                  <label className="flex items-center gap-2 text-sm font-medium mb-2">
-                    {status === "compliant" && <CheckCircle className="h-4 w-4 text-emerald-500" />}
-                    {status === "non_compliant" && <AlertCircle className="h-4 w-4 text-red-500" />}
-                    {status === "error" && <AlertCircle className="h-4 w-4 text-amber-500" />}
-                    {status === "not_applicable" && <Filter className="h-4 w-4 text-slate-400" />}
-                    {t(`compliance_rules.status_${status}`)}
-                  </label>
-                  <input
-                    type="text"
-                    value={multiRowMessages[status] || ""}
-                    onChange={(e) => setMultiRowMessages((prev) => ({ ...prev, [status]: e.target.value }))}
-                    placeholder={t("compliance_rules.multiRowMsgPlaceholder")}
-                    className={inputCls}
-                  />
-                </div>
-              ))}
+              {(["compliant", "non_compliant", "error", "not_applicable"] as const).map((status) => {
+                const entry = multiRowMessages[status] || { short: "" };
+                return (
+                  <div key={status} className={`p-4 rounded-lg border ${statusColors[status]} space-y-3`}>
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      {status === "compliant" && <CheckCircle className="h-4 w-4 text-emerald-500" />}
+                      {status === "non_compliant" && <AlertCircle className="h-4 w-4 text-red-500" />}
+                      {status === "error" && <AlertCircle className="h-4 w-4 text-amber-500" />}
+                      {status === "not_applicable" && <Filter className="h-4 w-4 text-slate-400" />}
+                      {t(`compliance_rules.status_${status}`)}
+                    </label>
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">{t("compliance_rules.resultMessageShort")}</span>
+                      <input
+                        type="text"
+                        value={entry.short}
+                        onChange={(e) => setMultiRowMessages((prev) => ({ ...prev, [status]: { ...(prev[status] || { short: "" }), short: e.target.value } }))}
+                        placeholder={t("compliance_rules.multiRowMsgPlaceholder")}
+                        className={inputCls}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase">{t("compliance_rules.resultMessageLong")}</span>
+                      <RichDescriptionEditor
+                        value={entry.long || ""}
+                        onChange={(html) => setMultiRowMessages((prev) => ({ ...prev, [status]: { ...(prev[status] || { short: "" }), long: html || undefined } }))}
+                        placeholder={t("compliance_rules.resultMessageLongPlaceholder")}
+                        inventoryStructure={inventoryStructure}
+                        inventoryTags={inventoryTags}
+                        sourceFieldOptions={sourceFieldOptions}
+                        t={t}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button onClick={() => setShowMultiRowModal(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
@@ -1639,9 +2026,14 @@ export default function ComplianceRuleEditPage() {
                 onClick={async () => {
                   setSavingMultiRow(true);
                   try {
-                    const cleaned: Record<string, string> = {};
+                    const cleaned: Record<string, MultiRowMessageEntry> = {};
                     for (const [k, v] of Object.entries(multiRowMessages)) {
-                      if (v.trim()) cleaned[k] = v.trim();
+                      const short = (v.short || "").trim();
+                      const long = (v.long || "").trim();
+                      if (short || long) {
+                        cleaned[k] = { short };
+                        if (long) cleaned[k].long = long;
+                      }
                     }
                     const res = await fetch(`/api/compliance-rules/${ruleId}`, {
                       method: "PUT",

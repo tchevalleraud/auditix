@@ -77,6 +77,8 @@ class EvaluateComplianceMessageHandler
             $result->setStatus($evaluation['status'] ?? 'error');
             $result->setSeverity($evaluation['severity'] ?? null);
             $result->setMessage($evaluation['message'] ?? null);
+            $result->setMessageLong($evaluation['messageLong'] ?? null);
+            $result->setRecommendation($evaluation['recommendation'] ?? null);
             $result->setEvaluatedAt(new \DateTimeImmutable());
             $this->em->persist($result);
 

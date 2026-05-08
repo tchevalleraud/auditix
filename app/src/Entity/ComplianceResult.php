@@ -36,6 +36,12 @@ class ComplianceResult
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $message = null;
 
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $messageLong = null;
+
+    #[ORM\Column(type: 'text', nullable: true)]
+    private ?string $recommendation = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $evaluatedAt;
 
@@ -57,6 +63,10 @@ class ComplianceResult
     public function setSeverity(?string $v): static { $this->severity = $v; return $this; }
     public function getMessage(): ?string { return $this->message; }
     public function setMessage(?string $v): static { $this->message = $v; return $this; }
+    public function getMessageLong(): ?string { return $this->messageLong; }
+    public function setMessageLong(?string $v): static { $this->messageLong = $v; return $this; }
+    public function getRecommendation(): ?string { return $this->recommendation; }
+    public function setRecommendation(?string $v): static { $this->recommendation = $v; return $this; }
     public function getEvaluatedAt(): \DateTimeImmutable { return $this->evaluatedAt; }
     public function setEvaluatedAt(\DateTimeImmutable $v): static { $this->evaluatedAt = $v; return $this; }
 }

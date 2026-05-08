@@ -358,6 +358,22 @@ export interface RuleRecommendationBlock {
   fontSize?: number;
 }
 
+export type ComplianceRecommendationsScope = "all" | "tag" | "device";
+
+export interface ComplianceRecommendationsBlock {
+  id: string;
+  type: "compliance_recommendations";
+  policyIds: number[];
+  ruleIds: number[];
+  scope: ComplianceRecommendationsScope;
+  nodeTagIds: number[];
+  nodeIds: number[];
+  showRecommendation: boolean;
+  recommendationFormat: "text" | "cli";
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+}
+
 // === Charts ===
 export type ChartKind = "bar" | "stacked_bar" | "pie" | "radar" | "line" | "area" | "treemap";
 
@@ -550,7 +566,7 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -634,6 +650,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "rule_non_compliant", labelKey: "structure.addRuleNonCompliant", icon: <ShieldAlert className="h-4 w-4 text-red-500" /> },
       { type: "rule_nodes_table", labelKey: "structure.addRuleNodesTable", icon: <Activity className="h-4 w-4 text-sky-500" /> },
       { type: "rule_recommendation", labelKey: "structure.addRuleRecommendation", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
+      { type: "compliance_recommendations", labelKey: "structure.addComplianceRecommendations", icon: <ShieldAlert className="h-4 w-4 text-amber-500" /> },
     ],
   },
   {
@@ -757,6 +774,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "rule_nodes_table", policyId: null, ruleId: null, showRuleDescription: true, showMessage: false, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
     } else if (type === "rule_recommendation") {
       block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", displayMode: "text", recommendation: "", showHeader: true, pageBreakBefore: false };
+    } else if (type === "compliance_recommendations") {
+      block = { id, type: "compliance_recommendations", policyIds: [], ruleIds: [], scope: "all", nodeTagIds: [], nodeIds: [], showRecommendation: false, recommendationFormat: "text", pageBreakBefore: false };
     } else if (type === "chart_static") {
       block = {
         id,
@@ -1038,6 +1057,15 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyRuleRecommendation")}</span>;
     }
+    if (block.type === "compliance_recommendations") {
+      const polCount = (block.policyIds ?? []).length;
+      const ruleCount = (block.ruleIds ?? []).length;
+      const scopeStr = block.scope === "all" ? "all" : block.scope === "tag" ? `${(block.nodeTagIds ?? []).length} tags` : `${(block.nodeIds ?? []).length} devices`;
+      if (polCount === 0 && ruleCount === 0) {
+        return <span className="italic text-slate-400">{t("structure.emptyComplianceRecommendations")}</span>;
+      }
+      return <span className="text-slate-500 text-xs">{t("structure.complianceRecommendations")} — {polCount} pol / {ruleCount} rules / {scopeStr}</span>;
+    }
     if (block.type === "chart_static") {
       const seriesCount = block.series.length;
       const labelCount = block.labels.length;
@@ -1175,6 +1203,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
           <Lightbulb className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "compliance_recommendations") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+          <ShieldAlert className="h-3 w-3" />
         </span>
       );
     }
@@ -1446,6 +1481,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "rule_recommendation" && (
                 <RuleRecommendationProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "compliance_recommendations" && (
+                <ComplianceRecommendationsProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "chart_static" && (
                 <ChartStaticProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -6477,6 +6515,255 @@ function RuleRecommendationProperties({
             className="flex-1 accent-blue-600"
           />
           <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? (block.displayMode === "cli" ? 9 : 11)}pt</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Compliance recommendations properties ===========================
+// =====================================================================
+
+interface ReportNodeTagOption { id: number; name: string; color: string }
+
+function ComplianceRecommendationsProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: ComplianceRecommendationsBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [policies, setPolicies] = useState<CompliancePolicyOption[]>([]);
+  const [allRules, setAllRules] = useState<ComplianceRuleOption[]>([]);
+  const [recNodes, setRecNodes] = useState<NodeItem[]>([]);
+  const [tags, setTags] = useState<ReportNodeTagOption[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/compliance-policies?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setPolicies(Array.isArray(d) ? d : []));
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: NodeItem[]) => setRecNodes(Array.isArray(d) ? d : []));
+    fetch(`/api/node-tags?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d: ReportNodeTagOption[]) => setTags(Array.isArray(d) ? d : []));
+  }, [current]);
+
+  useEffect(() => {
+    if (!block.policyIds || block.policyIds.length === 0) { setAllRules([]); return; }
+    Promise.all(block.policyIds.map((pid) =>
+      fetch(`/api/compliance-policies/${pid}/rules`)
+        .then((r) => (r.ok ? r.json() : { folder: null, extraRules: [] }))
+    )).then((results) => {
+      const merged: ComplianceRuleOption[] = [];
+      const seen = new Set<number>();
+      for (const d of results) {
+        const fromTree = flattenRulesFromTree(d?.folder);
+        const extras: ComplianceRuleOption[] = Array.isArray(d?.extraRules) ? d.extraRules : [];
+        for (const r of [...fromTree, ...extras]) {
+          if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); }
+        }
+      }
+      merged.sort((a, b) => (a.identifier ?? "").localeCompare(b.identifier ?? "") || a.name.localeCompare(b.name));
+      setAllRules(merged);
+    });
+  }, [block.policyIds]);
+
+  const togglePolicyId = (id: number) => {
+    const next = block.policyIds.includes(id)
+      ? block.policyIds.filter((x) => x !== id)
+      : [...block.policyIds, id];
+    updateBlock(block.id, { policyIds: next });
+  };
+
+  const toggleRuleId = (id: number) => {
+    const next = block.ruleIds.includes(id)
+      ? block.ruleIds.filter((x) => x !== id)
+      : [...block.ruleIds, id];
+    updateBlock(block.id, { ruleIds: next });
+  };
+
+  const toggleTagId = (id: number) => {
+    const next = block.nodeTagIds.includes(id)
+      ? block.nodeTagIds.filter((x) => x !== id)
+      : [...block.nodeTagIds, id];
+    updateBlock(block.id, { nodeTagIds: next });
+  };
+
+  const toggleNodeId = (id: number) => {
+    const next = block.nodeIds.includes(id)
+      ? block.nodeIds.filter((x) => x !== id)
+      : [...block.nodeIds, id];
+    updateBlock(block.id, { nodeIds: next });
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceRecPolicies")}</label>
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+          {policies.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">{t("structure.complianceRecNoPolicy")}</div>}
+          {policies.map((p) => (
+            <label key={p.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+              <input
+                type="checkbox"
+                checked={block.policyIds.includes(p.id)}
+                onChange={() => togglePolicyId(p.id)}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+              />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{p.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {block.policyIds.length > 0 && (
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.complianceRecRules")}</label>
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{t("structure.complianceRecRulesHelp")}</p>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+            {allRules.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">{t("structure.complianceRecNoRule")}</div>}
+            {allRules.map((r) => (
+              <label key={r.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <input
+                  type="checkbox"
+                  checked={block.ruleIds.includes(r.id)}
+                  onChange={() => toggleRuleId(r.id)}
+                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="text-sm text-slate-700 dark:text-slate-300">{r.identifier ? `[${r.identifier}] ` : ""}{r.name}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceRecScope")}</label>
+        <div className="flex gap-2">
+          {(["all", "tag", "device"] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => updateBlock(block.id, { scope: s })}
+              className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                block.scope === s
+                  ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                  : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+              }`}
+            >
+              {t(`structure.complianceRecScope_${s}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {block.scope === "tag" && (
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.complianceRecTags")}</label>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 max-h-40 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+            {tags.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">{t("structure.complianceRecNoTag")}</div>}
+            {tags.map((tg) => (
+              <label key={tg.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <input
+                  type="checkbox"
+                  checked={block.nodeTagIds.includes(tg.id)}
+                  onChange={() => toggleTagId(tg.id)}
+                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="inline-flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tg.color }} />
+                  {tg.name}
+                </span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {block.scope === "device" && (
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.complianceRecDevices")}</label>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+            {recNodes.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">{t("structure.complianceRecNoDevice")}</div>}
+            {recNodes.map((n) => (
+              <label key={n.id} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <input
+                  type="checkbox"
+                  checked={block.nodeIds.includes(n.id)}
+                  onChange={() => toggleNodeId(n.id)}
+                  className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+                />
+                <span className="text-sm text-slate-700 dark:text-slate-300">{(n.hostname || n.name || n.ipAddress)} ({n.ipAddress})</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showRecommendation}
+            onChange={(e) => updateBlock(block.id, { showRecommendation: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceRecShowRecommendation")}</span>
+        </label>
+
+        {block.showRecommendation && (
+          <div className="ml-6 space-y-1.5">
+            <label className={labelClass}>{t("structure.complianceRecRecommendationFormat")}</label>
+            <div className="flex gap-2">
+              {(["text", "cli"] as const).map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => updateBlock(block.id, { recommendationFormat: f })}
+                  className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                    block.recommendationFormat === f
+                      ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                  }`}
+                >
+                  {t(`structure.complianceRecFormat_${f}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={6}
+            max={14}
+            step={0.5}
+            value={block.fontSize ?? 9}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
         </div>
       </div>
     </div>

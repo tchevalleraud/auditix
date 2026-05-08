@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch, Lightbulb } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -82,6 +82,8 @@ interface ComplianceResultEntry {
   status: string;
   severity: string | null;
   message: string | null;
+  messageLong: string | null;
+  recommendation: string | null;
   evaluatedAt: string;
 }
 
@@ -196,6 +198,7 @@ export default function NodeDetailPage() {
   const [pinging, setPinging] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [expandedCompliancePolicies, setExpandedCompliancePolicies] = useState<Set<number>>(new Set());
+  const [expandedRecommendations, setExpandedRecommendations] = useState<Set<string>>(new Set());
   const [scoreCalcOpen, setScoreCalcOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
@@ -1491,21 +1494,45 @@ export default function NodeDetailPage() {
                               : r.severity === "medium" ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-500/20 dark:text-yellow-400"
                               : r.severity === "low" ? "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400"
                               : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400";
+                            const recoKey = `${pr.policy.id}-${r.ruleId}`;
+                            const recoExpanded = expandedRecommendations.has(recoKey);
+                            const longHtml = r.messageLong || (r.message ? `<p>${r.message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>` : "");
                             return (
-                              <div key={r.ruleId} className="flex items-center gap-3 px-4 py-2.5 pl-14">
-                                {statusIcon}
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {r.ruleIdentifier && <code className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 font-mono">{r.ruleIdentifier}</code>}
-                                    <span className="text-sm text-slate-900 dark:text-slate-100">{r.ruleName}</span>
-                                    {r.severity && r.status === "non_compliant" && (
-                                      <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                              <div key={r.ruleId} className="px-4 py-2.5 pl-14">
+                                <div className="flex items-center gap-3">
+                                  {statusIcon}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {r.ruleIdentifier && <code className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 rounded px-1.5 py-0.5 font-mono">{r.ruleIdentifier}</code>}
+                                      <span className="text-sm text-slate-900 dark:text-slate-100">{r.ruleName}</span>
+                                      {r.severity && r.status === "non_compliant" && (
+                                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${sevCls}`}>{r.severity}</span>
+                                      )}
+                                    </div>
+                                    {r.ruleDescription && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{r.ruleDescription}</p>}
+                                  </div>
+                                </div>
+                                {longHtml && (
+                                  <div
+                                    className="prose prose-sm dark:prose-invert max-w-none mt-2 ml-7 text-xs text-slate-600 dark:text-slate-300 [&_ul]:my-1 [&_ol]:my-1 [&_p]:my-1"
+                                    dangerouslySetInnerHTML={{ __html: longHtml }}
+                                  />
+                                )}
+                                {r.recommendation && (
+                                  <div className="mt-2 ml-7">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpandedRecommendations((prev) => { const next = new Set(prev); next.has(recoKey) ? next.delete(recoKey) : next.add(recoKey); return next; })}
+                                      className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
+                                    >
+                                      {recoExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                      <Lightbulb className="h-3 w-3" />
+                                      {t("compliance.recommendation")}
+                                    </button>
+                                    {recoExpanded && (
+                                      <pre className="mt-1.5 px-3 py-2 rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">{r.recommendation}</pre>
                                     )}
                                   </div>
-                                  {r.ruleDescription && <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{r.ruleDescription}</p>}
-                                </div>
-                                {r.message && (
-                                  <span className="text-xs text-slate-500 dark:text-slate-400 shrink-0 max-w-xs truncate text-right">{r.message}</span>
                                 )}
                               </div>
                             );
