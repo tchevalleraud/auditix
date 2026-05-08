@@ -56,6 +56,7 @@ import {
   ArrowDownAZ,
   GitCompare,
   Columns3,
+  ArrowLeftRight,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -504,6 +505,27 @@ export interface ComparisonDetailBlock {
   pageBreakBefore?: boolean;
 }
 
+export type InventoryDiffScope = "all" | "node" | "tag";
+
+export interface InventoryDiffBlock {
+  id: string;
+  type: "inventory_diff";
+  tag1: string;
+  tag2: string;
+  tag1Label?: string;
+  tag2Label?: string;
+  categoryName: string;
+  entryKey: string;
+  colLabel: string;
+  scope: InventoryDiffScope;
+  nodeId: number | null;
+  tagIds: number[];
+  showOnlyDiffs: boolean;
+  showHeader: boolean;
+  fontSize?: number;
+  pageBreakBefore?: boolean;
+}
+
 // === Timeline ===
 export interface TimelineBlock {
   id: string;
@@ -528,7 +550,7 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -630,6 +652,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "action_list", labelKey: "structure.addActionList", icon: <ClipboardList className="h-4 w-4 text-rose-500" /> },
       { type: "comparison_summary", labelKey: "structure.addComparisonSummary", icon: <GitCompare className="h-4 w-4 text-pink-500" /> },
       { type: "comparison_detail", labelKey: "structure.addComparisonDetail", icon: <Columns3 className="h-4 w-4 text-pink-500" /> },
+      { type: "inventory_diff", labelKey: "structure.addInventoryDiff", icon: <ArrowLeftRight className="h-4 w-4 text-pink-500" /> },
     ],
   },
 ];
@@ -810,6 +833,22 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         presentTemplate: "-",
         missingTemplate: "{{ key }} est manquant",
         differentTemplate: "",
+        showHeader: true,
+        pageBreakBefore: false,
+      };
+    } else if (type === "inventory_diff") {
+      block = {
+        id,
+        type: "inventory_diff",
+        tag1: "",
+        tag2: "",
+        categoryName: "",
+        entryKey: "",
+        colLabel: "",
+        scope: "all",
+        nodeId: null,
+        tagIds: [],
+        showOnlyDiffs: false,
         showHeader: true,
         pageBreakBefore: false,
       };
@@ -1033,6 +1072,14 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyComparisonDetail")}</span>;
     }
+    if (block.type === "inventory_diff") {
+      if (block.tag1 && block.tag2 && block.categoryName && block.colLabel) {
+        const scope = block.scope === "all" ? "all" : block.scope === "node" ? `device #${block.nodeId ?? "?"}` : `${block.tagIds.length} tags`;
+        const cell = `${block.categoryName} / ${block.entryKey || "*"} / ${block.colLabel}`;
+        return <span className="text-slate-500 text-xs">{t("structure.inventoryDiff")} — {block.tag1} ↔ {block.tag2} — {cell} — {scope}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyInventoryDiff")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -1163,6 +1210,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-pink-100 dark:bg-pink-500/15 px-2 py-0.5 text-[11px] font-bold text-pink-600 dark:text-pink-400">
           <Columns3 className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "inventory_diff") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-pink-100 dark:bg-pink-500/15 px-2 py-0.5 text-[11px] font-bold text-pink-600 dark:text-pink-400">
+          <ArrowLeftRight className="h-3 w-3" />
         </span>
       );
     }
@@ -1407,6 +1461,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "comparison_detail" && (
                 <ComparisonDetailProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "inventory_diff" && (
+                <InventoryDiffProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
             </div>
           </div>
@@ -7744,6 +7801,294 @@ function ComparisonSummaryProperties({
             checked={!!block.pageBreakBefore}
             onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
             className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.pageBreakBefore")}</span>
+        </label>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.fontSize")}</span>
+          <input
+            type="number"
+            min={6}
+            max={24}
+            value={block.fontSize ?? ""}
+            onChange={(e) => updateField("fontSize", e.target.value ? Number(e.target.value) : undefined)}
+            placeholder="-"
+            className={`${inputClass} w-20`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- Inventory Diff properties ---
+function InventoryDiffProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: InventoryDiffBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+  const [tagNames, setTagNames] = useState<string[]>([]);
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [allTags, setAllTags] = useState<InvTagItem[]>([]);
+  const [nodeSearch, setNodeSearch] = useState("");
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setStructure)
+      .catch(() => {});
+    fetch(`/api/inventory-categories/tags?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setTagNames)
+      .catch(() => {});
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAllNodes)
+      .catch(() => {});
+    fetch(`/api/node-tags?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setAllTags)
+      .catch(() => {});
+  }, [current]);
+
+  const updateField = <K extends keyof InventoryDiffBlock>(key: K, value: InventoryDiffBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  const cat = structure.find((c) => c.categoryName === block.categoryName);
+  const entryKeys = cat ? Array.from(new Set(cat.entries.map((e) => e.key))) : [];
+  const colLabels = (() => {
+    if (!cat) return [];
+    if (block.entryKey) {
+      const entry = cat.entries.find((e) => e.key === block.entryKey);
+      return entry ? Array.from(new Set(entry.columns)) : [];
+    }
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+    return Array.from(labels);
+  })();
+
+  const nodeLabel = (n: NodeItem) => n.hostname || n.name || n.ipAddress;
+  const filteredNodes = allNodes.filter((n) =>
+    nodeSearch === "" ||
+    (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+    (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+    n.ipAddress.includes(nodeSearch)
+  );
+
+  const toggleNodeTag = (id: number) => {
+    const cur = block.tagIds ?? [];
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    updateField("tagIds", next);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>
+            {t("structure.invDiffTag1")} <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={block.tag1}
+            onChange={(e) => updateField("tag1", e.target.value)}
+            className={`${inputClass} ${block.tag1 === "" ? "border-red-400 dark:border-red-500 ring-1 ring-red-400/20" : ""}`}
+          >
+            <option value="">{t("structure.invDiffPickTag")}</option>
+            {tagNames.map((tn) => (
+              <option key={tn} value={tn}>{tn}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.tag1Label ?? ""}
+            onChange={(e) => updateField("tag1Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>
+            {t("structure.invDiffTag2")} <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={block.tag2}
+            onChange={(e) => updateField("tag2", e.target.value)}
+            className={`${inputClass} ${block.tag2 === "" ? "border-red-400 dark:border-red-500 ring-1 ring-red-400/20" : ""}`}
+          >
+            <option value="">{t("structure.invDiffPickTag")}</option>
+            {tagNames.map((tn) => (
+              <option key={tn} value={tn}>{tn}</option>
+            ))}
+          </select>
+          <input
+            type="text"
+            value={block.tag2Label ?? ""}
+            onChange={(e) => updateField("tag2Label", e.target.value)}
+            placeholder={t("structure.cmpCustomLabel")}
+            className={inputClass}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <label className={labelClass}>
+            {t("structure.cmpCategory")} <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={block.categoryName}
+            onChange={(e) => updateField("categoryName", e.target.value)}
+            className={`${inputClass} ${block.categoryName === "" ? "border-red-400 dark:border-red-500 ring-1 ring-red-400/20" : ""}`}
+          >
+            <option value="">{t("structure.cmpPickCategory")}</option>
+            {structure.map((s) => (
+              <option key={s.categoryName} value={s.categoryName}>{s.categoryName}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.invDiffEntryKey")}</label>
+          <select
+            value={block.entryKey}
+            onChange={(e) => updateField("entryKey", e.target.value)}
+            disabled={!cat}
+            className={`${inputClass} disabled:opacity-50`}
+          >
+            <option value="">{t("structure.invDiffAllKeys")}</option>
+            {entryKeys.map((k) => (
+              <option key={k} value={k}>{k}</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>
+            {t("structure.invDiffColLabel")} <span className="text-red-500">*</span>
+          </label>
+          <select
+            value={block.colLabel}
+            onChange={(e) => updateField("colLabel", e.target.value)}
+            disabled={!cat}
+            className={`${inputClass} disabled:opacity-50 ${block.colLabel === "" ? "border-red-400 dark:border-red-500 ring-1 ring-red-400/20" : ""}`}
+          >
+            <option value="">{t("structure.invDiffPickColLabel")}</option>
+            {colLabels.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+        <label className={labelClass}>{t("structure.invDiffScope")}</label>
+        <div className="grid grid-cols-3 gap-2">
+          {(["all", "node", "tag"] as InventoryDiffScope[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => updateField("scope", m)}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                block.scope === m
+                  ? "border-pink-500 bg-pink-50 dark:bg-pink-500/10 text-pink-700 dark:text-pink-300"
+                  : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {t(m === "all" ? "structure.invDiffScopeAll" : m === "node" ? "structure.invDiffScopeNode" : "structure.invDiffScopeTag")}
+            </button>
+          ))}
+        </div>
+
+        {block.scope === "all" && (
+          <p className="text-[10px] italic text-slate-400 px-1">{t("structure.invDiffScopeAllHint")}</p>
+        )}
+
+        {block.scope === "node" && (
+          <div className="space-y-2">
+            <input
+              type="text"
+              placeholder={t("structure.searchNodes")}
+              value={nodeSearch}
+              onChange={(e) => setNodeSearch(e.target.value)}
+              className="w-full rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-xs"
+            />
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {filteredNodes.map((n) => {
+                const checked = block.nodeId === n.id;
+                return (
+                  <label key={n.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`invdiff-node-${block.id}`}
+                      checked={checked}
+                      onChange={() => updateField("nodeId", n.id)}
+                    />
+                    <span className="text-xs text-slate-700 dark:text-slate-300 truncate">{nodeLabel(n)}</span>
+                    <span className="text-[10px] font-mono text-slate-400 ml-auto">{n.ipAddress}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {block.scope === "tag" && (
+          <div className="space-y-2">
+            <p className="text-[10px] italic text-slate-400">{t("structure.invDiffScopeTagHint")} ({(block.tagIds ?? []).length})</p>
+            <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+              {allTags.map((tg) => {
+                const active = (block.tagIds ?? []).includes(tg.id);
+                return (
+                  <button
+                    key={tg.id}
+                    type="button"
+                    onClick={() => toggleNodeTag(tg.id)}
+                    style={active ? { backgroundColor: tg.color, borderColor: tg.color, color: "#fff" } : { borderColor: tg.color, color: tg.color }}
+                    className="rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-opacity hover:opacity-80"
+                  >
+                    {tg.name}
+                  </button>
+                );
+              })}
+              {allTags.length === 0 && (
+                <p className="text-[10px] italic text-slate-400">{t("structure.chartNoTags")}</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-6">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showOnlyDiffs}
+            onChange={(e) => updateField("showOnlyDiffs", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-pink-500 focus:ring-pink-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cmpShowOnlyDiffs")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showHeader}
+            onChange={(e) => updateField("showHeader", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-pink-500 focus:ring-pink-500/20 h-4 w-4"
+          />
+          <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.cmpShowHeader")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!block.pageBreakBefore}
+            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+            className="rounded border-slate-300 dark:border-slate-600 text-pink-500 focus:ring-pink-500/20 h-4 w-4"
           />
           <span className="text-sm text-slate-600 dark:text-slate-400">{t("structure.pageBreakBefore")}</span>
         </label>

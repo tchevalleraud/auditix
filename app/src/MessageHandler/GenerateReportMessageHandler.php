@@ -3,6 +3,7 @@
 namespace App\MessageHandler;
 
 use App\Entity\Collection;
+use App\Doctrine\Filter\LatestInventoryFilter;
 use App\Entity\Node;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\NodeTag;
@@ -3482,7 +3483,7 @@ class GenerateReportMessageHandler
                 $cmpNode2Id = (int) ($block['node2Id'] ?? 0);
                 $cmpComparisons = $block['comparisons'] ?? [];
                 $cmpShowHeader = !empty($block['showHeader']);
-                $cmpFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : ($styles['table']['fontSize'] ?? $bodySize);
+                $cmpFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : (!empty($styles['table']['fontSize']) ? (int) $styles['table']['fontSize'] : $bodySize);
 
                 if (!$cmpNode1Id || !$cmpNode2Id || empty($cmpComparisons)) {
                     continue;
@@ -3741,7 +3742,7 @@ class GenerateReportMessageHandler
                 $cdMatchColumns = $block['matchColumns'] ?? [];
                 if (!is_array($cdMatchColumns)) $cdMatchColumns = [];
                 $cdShowHeader = !empty($block['showHeader']);
-                $cdFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : ($styles['table']['fontSize'] ?? $bodySize);
+                $cdFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : (!empty($styles['table']['fontSize']) ? (int) $styles['table']['fontSize'] : $bodySize);
 
                 if (!$cdNode1Id || !$cdNode2Id || $cdCat === '') {
                     continue;
@@ -3918,6 +3919,278 @@ class GenerateReportMessageHandler
                     $pdf->Ln($pSpaceAfter);
                 }
                 $prevType = 'comparison_detail';
+
+            } elseif ($type === 'inventory_diff') {
+                $idTag1 = trim((string) ($block['tag1'] ?? ''));
+                $idTag2 = trim((string) ($block['tag2'] ?? ''));
+                $idCat = (string) ($block['categoryName'] ?? '');
+                $idEntryKey = (string) ($block['entryKey'] ?? '');
+                $idCol = (string) ($block['colLabel'] ?? '');
+                $idScope = (string) ($block['scope'] ?? 'all');
+                if (!in_array($idScope, ['all', 'node', 'tag'], true)) $idScope = 'all';
+                $idShowOnlyDiffs = !empty($block['showOnlyDiffs']);
+                $idShowHeader = !empty($block['showHeader']);
+                $idFontSize = !empty($block['fontSize']) ? (int) $block['fontSize'] : (!empty($styles['table']['fontSize']) ? (int) $styles['table']['fontSize'] : $bodySize);
+
+                if ($idTag1 === '' || $idTag2 === '' || $idCat === '' || $idCol === '') {
+                    continue;
+                }
+
+                // Resolve target nodes
+                $targetNodes = [];
+                if ($forNode) {
+                    $targetNodes = [$forNode];
+                } else {
+                    $reportContext = $report?->getContext();
+                    if (!$reportContext) {
+                        continue;
+                    }
+                    if ($idScope === 'node') {
+                        $nid = (int) ($block['nodeId'] ?? 0);
+                        if ($nid > 0) {
+                            $n = $this->em->getRepository(Node::class)->find($nid);
+                            if ($n && $n->getContext() === $reportContext) {
+                                $targetNodes = [$n];
+                            }
+                        }
+                    } elseif ($idScope === 'tag') {
+                        $tagIds = array_map('intval', (array) ($block['tagIds'] ?? []));
+                        if (!empty($tagIds)) {
+                            $candidates = $this->em->getRepository(Node::class)->findBy(['context' => $reportContext]);
+                            foreach ($candidates as $n) {
+                                foreach ($n->getTags() as $tg) {
+                                    if (in_array((int) $tg->getId(), $tagIds, true)) {
+                                        $targetNodes[] = $n;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        $targetNodes = $this->em->getRepository(Node::class)->findBy(['context' => $reportContext]);
+                    }
+                }
+
+                if (empty($targetNodes)) {
+                    continue;
+                }
+
+                // Disable the LatestInventoryFilter so we can read both tag snapshots.
+                $filters = $this->em->getFilters();
+                $hadFilter = $filters->isEnabled(LatestInventoryFilter::NAME);
+                if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+                try {
+                    $invRepoDiff = $this->em->getRepository(NodeInventoryEntry::class);
+                    $loadValues = function (Node $n, string $tagName) use ($invRepoDiff, $idCat, $idEntryKey, $idCol): array {
+                        $qb = $invRepoDiff->createQueryBuilder('e')
+                            ->select('e.entryKey AS k, e.value AS v')
+                            ->innerJoin('e.collectionTag', 't')
+                            ->where('e.node = :n')
+                            ->andWhere('e.categoryName = :cat')
+                            ->andWhere('e.colLabel = :col')
+                            ->andWhere('t.name = :tag')
+                            ->setParameter('n', $n)
+                            ->setParameter('cat', $idCat)
+                            ->setParameter('col', $idCol)
+                            ->setParameter('tag', $tagName);
+                        if ($idEntryKey !== '') {
+                            $qb->andWhere('e.entryKey = :ek')->setParameter('ek', $idEntryKey);
+                        }
+                        $rows = $qb->getQuery()->getArrayResult();
+                        $byKey = [];
+                        foreach ($rows as $r) {
+                            $k = (string) ($r['k'] ?? '');
+                            $byKey[$k] = (string) ($r['v'] ?? '');
+                        }
+                        return $byKey;
+                    };
+
+                    // Build (node, key) → (v1, v2)
+                    $idRows = [];
+                    foreach ($targetNodes as $n) {
+                        $v1 = $loadValues($n, $idTag1);
+                        $v2 = $loadValues($n, $idTag2);
+                        $allKeys = array_values(array_unique(array_merge(array_keys($v1), array_keys($v2))));
+                        sort($allKeys, SORT_NATURAL | SORT_FLAG_CASE);
+                        if (empty($allKeys)) {
+                            // No data for either tag — still show node with empty values when not "diffs only"
+                            if (!$idShowOnlyDiffs) {
+                                $idRows[] = [
+                                    'node' => $n,
+                                    'key' => $idEntryKey,
+                                    'v1' => '',
+                                    'v2' => '',
+                                    'differs' => false,
+                                ];
+                            }
+                            continue;
+                        }
+                        foreach ($allKeys as $k) {
+                            $a = $v1[$k] ?? '';
+                            $b = $v2[$k] ?? '';
+                            $differs = ($a !== $b);
+                            if ($idShowOnlyDiffs && !$differs) continue;
+                            $idRows[] = [
+                                'node' => $n,
+                                'key' => $k,
+                                'v1' => $a,
+                                'v2' => $b,
+                                'differs' => $differs,
+                            ];
+                        }
+                    }
+                } finally {
+                    if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+                }
+
+                if (empty($idRows)) {
+                    continue;
+                }
+
+                if ($firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                if (!empty($block['pageBreakBefore'])) {
+                    $pdf->AddPage();
+                }
+
+                $tableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $headerBg = $this->hexToRgb($tableStyle['headerBg'] ?? '#1e293b');
+                $headerColor = $this->hexToRgb($tableStyle['headerColor'] ?? '#ffffff');
+                $borderColor = $this->hexToRgb($tableStyle['borderColor'] ?? '#e2e8f0');
+                $alternateRows = $tableStyle['alternateRows'] ?? true;
+                $alternateBg = $this->hexToRgb($tableStyle['alternateBg'] ?? '#f8fafc');
+                $diffBg = $this->hexToRgb('#fef3c7');
+
+                $idTag1Label = (string) ($block['tag1Label'] ?? '');
+                if ($idTag1Label === '') $idTag1Label = $idTag1;
+                $idTag2Label = (string) ($block['tag2Label'] ?? '');
+                if ($idTag2Label === '') $idTag2Label = $idTag2;
+
+                $multiNode = count($targetNodes) > 1;
+                $multiKey = ($idEntryKey === '');
+                $columns = [];
+                if ($multiNode) $columns[] = 'equipment';
+                if ($multiKey) $columns[] = 'key';
+                $columns[] = 'v1';
+                $columns[] = 'v2';
+
+                $headerLabels = [];
+                foreach ($columns as $c) {
+                    if ($c === 'equipment') $headerLabels[] = 'Equipement';
+                    elseif ($c === 'key') $headerLabels[] = 'Clef';
+                    elseif ($c === 'v1') $headerLabels[] = $idTag1Label;
+                    elseif ($c === 'v2') $headerLabels[] = $idTag2Label;
+                }
+
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $colCount = count($columns);
+                $minLineH = $idFontSize * 0.3528 + 3;
+                $cellPadding = 6;
+
+                $cellOf = function (array $row, string $c) {
+                    $n = $row['node'];
+                    if ($c === 'equipment') return (string) ($n->getHostname() ?: $n->getName() ?: $n->getIpAddress() ?: '—');
+                    if ($c === 'key') return (string) $row['key'];
+                    if ($c === 'v1') return (string) $row['v1'];
+                    if ($c === 'v2') return (string) $row['v2'];
+                    return '';
+                };
+
+                $maxWidths = array_fill(0, $colCount, 0);
+                $pdf->SetFont($bodyFont, 'B', $idFontSize);
+                foreach ($headerLabels as $hi => $h) {
+                    $maxWidths[$hi] = max($maxWidths[$hi], $pdf->GetStringWidth($h) + $cellPadding);
+                }
+                $pdf->SetFont($bodyFont, '', $idFontSize);
+                foreach ($idRows as $row) {
+                    foreach ($columns as $ci => $c) {
+                        $text = $cellOf($row, $c);
+                        $maxWidths[$ci] = max($maxWidths[$ci], $pdf->GetStringWidth($text) + $cellPadding);
+                    }
+                }
+                $totalNatural = array_sum($maxWidths);
+                $colWidths = [];
+                if ($totalNatural < $contentW) {
+                    $extra = $contentW - $totalNatural;
+                    // Distribute extra width to value columns first
+                    $valueCols = [];
+                    foreach ($columns as $ci => $c) {
+                        if ($c === 'v1' || $c === 'v2') $valueCols[] = $ci;
+                    }
+                    $share = !empty($valueCols) ? ($extra / count($valueCols)) : 0;
+                    foreach ($maxWidths as $ci => $w) {
+                        $colWidths[$ci] = $w + (in_array($ci, $valueCols, true) ? $share : 0);
+                    }
+                } else {
+                    $scale = $contentW / max($totalNatural, 0.01);
+                    foreach ($maxWidths as $w) $colWidths[] = $w * $scale;
+                }
+
+                $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                if ($idShowHeader) {
+                    $pdf->SetFillColor($headerBg[0], $headerBg[1], $headerBg[2]);
+                    $pdf->SetTextColor($headerColor[0], $headerColor[1], $headerColor[2]);
+                    $pdf->SetFont($bodyFont, 'B', $idFontSize);
+                    $maxH = $minLineH;
+                    foreach ($headerLabels as $hi => $h) {
+                        $maxH = max($maxH, $pdf->getStringHeight($colWidths[$hi], $h) + 2);
+                    }
+                    $startY = $pdf->GetY();
+                    $startX = $mLeft;
+                    foreach ($headerLabels as $hi => $h) {
+                        $pdf->MultiCell($colWidths[$hi], $maxH, $h, 1, 'C', true, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                        $startX += $colWidths[$hi];
+                    }
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+
+                $pdf->SetFont($bodyFont, '', $idFontSize);
+                $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                foreach ($idRows as $ri => $row) {
+                    $maxH = $minLineH;
+                    foreach ($columns as $ci => $c) {
+                        $maxH = max($maxH, $pdf->getStringHeight($colWidths[$ci], $cellOf($row, $c)) + 2);
+                    }
+                    $startY = $pdf->GetY();
+                    if ($startY + $maxH > $pdf->getPageHeight() - $mBottom) {
+                        $pdf->AddPage();
+                        $startY = $pdf->GetY();
+                    }
+                    $altFill = $alternateRows && ($ri % 2 === 1);
+                    $startX = $mLeft;
+                    foreach ($columns as $ci => $c) {
+                        $highlight = $row['differs'] && ($c === 'v1' || $c === 'v2');
+                        if ($highlight) {
+                            $pdf->SetFillColor($diffBg[0], $diffBg[1], $diffBg[2]);
+                            $fill = true;
+                        } elseif ($altFill) {
+                            $pdf->SetFillColor($alternateBg[0], $alternateBg[1], $alternateBg[2]);
+                            $fill = true;
+                        } else {
+                            $fill = false;
+                        }
+                        $align = ($c === 'v1' || $c === 'v2') ? 'L' : 'L';
+                        $pdf->MultiCell($colWidths[$ci], $maxH, $cellOf($row, $c), 1, $align, $fill, 0, $startX, $startY, true, 0, false, true, $maxH, 'M');
+                        $startX += $colWidths[$ci];
+                    }
+                    $pdf->SetXY($mLeft, $startY + $maxH);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+                $prevType = 'inventory_diff';
             }
         }
     }
