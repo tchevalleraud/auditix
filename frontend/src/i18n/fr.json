@@ -2299,6 +2299,11 @@
   "structure": {
     "blocks": "Blocs du document",
     "addBlock": "Ajouter un bloc",
+    "catContent": "Contenu",
+    "catInventory": "Inventaire",
+    "catCompliance": "Conformite",
+    "catCharts": "Visualisations",
+    "catActions": "Actions et comparaison",
     "addHeading": "Titre",
     "addParagraph": "Paragraphe",
     "empty": "Ajoutez des blocs pour structurer votre document",

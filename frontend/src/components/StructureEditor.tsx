@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo, type ReactNode } from "react";
 import {
   Plus,
   Trash2,
@@ -578,6 +578,116 @@ const inputClass =
 
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
+// --- Block menu categories (shared between header dropdown and inline insert) ---
+type BlockMenuItem = { type: ReportBlock["type"]; labelKey: string; icon: ReactNode };
+type BlockCategoryDef = { labelKey: string; icon: ReactNode; items: BlockMenuItem[] };
+
+const BLOCK_CATEGORIES: BlockCategoryDef[] = [
+  {
+    labelKey: "structure.catContent",
+    icon: <FileText className="h-4 w-4 text-slate-500" />,
+    items: [
+      { type: "heading", labelKey: "structure.addHeading", icon: <Type className="h-4 w-4 text-indigo-500" /> },
+      { type: "paragraph", labelKey: "structure.addParagraph", icon: <AlignLeft className="h-4 w-4 text-emerald-500" /> },
+      { type: "image", labelKey: "structure.addImage", icon: <ImageIcon className="h-4 w-4 text-amber-500" /> },
+      { type: "table", labelKey: "structure.addTable", icon: <Table2 className="h-4 w-4 text-cyan-500" /> },
+    ],
+  },
+  {
+    labelKey: "structure.catInventory",
+    icon: <Server className="h-4 w-4 text-violet-500" />,
+    items: [
+      { type: "inventory_table", labelKey: "structure.addInventoryTable", icon: <Server className="h-4 w-4 text-violet-500" /> },
+      { type: "equipment_list", labelKey: "structure.addEquipmentList", icon: <ListChecks className="h-4 w-4 text-purple-500" /> },
+      { type: "command_list", labelKey: "structure.addCommandList", icon: <TerminalSquare className="h-4 w-4 text-teal-500" /> },
+      { type: "topology", labelKey: "structure.addTopology", icon: <Network className="h-4 w-4 text-violet-500" /> },
+      { type: "cli_command", labelKey: "structure.addCliCommand", icon: <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span> },
+    ],
+  },
+  {
+    labelKey: "structure.catCompliance",
+    icon: <ShieldCheck className="h-4 w-4 text-green-500" />,
+    items: [
+      { type: "compliance_matrix", labelKey: "structure.addComplianceMatrix", icon: <ShieldCheck className="h-4 w-4 text-green-500" /> },
+      { type: "rule_non_compliant", labelKey: "structure.addRuleNonCompliant", icon: <ShieldAlert className="h-4 w-4 text-red-500" /> },
+      { type: "rule_nodes_table", labelKey: "structure.addRuleNodesTable", icon: <Activity className="h-4 w-4 text-sky-500" /> },
+      { type: "rule_recommendation", labelKey: "structure.addRuleRecommendation", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
+    ],
+  },
+  {
+    labelKey: "structure.catCharts",
+    icon: <BarChart3 className="h-4 w-4 text-blue-500" />,
+    items: [
+      { type: "chart_static", labelKey: "structure.addChartStatic", icon: <BarChart3 className="h-4 w-4 text-blue-500" /> },
+      { type: "chart_inventory", labelKey: "structure.addChartInventory", icon: <PieChart className="h-4 w-4 text-fuchsia-500" /> },
+      { type: "timeline", labelKey: "structure.addTimeline", icon: <CalendarClock className="h-4 w-4 text-orange-500" /> },
+    ],
+  },
+  {
+    labelKey: "structure.catActions",
+    icon: <ClipboardList className="h-4 w-4 text-rose-500" />,
+    items: [
+      { type: "action_list", labelKey: "structure.addActionList", icon: <ClipboardList className="h-4 w-4 text-rose-500" /> },
+      { type: "comparison_summary", labelKey: "structure.addComparisonSummary", icon: <GitCompare className="h-4 w-4 text-pink-500" /> },
+      { type: "comparison_detail", labelKey: "structure.addComparisonDetail", icon: <Columns3 className="h-4 w-4 text-pink-500" /> },
+    ],
+  },
+];
+
+function BlockMenu({
+  onPick,
+  side,
+  verticalAnchor,
+  t,
+}: {
+  onPick: (type: ReportBlock["type"]) => void;
+  side: "left" | "right";
+  verticalAnchor: "top" | "bottom";
+  t: (key: string) => string;
+}) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const subMenuHorizontal = side === "right" ? "left-full ml-1" : "right-full mr-1";
+  const subMenuVertical = verticalAnchor === "top" ? "top-0" : "bottom-0";
+
+  return (
+    <div className="py-1" onMouseLeave={() => setHoverIdx(null)}>
+      {BLOCK_CATEGORIES.map((cat, ci) => {
+        const active = hoverIdx === ci;
+        return (
+          <div key={cat.labelKey} className="relative" onMouseEnter={() => setHoverIdx(ci)}>
+            <button
+              type="button"
+              className={`flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors ${active ? "bg-slate-50 dark:bg-slate-700" : ""}`}
+            >
+              {side === "left" && <ChevronLeft className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+              <span className="flex flex-1 items-center gap-2.5 min-w-0">
+                {cat.icon}
+                <span className="truncate">{t(cat.labelKey)}</span>
+              </span>
+              {side === "right" && <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />}
+            </button>
+            {active && (
+              <div className={`absolute ${subMenuHorizontal} ${subMenuVertical} z-40 min-w-56 w-max rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1`}>
+                {cat.items.map((item) => (
+                  <button
+                    key={item.type}
+                    type="button"
+                    onClick={() => onPick(item.type)}
+                    className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
+                  >
+                    <span className="shrink-0 inline-flex">{item.icon}</span>
+                    <span>{t(item.labelKey)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
@@ -1081,83 +1191,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               <ChevronDownIcon className="h-3.5 w-3.5" />
             </button>
             {addMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 w-52 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg py-1">
-                <button onClick={() => { addBlock("heading"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Type className="h-4 w-4 text-indigo-500" />
-                  {t("structure.addHeading")}
-                </button>
-                <button onClick={() => { addBlock("paragraph"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <AlignLeft className="h-4 w-4 text-emerald-500" />
-                  {t("structure.addParagraph")}
-                </button>
-                <button onClick={() => { addBlock("image"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ImageIcon className="h-4 w-4 text-amber-500" />
-                  {t("structure.addImage")}
-                </button>
-                <button onClick={() => { addBlock("table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Table2 className="h-4 w-4 text-cyan-500" />
-                  {t("structure.addTable")}
-                </button>
-                <button onClick={() => { addBlock("inventory_table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Server className="h-4 w-4 text-violet-500" />
-                  {t("structure.addInventoryTable")}
-                </button>
-                <button onClick={() => { addBlock("cli_command"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span>
-                  {t("structure.addCliCommand")}
-                </button>
-                <button onClick={() => { addBlock("equipment_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ListChecks className="h-4 w-4 text-purple-500" />
-                  {t("structure.addEquipmentList")}
-                </button>
-                <button onClick={() => { addBlock("action_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ClipboardList className="h-4 w-4 text-rose-500" />
-                  {t("structure.addActionList")}
-                </button>
-                <button onClick={() => { addBlock("command_list"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <TerminalSquare className="h-4 w-4 text-teal-500" />
-                  {t("structure.addCommandList")}
-                </button>
-                <button onClick={() => { addBlock("topology"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Network className="h-4 w-4 text-violet-500" />
-                  {t("structure.addTopology")}
-                </button>
-                <button onClick={() => { addBlock("compliance_matrix"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ShieldCheck className="h-4 w-4 text-green-500" />
-                  {t("structure.addComplianceMatrix")}
-                </button>
-                <button onClick={() => { addBlock("rule_non_compliant"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ShieldAlert className="h-4 w-4 text-red-500" />
-                  {t("structure.addRuleNonCompliant")}
-                </button>
-                <button onClick={() => { addBlock("rule_nodes_table"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <ShieldQuestion className="h-4 w-4 text-sky-500" />
-                  {t("structure.addRuleNodesTable")}
-                </button>
-                <button onClick={() => { addBlock("rule_recommendation"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Lightbulb className="h-4 w-4 text-amber-500" />
-                  {t("structure.addRuleRecommendation")}
-                </button>
-                <button onClick={() => { addBlock("chart_static"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <BarChart3 className="h-4 w-4 text-blue-500" />
-                  {t("structure.addChartStatic")}
-                </button>
-                <button onClick={() => { addBlock("chart_inventory"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <PieChart className="h-4 w-4 text-fuchsia-500" />
-                  {t("structure.addChartInventory")}
-                </button>
-                <button onClick={() => { addBlock("timeline"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <CalendarClock className="h-4 w-4 text-orange-500" />
-                  {t("structure.addTimeline")}
-                </button>
-                <button onClick={() => { addBlock("comparison_summary"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <GitCompare className="h-4 w-4 text-pink-500" />
-                  {t("structure.addComparisonSummary")}
-                </button>
-                <button onClick={() => { addBlock("comparison_detail"); setAddMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-                  <Columns3 className="h-4 w-4 text-pink-500" />
-                  {t("structure.addComparisonDetail")}
-                </button>
+              <div className="absolute right-0 top-full mt-1 z-30 w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg">
+                <BlockMenu
+                  onPick={(type) => { addBlock(type); setAddMenuOpen(false); }}
+                  side="left"
+                  verticalAnchor="top"
+                  t={t}
+                />
               </div>
             )}
           </div>
@@ -1173,22 +1213,33 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
           )}
 
           {blocks.length > 0 && (
-            <div className="divide-y divide-slate-100 dark:divide-slate-800/50">
+            <div className="divide-y divide-slate-100 dark:divide-slate-800/50 pb-3">
               {blocks.map((block, idx) => {
                 const depth = depths[idx];
                 const isDragOver = dragOverIdx === idx && dragIdx !== idx;
                 const borderColor = DEPTH_COLORS[Math.min(depth, DEPTH_COLORS.length - 1)];
 
                 return (
-                  <div key={block.id}>
-                    {/* Insert line before block */}
+                  <div key={block.id} className="relative group/block">
+                    {/* Floating + before this block */}
                     <InsertLine
                       index={idx}
+                      position="before"
                       activeIndex={insertMenuIdx}
                       onToggle={setInsertMenuIdx}
                       onInsert={insertBlock}
                       t={t}
                     />
+                    {idx === blocks.length - 1 && (
+                      <InsertLine
+                        index={blocks.length}
+                        position="after"
+                        activeIndex={insertMenuIdx}
+                        onToggle={setInsertMenuIdx}
+                        onInsert={insertBlock}
+                        t={t}
+                      />
+                    )}
 
                     <div className={`${dragIdx === idx ? "opacity-40" : ""}`}>
                       <div
@@ -1269,14 +1320,6 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 );
               })}
 
-              {/* Insert line after last block */}
-              <InsertLine
-                index={blocks.length}
-                activeIndex={insertMenuIdx}
-                onToggle={setInsertMenuIdx}
-                onInsert={insertBlock}
-                t={t}
-              />
             </div>
           )}
         </div>
@@ -1373,138 +1416,80 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
   );
 }
 
-// --- Insert line between blocks ---
+// --- Insert handle: floating + button overlaying a block edge ---
 function InsertLine({
   index,
+  position,
   activeIndex,
   onToggle,
   onInsert,
   t,
 }: {
   index: number;
+  position: "before" | "after";
   activeIndex: number | null;
   onToggle: (idx: number | null) => void;
   onInsert: (type: ReportBlock["type"], atIndex: number) => void;
   t: (key: string) => string;
 }) {
   const isActive = activeIndex === index;
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [openUpward, setOpenUpward] = useState(false);
+
+  useEffect(() => {
+    if (!isActive || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    setOpenUpward(spaceBelow < 260);
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    const onClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        onToggle(null);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isActive, onToggle]);
+
+  // Wrapper straddles the block edge so the 20px button is centered on it
+  // (10px above + 10px below). Then `pb-3` on the list reserves the trailing 10px.
+  const verticalClass =
+    position === "before" ? "top-0 -translate-y-1/2" : "bottom-0 translate-y-1/2";
 
   return (
-    <div className="group/insert relative flex items-center py-0.5 px-4">
-      {/* Line */}
-      <div className="flex-1 border-t border-dashed border-transparent group-hover/insert:border-slate-300 dark:group-hover/insert:border-slate-600 transition-colors" />
-
-      {/* + button */}
+    <div
+      ref={wrapperRef}
+      className={`pointer-events-none absolute ${verticalClass} left-0 right-0 z-20 h-5`}
+    >
       <button
-        onClick={() => onToggle(isActive ? null : index)}
-        className={`absolute left-1/2 -translate-x-1/2 flex items-center justify-center h-5 w-5 rounded-full border text-[10px] font-bold transition-all ${
+        ref={btnRef}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onToggle(isActive ? null : index); }}
+        className={`pointer-events-auto absolute left-0 top-0 flex items-center justify-center h-5 w-5 rounded-full border text-[10px] font-bold shadow-sm transition-all ${
           isActive
             ? "bg-blue-500 border-blue-500 text-white scale-100 opacity-100"
-            : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500 scale-0 opacity-0 group-hover/insert:scale-100 group-hover/insert:opacity-100"
+            : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500 scale-0 opacity-0 group-hover/block:scale-100 group-hover/block:opacity-100 hover:text-blue-500 hover:border-blue-400"
         }`}
       >
         <Plus className="h-3 w-3" />
       </button>
 
-      {/* Dropdown menu */}
       {isActive && (
-        <div className="absolute left-1/2 -translate-x-1/2 top-6 z-20 flex items-center gap-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg px-1.5 py-1">
-          <button
-            onClick={() => onInsert("heading", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <Type className="h-3.5 w-3.5" />
-            {t("structure.addHeading")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("paragraph", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <AlignLeft className="h-3.5 w-3.5" />
-            {t("structure.addParagraph")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("image", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <ImageIcon className="h-3.5 w-3.5" />
-            {t("structure.addImage")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("table", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <Table2 className="h-3.5 w-3.5" />
-            {t("structure.addTable")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("inventory_table", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <Server className="h-3.5 w-3.5" />
-            {t("structure.addInventoryTable")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("cli_command", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <span className="font-mono text-[10px] font-bold">&gt;_</span>
-            {t("structure.addCliCommand")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("equipment_list", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <ListChecks className="h-3.5 w-3.5" />
-            {t("structure.addEquipmentList")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button
-            onClick={() => onInsert("action_list", index)}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap"
-          >
-            <ClipboardList className="h-3.5 w-3.5" />
-            {t("structure.addActionList")}
-          </button>
-          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700" />
-          <button onClick={() => onInsert("command_list", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <TerminalSquare className="h-3.5 w-3.5" />
-            {t("structure.addCommandList")}
-          </button>
-          <button onClick={() => onInsert("topology", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <Network className="h-3.5 w-3.5" />
-            {t("structure.addTopology")}
-          </button>
-          <button onClick={() => onInsert("compliance_matrix", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            {t("structure.addComplianceMatrix")}
-          </button>
-          <button onClick={() => onInsert("rule_non_compliant", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <ShieldAlert className="h-3.5 w-3.5" />
-            {t("structure.addRuleNonCompliant")}
-          </button>
-          <button onClick={() => onInsert("rule_nodes_table", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <ShieldQuestion className="h-3.5 w-3.5" />
-            {t("structure.addRuleNodesTable")}
-          </button>
-          <button onClick={() => onInsert("rule_recommendation", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <Lightbulb className="h-3.5 w-3.5" />
-            {t("structure.addRuleRecommendation")}
-          </button>
-          <button onClick={() => onInsert("comparison_summary", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <GitCompare className="h-3.5 w-3.5" />
-            {t("structure.addComparisonSummary")}
-          </button>
-          <button onClick={() => onInsert("comparison_detail", index)} className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors whitespace-nowrap">
-            <Columns3 className="h-3.5 w-3.5" />
-            {t("structure.addComparisonDetail")}
-          </button>
+        <div
+          className={`pointer-events-auto absolute left-7 z-30 w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg ${
+            openUpward ? "bottom-0" : "top-0"
+          }`}
+        >
+          <BlockMenu
+            onPick={(type) => onInsert(type, index)}
+            side="right"
+            verticalAnchor={openUpward ? "bottom" : "top"}
+            t={t}
+          />
         </div>
       )}
     </div>
