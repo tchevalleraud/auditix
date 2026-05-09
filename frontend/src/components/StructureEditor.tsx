@@ -395,6 +395,19 @@ export interface StaticRecommendationsBlock {
   fontSize?: number;
 }
 
+export type RecommendationSummaryDescriptionMode = "none" | "short" | "long";
+
+export interface RecommendationSummaryBlock {
+  id: string;
+  type: "recommendation_summary";
+  title: string;
+  severityFilter: StaticRecommendationSeverity[];
+  showPageNumber: boolean;
+  descriptionMode: RecommendationSummaryDescriptionMode;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+}
+
 // === Charts ===
 export type ChartKind = "bar" | "stacked_bar" | "pie" | "radar" | "line" | "area" | "treemap";
 
@@ -587,7 +600,7 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | StaticRecommendationsBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | StaticRecommendationsBlock | RecommendationSummaryBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -673,6 +686,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "rule_recommendation", labelKey: "structure.addRuleRecommendation", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
       { type: "compliance_recommendations", labelKey: "structure.addComplianceRecommendations", icon: <ShieldAlert className="h-4 w-4 text-amber-500" /> },
       { type: "static_recommendations", labelKey: "structure.addStaticRecommendations", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
+      { type: "recommendation_summary", labelKey: "structure.addRecommendationSummary", icon: <ListChecks className="h-4 w-4 text-amber-500" /> },
     ],
   },
   {
@@ -800,6 +814,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "compliance_recommendations", policyIds: [], ruleIds: [], scope: "all", nodeTagIds: [], nodeIds: [], showRecommendation: false, recommendationFormat: "text", pageBreakBefore: false };
     } else if (type === "static_recommendations") {
       block = { id, type: "static_recommendations", title: "", items: [], showRecommendation: true, pageBreakBefore: false };
+    } else if (type === "recommendation_summary") {
+      block = { id, type: "recommendation_summary", title: "", severityFilter: ["critical", "high", "medium", "low", "info"], showPageNumber: true, descriptionMode: "none", pageBreakBefore: false };
     } else if (type === "chart_static") {
       block = {
         id,
@@ -1097,6 +1113,10 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="text-slate-500 text-xs">{block.title || t("structure.staticRecommendations")} — {count} {count > 1 ? t("structure.staticRecItemsPlural") : t("structure.staticRecItemsSingular")}</span>;
     }
+    if (block.type === "recommendation_summary") {
+      const sevs = (block.severityFilter ?? []).length;
+      return <span className="text-slate-500 text-xs">{block.title || t("structure.recommendationSummary")} — {sevs}/5 {t("structure.recSummarySeverities")}</span>;
+    }
     if (block.type === "chart_static") {
       const seriesCount = block.series.length;
       const labelCount = block.labels.length;
@@ -1248,6 +1268,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
           <Lightbulb className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "recommendation_summary") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+          <ListChecks className="h-3 w-3" />
         </span>
       );
     }
@@ -1525,6 +1552,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "static_recommendations" && (
                 <StaticRecommendationsProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "recommendation_summary" && (
+                <RecommendationSummaryProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "chart_static" && (
                 <ChartStaticProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -6825,6 +6855,17 @@ const STATIC_REC_SEVERITY_STYLES: Record<StaticRecommendationSeverity, { color: 
   info: { color: "text-slate-700 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-500/10", border: "border-slate-200 dark:border-slate-500/20" },
 };
 
+function cleanRichTextHtml(html: string): string {
+  let out = html;
+  // Strip trailing empty paragraphs/divs (with optional <br>) that TipTap appends after a list
+  while (true) {
+    const next = out.replace(/(<p>(?:\s|&nbsp;|<br\s*\/?\>)*<\/p>|<div>(?:\s|&nbsp;|<br\s*\/?\>)*<\/div>)\s*$/i, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out.trim();
+}
+
 function StaticRecLongEditor({
   value,
   onChange,
@@ -6845,12 +6886,12 @@ function StaticRecLongEditor({
     onUpdate: ({ editor: ed }) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
-        onChange(ed.getHTML());
+        onChange(cleanRichTextHtml(ed.getHTML()));
       }, 250);
     },
     onBlur: ({ editor: ed }) => {
       if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
-      onChange(ed.getHTML());
+      onChange(cleanRichTextHtml(ed.getHTML()));
     },
     editorProps: {
       attributes: { class: "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[110px] px-3 py-2 text-sm" },
@@ -7134,6 +7175,116 @@ function StaticRecommendationsProperties({
             className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
           />
           <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.staticRecShowRecommendation")}</span>
+        </label>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelCls}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={6}
+            max={14}
+            step={0.5}
+            value={block.fontSize ?? 9}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Recommendation summary properties ===============================
+// =====================================================================
+
+function RecommendationSummaryProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RecommendationSummaryBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  const toggleSeverity = (s: StaticRecommendationSeverity) => {
+    const set = new Set(block.severityFilter ?? []);
+    if (set.has(s)) set.delete(s); else set.add(s);
+    updateBlock(block.id, { severityFilter: STATIC_REC_SEVERITIES.filter((x) => set.has(x)) });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <label className={labelCls}>{t("structure.recSummaryTitle")}</label>
+        <input
+          type="text"
+          value={block.title}
+          onChange={(e) => updateBlock(block.id, { title: e.target.value })}
+          placeholder={t("structure.recSummaryTitlePlaceholder")}
+          className={inputCls}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelCls}>{t("structure.recSummarySeverityFilter")}</label>
+        <p className="text-[11px] text-slate-400 dark:text-slate-500">{t("structure.recSummarySeverityFilterHelp")}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {STATIC_REC_SEVERITIES.map((s) => {
+            const sc = STATIC_REC_SEVERITY_STYLES[s];
+            const active = (block.severityFilter ?? []).includes(s);
+            return (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleSeverity(s)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${active ? `${sc.bg} ${sc.color} ${sc.border} ring-1 ring-current` : "border-slate-200 dark:border-slate-700 text-slate-400 hover:border-slate-300"}`}
+              >
+                {t(`structure.staticRecSev_${s}`)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelCls}>{t("structure.recSummaryDescriptionMode")}</label>
+        <select
+          value={block.descriptionMode ?? "none"}
+          onChange={(e) => updateBlock(block.id, { descriptionMode: e.target.value as RecommendationSummaryDescriptionMode })}
+          className={inputCls}
+        >
+          <option value="none">{t("structure.recSummaryDescNone")}</option>
+          <option value="short">{t("structure.recSummaryDescShort")}</option>
+          <option value="long">{t("structure.recSummaryDescLong")}</option>
+        </select>
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showPageNumber}
+            onChange={(e) => updateBlock(block.id, { showPageNumber: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.recSummaryShowPageNumber")}</span>
         </label>
 
         <label className="flex items-center gap-2 cursor-pointer">

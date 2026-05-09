@@ -323,6 +323,29 @@ class GenerateReportMessageHandler
 
     private function generatePdf(Report $report, string $filePath, ?Node $forNode = null): void
     {
+        $blocks = $report->getBlocks();
+        $hasSummary = false;
+        foreach ($blocks as $b) {
+            if (($b['type'] ?? '') === 'recommendation_summary') { $hasSummary = true; break; }
+        }
+
+        $pageMap = [];
+        if ($hasSummary) {
+            $tmpPath = tempnam(sys_get_temp_dir(), 'auditix_pre_') . '.pdf';
+            try {
+                $unused = [];
+                $this->doGeneratePdf($report, $tmpPath, $forNode, [], $pageMap);
+            } finally {
+                @unlink($tmpPath);
+            }
+        }
+
+        $unused2 = [];
+        $this->doGeneratePdf($report, $filePath, $forNode, $pageMap, $unused2);
+    }
+
+    private function doGeneratePdf(Report $report, string $filePath, ?Node $forNode, array $summaryPageMap, array &$collectedPageMap): void
+    {
         $locale = $report->getLocale() ?: 'fr';
         $t = self::PDF_TRANSLATIONS[$locale] ?? self::PDF_TRANSLATIONS['fr'];
 
@@ -473,7 +496,7 @@ class GenerateReportMessageHandler
         $pdf->SetAutoPageBreak(true, $mBottom);
 
         // Render structure blocks
-        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report);
+        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report, $summaryPageMap, $collectedPageMap);
 
         // Post-processing: render headers and footers on all pages except cover (page 1)
         $totalPages = $pdf->getNumPages();
@@ -764,6 +787,37 @@ class GenerateReportMessageHandler
         $pdf->Cell($pageW - 40, 6, 'Genere par Auditix', 0, 1, 'L');
     }
 
+    /**
+     * Render an HTML fragment via writeHTMLCell, trimming the phantom trailing
+     * line that TCPDF adds after a closing list tag.
+     */
+    private function writeHtmlFragment(TCPDF $pdf, string $html, float $width, float $x, float $y): void
+    {
+        if ($html === '') return;
+
+        // Wrap plain text in <p> with line breaks
+        if (!preg_match('/<[a-z][^>]*>/i', $html)) {
+            $html = '<p>' . nl2br(htmlspecialchars($html, ENT_QUOTES)) . '</p>';
+        }
+
+        // Strip trailing empty paragraphs/divs (TipTap leaves an empty <p></p> after a list)
+        $prev = null;
+        while ($prev !== $html) {
+            $prev = $html;
+            $html = preg_replace('#(<p>(?:\s|&nbsp;|<br\s*/?>)*</p>|<div>(?:\s|&nbsp;|<br\s*/?>)*</div>)\s*$#i', '', $html) ?? $html;
+        }
+        $html = rtrim($html);
+        if ($html === '') return;
+
+        $pdf->writeHTMLCell($width, 0, $x, $y, $html, 0, 1, false, true, 'L', true);
+
+        // TCPDF appends a phantom line break when HTML ends with a closing list tag
+        if (preg_match('/<\/(ul|ol)>\s*$/i', $html)) {
+            $lineH = $pdf->getCellHeight($pdf->FontSize);
+            $pdf->SetY($pdf->GetY() - $lineH);
+        }
+    }
+
     private function renderBlocks(
         TCPDF $pdf,
         array $blocks,
@@ -776,6 +830,8 @@ class GenerateReportMessageHandler
         float $mBottom,
         ?Node $forNode = null,
         ?Report $report = null,
+        array $summaryPageMap = [],
+        array &$collectedPageMap = [],
     ): void {
         if (empty($blocks)) return;
 
@@ -3391,42 +3447,38 @@ class GenerateReportMessageHandler
                     $crRuleTitle = trim(($crRule->getIdentifier() ? '[' . $crRule->getIdentifier() . '] ' : '') . $crRule->getName());
                     $crLong = (string) ($crRes->getMessageLong() ?? '');
                     if ($crLong === '') $crLong = (string) ($crRes->getMessage() ?? '');
+                    $crReco = $crShowReco ? (string) ($crRes->getRecommendation() ?? '') : '';
 
-                    $crBoxStartY = $pdf->GetY();
+                    // Closure renders the full item from current Y; called twice when checking page fit
+                    $renderCrItem = function () use (
+                        &$pdf, $crColor, $crSevLabel, $crNodeLabel, $crRuleTitle, $crLong, $crReco,
+                        $crShowReco, $crRecoFormat, $crFontSize, $bodyFont, $bodyRgb, $mLeft, $mBottom,
+                        $crContentW, $styles
+                    ) {
+                        $crBoxStartY = $pdf->GetY();
+                        $crBarW = 1.2;
+                        $crBadgeW = 22;
+                        $crBadgeH = $crFontSize * 0.3528 + 1.5;
 
-                    // Severity ribbon (left vertical bar)
-                    $crBarW = 1.2;
-                    // Header line: severity badge + node + rule title
-                    $crBadgeW = 22;
-                    $crBadgeH = $crFontSize * 0.3528 + 1.5;
-                    $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
-                    $pdf->SetTextColor(255, 255, 255);
-                    $pdf->SetFont($bodyFont, 'B', $crFontSize - 1);
-                    $pdf->Rect($mLeft, $crBoxStartY, $crBadgeW, $crBadgeH, 'F');
-                    $pdf->SetXY($mLeft, $crBoxStartY);
-                    $pdf->Cell($crBadgeW, $crBadgeH, strtoupper($crSevLabel), 0, 0, 'C');
+                        $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
+                        $pdf->SetTextColor(255, 255, 255);
+                        $pdf->SetFont($bodyFont, 'B', $crFontSize - 1);
+                        $pdf->Rect($mLeft, $crBoxStartY, $crBadgeW, $crBadgeH, 'F');
+                        $pdf->SetXY($mLeft, $crBoxStartY);
+                        $pdf->Cell($crBadgeW, $crBadgeH, strtoupper($crSevLabel), 0, 0, 'C');
 
-                    // Title to the right of the badge
-                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
-                    $pdf->SetFont($bodyFont, 'B', $crFontSize);
-                    $pdf->SetXY($mLeft + $crBadgeW + 2, $crBoxStartY);
-                    $pdf->Cell($crContentW - $crBadgeW - 2, $crBadgeH, $crNodeLabel . ' — ' . $crRuleTitle, 0, 1, 'L');
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $pdf->SetFont($bodyFont, 'B', $crFontSize);
+                        $pdf->SetXY($mLeft + $crBadgeW + 2, $crBoxStartY);
+                        $pdf->Cell($crContentW - $crBadgeW - 2, $crBadgeH, $crNodeLabel . ' — ' . $crRuleTitle, 0, 1, 'L');
 
-                    // Long description (HTML rendering)
-                    $pdf->SetFont($bodyFont, '', $crFontSize);
-                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
-                    if ($crLong !== '') {
-                        // If plain text (no tags), wrap in paragraph and escape
-                        if (!preg_match('/<[a-z][^>]*>/i', $crLong)) {
-                            $crLong = '<p>' . nl2br(htmlspecialchars($crLong, ENT_QUOTES | ENT_HTML5, 'UTF-8')) . '</p>';
+                        $pdf->SetFont($bodyFont, '', $crFontSize);
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        if ($crLong !== '') {
+                            $this->writeHtmlFragment($pdf, $crLong, $crContentW, $mLeft, $pdf->GetY() + 0.5);
                         }
-                        $pdf->writeHTMLCell($crContentW, 0, $mLeft, $pdf->GetY() + 0.5, $crLong, 0, 1, false, true, 'L', true);
-                    }
 
-                    // Optional recommendation
-                    if ($crShowReco) {
-                        $crReco = (string) ($crRes->getRecommendation() ?? '');
-                        if ($crReco !== '') {
+                        if ($crShowReco && $crReco !== '') {
                             if ($crRecoFormat === 'cli') {
                                 $crCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
                                 $crCliFont = $this->mapFont($crCliStyle['font'] ?? 'Consolas');
@@ -3456,16 +3508,32 @@ class GenerateReportMessageHandler
                                 $pdf->SetY($crStartY + $crBodyH);
                             } else {
                                 $pdf->Ln(0.5);
-                                $crRecoEsc = nl2br(htmlspecialchars($crReco, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                                $crRecoEsc = nl2br(htmlspecialchars($crReco, ENT_QUOTES, 'UTF-8'));
                                 $pdf->writeHTMLCell($crContentW, 0, $mLeft, $pdf->GetY(), '<i>' . $crRecoEsc . '</i>', 0, 1, false, true, 'L', true);
                             }
                         }
+
+                        $crBoxEndY = $pdf->GetY();
+                        $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
+                        $pdf->Rect($mLeft - 1.8, $crBoxStartY, $crBarW, $crBoxEndY - $crBoxStartY, 'F');
+                    };
+
+                    // Dry-run via TCPDF transaction to detect cross-page rendering
+                    $crStartY = $pdf->GetY();
+                    $crStartPage = $pdf->getPage();
+                    $pdf->startTransaction();
+                    $renderCrItem();
+                    $crCrossedPage = ($pdf->getPage() !== $crStartPage);
+                    $pdf->rollbackTransaction(true);
+
+                    // Force a page break if the item would cross AND we are not already at the top
+                    if ($crCrossedPage && $crStartY > $mTop + 10) {
+                        $pdf->AddPage();
                     }
 
-                    // Severity ribbon over full block height
-                    $crBoxEndY = $pdf->GetY();
-                    $pdf->SetFillColor($crColor[0], $crColor[1], $crColor[2]);
-                    $pdf->Rect($mLeft - 1.8, $crBoxStartY, $crBarW, $crBoxEndY - $crBoxStartY, 'F');
+                    $collectedPageMap['cr-' . $crRes->getId()] = $pdf->getPage();
+
+                    $renderCrItem();
 
                     $pdf->Ln(2);
                 }
@@ -3513,6 +3581,7 @@ class GenerateReportMessageHandler
                     'info' => [148, 163, 184],
                 ];
 
+                $srBlockId = (string) ($block['id'] ?? '');
                 foreach ($srItems as $srItem) {
                     if (!is_array($srItem)) continue;
                     $srSev = (string) ($srItem['severity'] ?? 'info');
@@ -3524,76 +3593,312 @@ class GenerateReportMessageHandler
                     $srLong = $this->resolveNodeVariables((string) ($srItem['longDescription'] ?? ''), $forNode, $report);
                     $srReco = $this->resolveNodeVariables((string) ($srItem['recommendation'] ?? ''), $forNode, $report);
                     $srRecoFormat = ($srItem['recommendationFormat'] ?? 'text') === 'cli' ? 'cli' : 'text';
+                    $srItemId = (string) ($srItem['id'] ?? '');
 
-                    $srBoxStartY = $pdf->GetY();
-                    $srBarW = 1.2;
-                    $srBadgeW = 22;
-                    $srBadgeH = $srFontSize * 0.3528 + 1.5;
+                    // Closure renders the full item from current Y; called twice when checking page fit
+                    $renderSrItem = function () use (
+                        &$pdf, $srColor, $srSevLabel, $srShort, $srLong, $srReco, $srRecoFormat,
+                        $srShowReco, $srFontSize, $bodyFont, $bodyRgb, $mLeft, $mBottom, $srContentW, $styles
+                    ) {
+                        $srBoxStartY = $pdf->GetY();
+                        $srBarW = 1.2;
+                        $srBadgeW = 22;
+                        $srBadgeH = $srFontSize * 0.3528 + 1.5;
 
-                    $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
-                    $pdf->SetTextColor(255, 255, 255);
-                    $pdf->SetFont($bodyFont, 'B', $srFontSize - 1);
-                    $pdf->Rect($mLeft, $srBoxStartY, $srBadgeW, $srBadgeH, 'F');
-                    $pdf->SetXY($mLeft, $srBoxStartY);
-                    $pdf->Cell($srBadgeW, $srBadgeH, strtoupper($srSevLabel), 0, 0, 'C');
+                        $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
+                        $pdf->SetTextColor(255, 255, 255);
+                        $pdf->SetFont($bodyFont, 'B', $srFontSize - 1);
+                        $pdf->Rect($mLeft, $srBoxStartY, $srBadgeW, $srBadgeH, 'F');
+                        $pdf->SetXY($mLeft, $srBoxStartY);
+                        $pdf->Cell($srBadgeW, $srBadgeH, strtoupper($srSevLabel), 0, 0, 'C');
 
-                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
-                    $pdf->SetFont($bodyFont, 'B', $srFontSize);
-                    $pdf->SetXY($mLeft + $srBadgeW + 2, $srBoxStartY);
-                    $pdf->Cell($srContentW - $srBadgeW - 2, $srBadgeH, $srShort, 0, 1, 'L');
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $pdf->SetFont($bodyFont, 'B', $srFontSize);
+                        $pdf->SetXY($mLeft + $srBadgeW + 2, $srBoxStartY);
+                        $pdf->Cell($srContentW - $srBadgeW - 2, $srBadgeH, $srShort, 0, 1, 'L');
 
-                    $pdf->SetFont($bodyFont, '', $srFontSize);
-                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
-                    if ($srLong !== '') {
-                        if (!preg_match('/<[a-z][^>]*>/i', $srLong)) {
-                            $srLong = '<p>' . nl2br(htmlspecialchars($srLong, ENT_QUOTES, 'UTF-8')) . '</p>';
+                        $pdf->SetFont($bodyFont, '', $srFontSize);
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        if ($srLong !== '') {
+                            $this->writeHtmlFragment($pdf, $srLong, $srContentW, $mLeft, $pdf->GetY() + 0.5);
                         }
-                        $pdf->writeHTMLCell($srContentW, 0, $mLeft, $pdf->GetY() + 0.5, $srLong, 0, 1, false, true, 'L', true);
+
+                        if ($srShowReco && $srReco !== '') {
+                            if ($srRecoFormat === 'cli') {
+                                $srCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
+                                $srCliFont = $this->mapFont($srCliStyle['font'] ?? 'Consolas');
+                                $srCliBg = $this->hexToRgb($srCliStyle['bgColor'] ?? '#f1f5f9');
+                                $srCliText = $this->hexToRgb($srCliStyle['textColor'] ?? '#1e293b');
+                                $srCliBorder = $this->hexToRgb($srCliStyle['borderColor'] ?? '#e2e8f0');
+                                $srCliPadding = (float) ($srCliStyle['padding'] ?? 3);
+                                $srLines = explode("\n", $srReco);
+                                $srLineH = $srFontSize * 0.3528 * 1.4;
+                                $srBodyH = ($srCliPadding * 2) + (count($srLines) * $srLineH);
+                                $srStartY = $pdf->GetY() + 1;
+                                if ($srStartY + $srBodyH > $pdf->getPageHeight() - $mBottom) {
+                                    $pdf->AddPage();
+                                    $srStartY = $pdf->GetY();
+                                }
+                                $pdf->SetDrawColor($srCliBorder[0], $srCliBorder[1], $srCliBorder[2]);
+                                $pdf->SetFillColor($srCliBg[0], $srCliBg[1], $srCliBg[2]);
+                                $pdf->Rect($mLeft, $srStartY, $srContentW, $srBodyH, 'DF');
+                                $pdf->SetFont($srCliFont, '', $srFontSize);
+                                $pdf->SetTextColor($srCliText[0], $srCliText[1], $srCliText[2]);
+                                $srCurY = $srStartY + $srCliPadding;
+                                foreach ($srLines as $srLine) {
+                                    $pdf->SetXY($mLeft + $srCliPadding, $srCurY);
+                                    $pdf->Cell($srContentW - ($srCliPadding * 2), $srLineH, $srLine, 0, 0, 'L');
+                                    $srCurY += $srLineH;
+                                }
+                                $pdf->SetY($srStartY + $srBodyH);
+                            } else {
+                                $pdf->Ln(0.5);
+                                $srRecoEsc = nl2br(htmlspecialchars($srReco, ENT_QUOTES, 'UTF-8'));
+                                $pdf->writeHTMLCell($srContentW, 0, $mLeft, $pdf->GetY(), '<i>' . $srRecoEsc . '</i>', 0, 1, false, true, 'L', true);
+                            }
+                        }
+
+                        $srBoxEndY = $pdf->GetY();
+                        $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
+                        $pdf->Rect($mLeft - 1.8, $srBoxStartY, $srBarW, $srBoxEndY - $srBoxStartY, 'F');
+                    };
+
+                    // Dry-run via TCPDF transaction to detect cross-page rendering
+                    $srStartY = $pdf->GetY();
+                    $srStartPage = $pdf->getPage();
+                    $pdf->startTransaction();
+                    $renderSrItem();
+                    $srCrossedPage = ($pdf->getPage() !== $srStartPage);
+                    $pdf->rollbackTransaction(true);
+
+                    // Force a page break if the item would cross AND we are not already at the top
+                    if ($srCrossedPage && $srStartY > $mTop + 10) {
+                        $pdf->AddPage();
                     }
 
-                    if ($srShowReco && $srReco !== '') {
-                        if ($srRecoFormat === 'cli') {
-                            $srCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
-                            $srCliFont = $this->mapFont($srCliStyle['font'] ?? 'Consolas');
-                            $srCliBg = $this->hexToRgb($srCliStyle['bgColor'] ?? '#f1f5f9');
-                            $srCliText = $this->hexToRgb($srCliStyle['textColor'] ?? '#1e293b');
-                            $srCliBorder = $this->hexToRgb($srCliStyle['borderColor'] ?? '#e2e8f0');
-                            $srCliPadding = (float) ($srCliStyle['padding'] ?? 3);
-                            $srLines = explode("\n", $srReco);
-                            $srLineH = $srFontSize * 0.3528 * 1.4;
-                            $srBodyH = ($srCliPadding * 2) + (count($srLines) * $srLineH);
-                            $srStartY = $pdf->GetY() + 1;
-                            if ($srStartY + $srBodyH > $pdf->getPageHeight() - $mBottom) {
-                                $pdf->AddPage();
-                                $srStartY = $pdf->GetY();
-                            }
-                            $pdf->SetDrawColor($srCliBorder[0], $srCliBorder[1], $srCliBorder[2]);
-                            $pdf->SetFillColor($srCliBg[0], $srCliBg[1], $srCliBg[2]);
-                            $pdf->Rect($mLeft, $srStartY, $srContentW, $srBodyH, 'DF');
-                            $pdf->SetFont($srCliFont, '', $srFontSize);
-                            $pdf->SetTextColor($srCliText[0], $srCliText[1], $srCliText[2]);
-                            $srCurY = $srStartY + $srCliPadding;
-                            foreach ($srLines as $srLine) {
-                                $pdf->SetXY($mLeft + $srCliPadding, $srCurY);
-                                $pdf->Cell($srContentW - ($srCliPadding * 2), $srLineH, $srLine, 0, 0, 'L');
-                                $srCurY += $srLineH;
-                            }
-                            $pdf->SetY($srStartY + $srBodyH);
-                        } else {
-                            $pdf->Ln(0.5);
-                            $srRecoEsc = nl2br(htmlspecialchars($srReco, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                            $pdf->writeHTMLCell($srContentW, 0, $mLeft, $pdf->GetY(), '<i>' . $srRecoEsc . '</i>', 0, 1, false, true, 'L', true);
-                        }
+                    if ($srItemId !== '') {
+                        $collectedPageMap['sr-' . $srBlockId . '-' . $srItemId] = $pdf->getPage();
                     }
 
-                    $srBoxEndY = $pdf->GetY();
-                    $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
-                    $pdf->Rect($mLeft - 1.8, $srBoxStartY, $srBarW, $srBoxEndY - $srBoxStartY, 'F');
+                    $renderSrItem();
 
                     $pdf->Ln(2);
                 }
 
                 $prevType = 'static_recommendations';
+
+            } elseif ($type === 'recommendation_summary') {
+                $rsTitle = $this->resolveNodeVariables((string) ($block['title'] ?? ''), $forNode, $report);
+                $rsSeverityFilter = is_array($block['severityFilter'] ?? null) ? $block['severityFilter'] : ['critical', 'high', 'medium', 'low', 'info'];
+                $rsShowPage = !isset($block['showPageNumber']) || !empty($block['showPageNumber']);
+                $rsDescMode = (string) ($block['descriptionMode'] ?? 'none');
+                if (!in_array($rsDescMode, ['none', 'short', 'long'], true)) $rsDescMode = 'none';
+                $rsPageBreak = !empty($block['pageBreakBefore']);
+                $rsFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
+
+                $rsLocale = $report ? $report->getLocale() : 'en';
+                $rsCl = self::COMPLIANCE_LABELS[$rsLocale] ?? self::COMPLIANCE_LABELS['en'];
+
+                // Severity colors (mirror compliance_recommendations)
+                $rsSevColors = [
+                    'critical' => [239, 68, 68],
+                    'high' => [249, 115, 22],
+                    'medium' => [234, 179, 8],
+                    'low' => [59, 130, 246],
+                    'info' => [148, 163, 184],
+                ];
+                $rsSevOrder = ['critical' => 5, 'high' => 4, 'medium' => 3, 'low' => 2, 'info' => 1];
+
+                // Walk all blocks of the document to collect recommendation items
+                $rsItems = [];
+                $rsInsertion = 0;
+                foreach ($blocks as $rsBlock) {
+                    $rsBlockType = $rsBlock['type'] ?? '';
+                    if ($rsBlockType === 'compliance_recommendations') {
+                        $rsPolicyIds = array_values(array_filter(array_map('intval', $rsBlock['policyIds'] ?? []), fn($x) => $x > 0));
+                        $rsRuleIds = array_values(array_filter(array_map('intval', $rsBlock['ruleIds'] ?? []), fn($x) => $x > 0));
+                        $rsScope = (string) ($rsBlock['scope'] ?? 'all');
+                        $rsNodeTagIds = array_values(array_filter(array_map('intval', $rsBlock['nodeTagIds'] ?? []), fn($x) => $x > 0));
+                        $rsNodeIdsSel = array_values(array_filter(array_map('intval', $rsBlock['nodeIds'] ?? []), fn($x) => $x > 0));
+                        if (empty($rsPolicyIds) && empty($rsRuleIds)) continue;
+                        $rsQb = $this->em->createQueryBuilder()
+                            ->select('cr', 'r', 'p', 'n')
+                            ->from(\App\Entity\ComplianceResult::class, 'cr')
+                            ->innerJoin('cr.rule', 'r')
+                            ->innerJoin('cr.policy', 'p')
+                            ->innerJoin('cr.node', 'n')
+                            ->where('p.enabled = true')
+                            ->andWhere('cr.status IN (:statuses)')
+                            ->setParameter('statuses', ['non_compliant', 'error']);
+                        if (!empty($rsPolicyIds)) $rsQb->andWhere('p.id IN (:policyIds)')->setParameter('policyIds', $rsPolicyIds);
+                        if (!empty($rsRuleIds)) $rsQb->andWhere('r.id IN (:ruleIds)')->setParameter('ruleIds', $rsRuleIds);
+                        if ($rsScope === 'device' && !empty($rsNodeIdsSel)) {
+                            $rsQb->andWhere('n.id IN (:nodeIds)')->setParameter('nodeIds', $rsNodeIdsSel);
+                        } elseif ($rsScope === 'tag' && !empty($rsNodeTagIds)) {
+                            $rsQb->innerJoin('n.tags', 'nt')->andWhere('nt.id IN (:tagIds)')->setParameter('tagIds', $rsNodeTagIds);
+                        } elseif ($rsScope === 'device' || $rsScope === 'tag') {
+                            continue;
+                        }
+                        $rsResults = $rsQb->getQuery()->getResult();
+                        foreach ($rsResults as $rsRes) {
+                            $rsStatus = $rsRes->getStatus();
+                            $rsSev = $rsStatus === 'error' ? 'critical' : ($rsRes->getSeverity() ?? 'info');
+                            if (!in_array($rsSev, $rsSeverityFilter, true)) continue;
+                            $rsRule = $rsRes->getRule();
+                            $rsNode = $rsRes->getNode();
+                            $rsNodeLabel = $rsNode->getHostname() ?: ($rsNode->getName() ?: $rsNode->getIpAddress());
+                            $rsRuleTitle = trim(($rsRule->getIdentifier() ? '[' . $rsRule->getIdentifier() . '] ' : '') . $rsRule->getName());
+                            $rsMsg = (string) ($rsRes->getMessage() ?? '');
+                            $rsMsgLong = (string) ($rsRes->getMessageLong() ?? '');
+                            if ($rsMsgLong === '') $rsMsgLong = $rsMsg;
+                            $rsItems[] = [
+                                'severity' => $rsSev,
+                                'title' => $rsNodeLabel . ' — ' . $rsRuleTitle,
+                                'descShort' => $rsMsg,
+                                'descLong' => $rsMsgLong,
+                                'pageId' => 'cr-' . $rsRes->getId(),
+                                'order' => $rsInsertion++,
+                            ];
+                        }
+                    } elseif ($rsBlockType === 'static_recommendations') {
+                        $rsBlockIdLocal = (string) ($rsBlock['id'] ?? '');
+                        foreach (($rsBlock['items'] ?? []) as $rsItem) {
+                            if (!is_array($rsItem)) continue;
+                            $rsSev = (string) ($rsItem['severity'] ?? 'info');
+                            if (!isset($rsSevColors[$rsSev])) $rsSev = 'info';
+                            if (!in_array($rsSev, $rsSeverityFilter, true)) continue;
+                            $rsItemIdLocal = (string) ($rsItem['id'] ?? '');
+                            $rsShortRaw = $this->resolveNodeVariables((string) ($rsItem['shortDescription'] ?? ''), $forNode, $report);
+                            if ($rsShortRaw === '') $rsShortRaw = '—';
+                            $rsLongRaw = $this->resolveNodeVariables((string) ($rsItem['longDescription'] ?? ''), $forNode, $report);
+                            $rsItems[] = [
+                                'severity' => $rsSev,
+                                'title' => $rsShortRaw,
+                                'descShort' => '',
+                                'descLong' => $rsLongRaw,
+                                'pageId' => 'sr-' . $rsBlockIdLocal . '-' . $rsItemIdLocal,
+                                'order' => $rsInsertion++,
+                            ];
+                        }
+                    }
+                }
+
+                if (empty($rsItems)) {
+                    continue;
+                }
+
+                // Sort by severity desc, then by document insertion order
+                usort($rsItems, function ($a, $b) use ($rsSevOrder) {
+                    $sa = $rsSevOrder[$a['severity']] ?? 0;
+                    $sb = $rsSevOrder[$b['severity']] ?? 0;
+                    if ($sa !== $sb) return $sb - $sa;
+                    return $a['order'] - $b['order'];
+                });
+
+                if ($rsPageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $rsContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+
+                if ($rsTitle !== '') {
+                    $rsTitleFont = $this->mapFont(($headingsByLevel[1] ?? [])['font'] ?? $bodyFont);
+                    $pdf->SetFont($rsTitleFont, 'B', $bodySize + 1);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell(0, ($bodySize + 1) * 0.3528 + 1, $rsTitle, 0, 'L');
+                    $pdf->Ln(2);
+                }
+
+                $rsBadgeW = 22;
+                $rsPageColW = $rsShowPage ? 14 : 0;
+                $rsGap = 2;
+                $rsTextColW = $rsContentW - $rsBadgeW - $rsGap - ($rsShowPage ? ($rsGap + $rsPageColW) : 0);
+                $rsLineH = $rsFontSize * 0.3528 + 1.5;
+
+                foreach ($rsItems as $rsItem) {
+                    $rsSev = $rsItem['severity'];
+                    $rsColor = $rsSevColors[$rsSev] ?? $rsSevColors['info'];
+                    $rsSevLabel = $rsCl['sev_' . $rsSev] ?? $rsSev;
+                    $rsItemTitle = (string) $rsItem['title'];
+                    $rsDescHtml = '';
+                    if ($rsDescMode === 'short') {
+                        $rsDescHtml = (string) ($rsItem['descShort'] ?? '');
+                    } elseif ($rsDescMode === 'long') {
+                        $rsDescHtml = (string) ($rsItem['descLong'] ?? '');
+                    }
+                    $rsHasDesc = trim(strip_tags($rsDescHtml)) !== '';
+                    $rsPageNum = $summaryPageMap[$rsItem['pageId']] ?? null;
+                    $rsPageStr = $rsShowPage ? ($rsPageNum !== null ? (string) $rsPageNum : '—') : '';
+
+                    // Closure renders the full row from current Y; called twice when checking page fit
+                    $renderRsRow = function () use (
+                        &$pdf, $rsColor, $rsSevLabel, $rsItemTitle, $rsDescHtml, $rsHasDesc, $rsPageStr,
+                        $rsShowPage, $rsFontSize, $rsLineH, $rsBadgeW, $rsTextColW, $rsPageColW, $rsGap,
+                        $bodyFont, $bodyRgb, $mLeft
+                    ) {
+                        $rsRowStartY = $pdf->GetY();
+                        $rsStartPage = $pdf->getPage();
+
+                        $pdf->SetFillColor($rsColor[0], $rsColor[1], $rsColor[2]);
+                        $pdf->SetTextColor(255, 255, 255);
+                        $pdf->SetFont($bodyFont, 'B', $rsFontSize - 1);
+                        $pdf->Rect($mLeft, $rsRowStartY, $rsBadgeW, $rsLineH, 'F');
+                        $pdf->SetXY($mLeft, $rsRowStartY);
+                        $pdf->Cell($rsBadgeW, $rsLineH, strtoupper($rsSevLabel), 0, 0, 'C');
+
+                        $rsTitleStyle = $rsHasDesc ? 'B' : '';
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $pdf->SetFont($bodyFont, $rsTitleStyle, $rsFontSize);
+                        $pdf->SetXY($mLeft + $rsBadgeW + $rsGap, $rsRowStartY);
+                        $pdf->Cell($rsTextColW, $rsLineH, $rsItemTitle, 0, 0, 'L');
+
+                        if ($rsShowPage) {
+                            $pdf->SetXY($mLeft + $rsBadgeW + $rsGap + $rsTextColW + $rsGap, $rsRowStartY);
+                            $pdf->SetFont($bodyFont, 'B', $rsFontSize);
+                            $pdf->SetTextColor(100, 116, 139);
+                            $pdf->Cell($rsPageColW, $rsLineH, $rsPageStr, 0, 0, 'R');
+                        }
+
+                        $pdf->SetY($rsRowStartY + $rsLineH);
+
+                        if ($rsHasDesc) {
+                            $pdf->SetFont($bodyFont, '', $rsFontSize - 0.5);
+                            $pdf->SetTextColor(71, 85, 105);
+                            $this->writeHtmlFragment($pdf, $rsDescHtml, $rsTextColW, $mLeft + $rsBadgeW + $rsGap, $pdf->GetY());
+                        }
+
+                        $rsRowEndY = $pdf->GetY();
+                        $rsEndPage = $pdf->getPage();
+
+                        if ($rsEndPage === $rsStartPage) {
+                            $pdf->SetFillColor($rsColor[0], $rsColor[1], $rsColor[2]);
+                            $pdf->Rect($mLeft - 1.8, $rsRowStartY, 1.2, $rsRowEndY - $rsRowStartY, 'F');
+                        }
+                    };
+
+                    // Dry-run via TCPDF transaction to detect cross-page rendering
+                    $rsItemStartY = $pdf->GetY();
+                    $rsItemStartPage = $pdf->getPage();
+                    $pdf->startTransaction();
+                    $renderRsRow();
+                    $rsItemCrossedPage = ($pdf->getPage() !== $rsItemStartPage);
+                    $pdf->rollbackTransaction(true);
+
+                    if ($rsItemCrossedPage && $rsItemStartY > $mTop + 10) {
+                        $pdf->AddPage();
+                    }
+
+                    $renderRsRow();
+
+                    $pdf->Ln(1);
+                }
+
+                $prevType = 'recommendation_summary';
 
             } elseif ($type === 'chart_static') {
                 $chKind = (string) ($block['chartKind'] ?? 'bar');
