@@ -68,6 +68,10 @@ class Collection
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $extractError = null;
 
+    /** @var string[]|null Tags to apply only after a successful collect — null when already applied. */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $pendingTags = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -177,6 +181,17 @@ class Collection
     public function setLastExtractedAt(?\DateTimeImmutable $v): static { $this->lastExtractedAt = $v; return $this; }
     public function getExtractError(): ?string { return $this->extractError; }
     public function setExtractError(?string $v): static { $this->extractError = $v; return $this; }
+
+    /** @return string[] */
+    public function getPendingTags(): array { return $this->pendingTags ?? []; }
+    public function setPendingTags(?array $names): static
+    {
+        if ($names === null) { $this->pendingTags = null; return $this; }
+        $clean = array_values(array_unique(array_filter(array_map('strval', $names), fn($n) => $n !== '')));
+        $this->pendingTags = $clean ?: null;
+        return $this;
+    }
+    public function clearPendingTags(): static { $this->pendingTags = null; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 
     public function getStoragePath(): string

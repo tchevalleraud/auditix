@@ -81,6 +81,9 @@ class CollectNodeMessageHandler
             $collection->setCompletedCount(0);
             $collection->setCompletedAt(new \DateTimeImmutable());
             $this->em->flush();
+            // No commands at all is treated as success — apply the pending
+            // tag swap so the empty collect still becomes the new "latest".
+            $this->applyPendingTagSwap($collection);
             $this->publishUpdate($collection);
             return;
         }
@@ -100,11 +103,10 @@ class CollectNodeMessageHandler
         $cliCred = $profile?->getCliCredential();
 
         if (!$cliCred || !$cliCred->getUsername()) {
-            $collection->setStatus(Collection::STATUS_FAILED);
-            $collection->setError('No CLI credentials configured on this node\'s profile');
-            $collection->setCompletedAt(new \DateTimeImmutable());
-            $this->em->flush();
-            $this->publishUpdate($collection);
+            $this->rollbackFailedCollection(
+                $collection,
+                'No CLI credentials configured on this node\'s profile',
+            );
             return;
         }
 
@@ -116,11 +118,10 @@ class CollectNodeMessageHandler
             $ssh->enablePTY();
 
             if (!$ssh->login($cliCred->getUsername(), $cliCred->getPassword() ?? '')) {
-                $collection->setStatus(Collection::STATUS_FAILED);
-                $collection->setError('SSH authentication failed for ' . $cliCred->getUsername() . '@' . $ip . ':' . $port);
-                $collection->setCompletedAt(new \DateTimeImmutable());
-                $this->em->flush();
-                $this->publishUpdate($collection);
+                $this->rollbackFailedCollection(
+                    $collection,
+                    'SSH authentication failed for ' . $cliCred->getUsername() . '@' . $ip . ':' . $port,
+                );
                 return;
             }
 
@@ -195,11 +196,6 @@ class CollectNodeMessageHandler
 
             $ssh->disconnect();
 
-            $collection->setStatus($hasError ? Collection::STATUS_FAILED : Collection::STATUS_COMPLETED);
-            $collection->setCompletedAt(new \DateTimeImmutable());
-            $this->em->flush();
-            $this->publishUpdate($collection);
-
             $this->logger->info('[collect] done', [
                 'collectionId' => $collection->getId(),
                 'nodeId' => $node->getId(),
@@ -209,25 +205,43 @@ class CollectNodeMessageHandler
                 'hasError' => $hasError,
             ]);
 
-            // Apply collection rules and extract inventory data
-            $extractOk = false;
-            if (!$hasError) {
-                $collection->setExtractStatus(Collection::EXTRACT_STATUS_RUNNING);
-                $this->em->flush();
-                try {
-                    $this->processInventoryRules($collection, $node, $baseDir);
-                    $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
-                    $collection->setLastExtractedAt(new \DateTimeImmutable());
-                    $extractOk = true;
-                } catch (\Throwable $e) {
-                    $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
-                    $collection->setExtractError($e->getMessage());
-                }
-                $this->em->flush();
+            if ($hasError) {
+                // Rollback: drop the failed collection so the prior collection
+                // keeps its tag and inventory. Stop the pipeline here.
+                $this->rollbackFailedCollection(
+                    $collection,
+                    'One or more collect commands failed',
+                );
+                return;
+            }
 
-                if ($extractOk) {
-                    $this->publishNodeUpdated($node);
-                }
+            $collection->setStatus(Collection::STATUS_COMPLETED);
+            $collection->setCompletedAt(new \DateTimeImmutable());
+            $this->em->flush();
+
+            // Swap tags now that the collect succeeded. Releasing the prior tag
+            // CASCADE-deletes its inventory entries so the next extraction can
+            // populate this collection's snapshot.
+            $this->applyPendingTagSwap($collection);
+            $this->publishUpdate($collection);
+
+            // Apply collection rules and extract inventory data
+            $collection->setExtractStatus(Collection::EXTRACT_STATUS_RUNNING);
+            $this->em->flush();
+            $extractOk = false;
+            try {
+                $this->processInventoryRules($collection, $node, $baseDir);
+                $collection->setExtractStatus(Collection::EXTRACT_STATUS_COMPLETED);
+                $collection->setLastExtractedAt(new \DateTimeImmutable());
+                $extractOk = true;
+            } catch (\Throwable $e) {
+                $collection->setExtractStatus(Collection::EXTRACT_STATUS_FAILED);
+                $collection->setExtractError($e->getMessage());
+            }
+            $this->em->flush();
+
+            if ($extractOk) {
+                $this->publishNodeUpdated($node);
             }
 
             if ($extractOk && $message->shouldChainCompliance()) {
@@ -235,12 +249,121 @@ class CollectNodeMessageHandler
             }
 
         } catch (\Throwable $e) {
-            $collection->setStatus(Collection::STATUS_FAILED);
-            $collection->setError('SSH error: ' . $e->getMessage());
-            $collection->setCompletedAt(new \DateTimeImmutable());
-            $this->em->flush();
-            $this->publishUpdate($collection);
+            $this->rollbackFailedCollection($collection, 'SSH error: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Apply the deferred tag swap after a successful collect: release the same
+     * tag from any prior collection on the node (CASCADE-deletes its inventory)
+     * and bind it to this collection. Idempotent — clears pendingTags after.
+     */
+    private function applyPendingTagSwap(Collection $collection): void
+    {
+        $pending = $collection->getPendingTags();
+        if (empty($pending)) {
+            return;
+        }
+
+        $node = $collection->getNode();
+        foreach ($pending as $name) {
+            // Release this tag from any other collection of the same node.
+            $this->em->createQueryBuilder()
+                ->delete(CollectionTag::class, 'ct')
+                ->where('ct.node = :node AND ct.name = :name AND ct.collection != :self')
+                ->setParameter('node', $node)
+                ->setParameter('name', $name)
+                ->setParameter('self', $collection)
+                ->getQuery()
+                ->execute();
+
+            if (!$collection->hasTag($name)) {
+                $collection->addTag($name);
+            }
+        }
+        $collection->clearPendingTags();
+        $this->em->flush();
+    }
+
+    /**
+     * Discard a collection that failed before completion: delete the row, its
+     * SSH output storage, and notify subscribers. The prior collection on the
+     * same node keeps its tag and inventory intact.
+     */
+    private function rollbackFailedCollection(Collection $collection, string $reason): void
+    {
+        $node = $collection->getNode();
+        $context = $collection->getContext();
+        $collectionId = $collection->getId();
+
+        $this->logger->warning('[collect] rollback', [
+            'collectionId' => $collectionId,
+            'nodeId' => $node?->getId(),
+            'reason' => $reason,
+        ]);
+
+        $storageDir = $this->projectDir . '/var/' . $collection->getStoragePath();
+        $this->deleteDirectory($storageDir);
+
+        $this->em->remove($collection);
+        $this->em->flush();
+
+        $this->publishCollectionDeleted($collectionId, $node, $context, $reason);
+    }
+
+    private function deleteDirectory(string $dir): void
+    {
+        if (!is_dir($dir)) return;
+        $items = scandir($dir);
+        if ($items === false) return;
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $path = $dir . '/' . $item;
+            if (is_dir($path)) {
+                $this->deleteDirectory($path);
+            } else {
+                @unlink($path);
+            }
+        }
+        @rmdir($dir);
+    }
+
+    private function publishCollectionDeleted(?int $id, ?Node $node, $context, string $reason): void
+    {
+        if (!$id || !$node) return;
+
+        $this->hub->publish(new Update(
+            'collections/node/' . $node->getId(),
+            json_encode([
+                'event' => 'collection.deleted',
+                'collection' => [
+                    'id' => $id,
+                    'nodeId' => $node->getId(),
+                    'reason' => $reason,
+                ],
+            ]),
+        ));
+
+        $this->hub->publish(new Update(
+            'admin/tasks',
+            json_encode([
+                'event' => 'task.deleted',
+                'task' => [
+                    'id' => 'col-' . $id,
+                    'type' => 'collection',
+                    'reason' => $reason,
+                    'node' => [
+                        'id' => $node->getId(),
+                        'ipAddress' => $node->getIpAddress(),
+                        'name' => $node->getName(),
+                    ],
+                    'context' => $context ? [
+                        'id' => $context->getId(),
+                        'name' => $context->getName(),
+                    ] : null,
+                ],
+            ]),
+        ));
     }
 
     /**

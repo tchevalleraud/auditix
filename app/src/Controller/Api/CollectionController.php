@@ -40,6 +40,7 @@ class CollectionController extends AbstractController
                 'ipAddress' => $node->getIpAddress(),
             ],
             'tags' => $c->getTagNames(),
+            'pendingTags' => $c->getPendingTags(),
             'collectionTags' => array_map(fn(CollectionTag $t) => [
                 'id' => $t->getId(),
                 'name' => $t->getName(),
@@ -129,15 +130,13 @@ class CollectionController extends AbstractController
 
         foreach ($nodes as $node) {
             $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
-            // Release tags from other collections of the same node
-            foreach ($tags as $tag) {
-                $this->releaseTag($em, $tag, $node);
-            }
-
+            // Defer the tag swap to the message handler — applied only after a
+            // successful collect so the prior collection (and its inventory)
+            // stays intact if the new collect fails.
             $collection = new Collection();
             $collection->setNode($node);
             $collection->setContext($context);
-            $collection->setTags($tags);
+            $collection->setPendingTags($tags);
 
             $em->persist($collection);
             $collections[] = $collection;

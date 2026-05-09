@@ -226,20 +226,14 @@ class PublicLabController extends AbstractController
             }
         }
 
-        // Release tags and create collections
+        // Tags are deferred — applied by the message handler only after a
+        // successful collect, so a failed collect leaves the prior collection's
+        // tag and inventory untouched.
         foreach ($allNodes as $node) {
-            $em->createQueryBuilder()
-                ->delete(\App\Entity\CollectionTag::class, 'ct')
-                ->where('ct.node = :node AND ct.name = :name')
-                ->setParameter('node', $node)
-                ->setParameter('name', 'latest')
-                ->getQuery()
-                ->execute();
-
             $collection = new Collection();
             $collection->setNode($node);
             $collection->setContext($context);
-            $collection->setTags(['latest']);
+            $collection->setPendingTags(['latest']);
             $em->persist($collection);
         }
 

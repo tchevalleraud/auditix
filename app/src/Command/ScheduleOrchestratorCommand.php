@@ -180,21 +180,13 @@ class ScheduleOrchestratorCommand extends Command
         $context = $schedule->getContext();
 
         foreach ($nodes as $node) {
-            // Release 'latest' from any prior collection with a direct DELETE so
-            // the unique (node_id, name) row is gone before the new CollectionTag
-            // INSERT in the same UOW.
-            $this->em->createQueryBuilder()
-                ->delete(\App\Entity\CollectionTag::class, 'ct')
-                ->where('ct.node = :node AND ct.name = :name')
-                ->setParameter('node', $node)
-                ->setParameter('name', 'latest')
-                ->getQuery()
-                ->execute();
-
+            // Tags are deferred — applied by the message handler only after a
+            // successful collect, so a failed collect leaves the prior
+            // collection's tag and inventory untouched.
             $collection = new Collection();
             $collection->setNode($node);
             $collection->setContext($context);
-            $collection->setTags(['latest']);
+            $collection->setPendingTags(['latest']);
 
             $this->em->persist($collection);
         }

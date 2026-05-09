@@ -96,15 +96,13 @@ class OperationController extends AbstractController
 
         $collections = [];
         foreach ($nodes as $node) {
-            // Release tags from other collections of the same node
-            foreach ($tags as $tag) {
-                $this->releaseTag($em, $tag, $node);
-            }
-
+            // Defer the tag swap to the message handler — applied only after a
+            // successful collect so the prior collection (and its inventory)
+            // stays intact if the new collect fails.
             $collection = new Collection();
             $collection->setNode($node);
             $collection->setContext($context);
-            $collection->setTags($tags);
+            $collection->setPendingTags($tags);
 
             $em->persist($collection);
             $collections[] = $collection;
@@ -359,16 +357,4 @@ class OperationController extends AbstractController
         return $this->json($result);
     }
 
-    private function releaseTag(EntityManagerInterface $em, string $tag, Node $node): void
-    {
-        // Direct DELETE bypasses the UOW so the unique (node_id, name) row is
-        // gone before any new CollectionTag is INSERTed in the same flush.
-        $em->createQueryBuilder()
-            ->delete(\App\Entity\CollectionTag::class, 'ct')
-            ->where('ct.node = :node AND ct.name = :name')
-            ->setParameter('node', $node)
-            ->setParameter('name', $tag)
-            ->getQuery()
-            ->execute();
-    }
 }
