@@ -10,6 +10,7 @@ use App\Entity\NodeTag;
 use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
+use App\Service\BlockConditionEvaluator;
 use App\Service\ComplianceEvaluator;
 use App\Service\InventoryNodeRuleEvaluator;
 use App\Service\SystemUpdateScoreCalculator;
@@ -29,6 +30,7 @@ class GenerateReportMessageHandler
         private readonly InventoryNodeRuleEvaluator $inventoryRuleEvaluator,
         private readonly ComplianceEvaluator $complianceEvaluator,
         private readonly SystemUpdateScoreCalculator $lifecycleCalculator,
+        private readonly BlockConditionEvaluator $blockConditionEvaluator,
         private readonly LoggerInterface $logger,
     ) {}
 
@@ -424,33 +426,10 @@ class GenerateReportMessageHandler
             $tocEntries[] = ['level' => 1, 'title' => $t['illustrations_page'], 'page' => $pageNum];
         }
 
-        // Blocks: compute TOC entries and page numbers
+        // Blocks: compute TOC entries and page numbers (recurses into containers).
         $blocks = $report->getBlocks();
         $firstBlockDone = false;
-        foreach ($blocks as $block) {
-            if (!$firstBlockDone) {
-                $pageNum++;
-                $firstBlockDone = true;
-                if ($block['type'] === 'heading') {
-                    $tocEntries[] = [
-                        'level' => $block['level'] ?? 1,
-                        'title' => $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report),
-                        'page' => $pageNum,
-                    ];
-                }
-                continue;
-            }
-            if ($block['type'] === 'heading') {
-                if (!empty($block['pageBreakBefore'])) {
-                    $pageNum++;
-                }
-                $tocEntries[] = [
-                    'level' => $block['level'] ?? 1,
-                    'title' => $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report),
-                    'page' => $pageNum,
-                ];
-            }
-        }
+        $this->collectTocEntries($blocks, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
 
         // --- Render PDF ---
         $pdf = new TCPDF('P', 'mm', 'A4', true, 'UTF-8');
@@ -832,6 +811,7 @@ class GenerateReportMessageHandler
         ?Report $report = null,
         array $summaryPageMap = [],
         array &$collectedPageMap = [],
+        bool $isNestedCall = false,
     ): void {
         if (empty($blocks)) return;
 
@@ -850,7 +830,9 @@ class GenerateReportMessageHandler
 
         // Heading numbering counters
         $counters = [];
-        $firstBlock = true;
+        // Nested calls (two_column, conditional) skip the implicit AddPage on the
+        // first block so the cursor stays where the parent placed it.
+        $firstBlock = !$isNestedCall;
         $prevType = '';
         $blockCount = count($blocks);
 
@@ -4795,6 +4777,372 @@ class GenerateReportMessageHandler
                     $pdf->Ln($pSpaceAfter);
                 }
                 $prevType = 'inventory_diff';
+
+            } elseif ($type === 'two_column') {
+                if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                }
+                $this->renderTwoColumn(
+                    $pdf, $block, $headingsByLevel, $styles, $numberingEnabled,
+                    $mLeft, $mTop, $mRight, $mBottom,
+                    $forNode, $report, $summaryPageMap, $collectedPageMap
+                );
+                $prevType = 'two_column';
+
+            } elseif ($type === 'conditional') {
+                $condTree = is_array($block['condition'] ?? null) ? $block['condition'] : null;
+                $shouldRender = $this->blockConditionEvaluator->evaluate($condTree, $forNode, $report);
+                if ($shouldRender) {
+                    if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                        $pdf->SetMargins($mLeft, $mTop, $mRight);
+                        $pdf->SetAutoPageBreak(true, $mBottom);
+                        $pdf->AddPage();
+                        $firstBlock = false;
+                    }
+                    $children = is_array($block['children'] ?? null) ? $block['children'] : [];
+                    if (!empty($block['inheritScopeToChildren'])) {
+                        $parentScope = $this->blockConditionEvaluator->extractInheritedScope($condTree);
+                        if ($parentScope !== null) {
+                            $children = array_map(
+                                fn($c) => is_array($c) ? $this->overlayScopeOnBlock($c, $parentScope) : $c,
+                                $children,
+                            );
+                        }
+                    }
+                    $this->renderBlocks(
+                        $pdf, $children, $headingsByLevel, $styles, $numberingEnabled,
+                        $mLeft, $mTop, $mRight, $mBottom,
+                        $forNode, $report, $summaryPageMap, $collectedPageMap,
+                        true,
+                    );
+                    $prevType = 'conditional';
+                }
+            }
+        }
+    }
+
+    /**
+     * Render a two_column container block.
+     *
+     * Strategy:
+     *   - Restrict TCPDF margins per column (enlarge the right margin for the
+     *     left column and vice-versa) so children render within the column box.
+     *   - Phase 1: dry-run each column inside a TCPDF transaction to measure its
+     *     height. When both columns end on the start page, vAlign offsets are
+     *     applied so each column can be top/middle/bottom-aligned independently.
+     *   - Phase 2: render each column for real. Auto page-break works inside the
+     *     column box, so overflow continues at the top of the next page within
+     *     that same column. Multi-page layouts may not stay perfectly side-by-side
+     *     when one column is much taller — vAlign is skipped in that case.
+     *   - Restore margins and place the cursor on the deeper column's end.
+     */
+    private function renderTwoColumn(
+        TCPDF $pdf,
+        array $block,
+        array $headingsByLevel,
+        array $styles,
+        bool $numberingEnabled,
+        float $mLeft,
+        float $mTop,
+        float $mRight,
+        float $mBottom,
+        ?Node $forNode,
+        ?Report $report,
+        array $summaryPageMap,
+        array &$collectedPageMap,
+    ): void {
+        $leftPct = (float) ($block['leftWidthPct'] ?? 50);
+        if ($leftPct < 10) $leftPct = 10;
+        if ($leftPct > 90) $leftPct = 90;
+        $gap = max(0.0, (float) ($block['gapMm'] ?? 4));
+        $leftBlocks = is_array($block['leftBlocks'] ?? null) ? $block['leftBlocks'] : [];
+        $rightBlocks = is_array($block['rightBlocks'] ?? null) ? $block['rightBlocks'] : [];
+        $leftVAlign = (string) ($block['leftVAlign'] ?? 'top');
+        $rightVAlign = (string) ($block['rightVAlign'] ?? 'top');
+
+        $pageW = $pdf->getPageWidth();
+        $contentW = $pageW - $mLeft - $mRight;
+        $effW = max(1.0, $contentW - $gap);
+        $leftW = $effW * $leftPct / 100.0;
+        $rightW = $effW - $leftW;
+
+        $leftRightM = $mRight + $rightW + $gap;
+        $rightLeftM = $mLeft + $leftW + $gap;
+
+        $startY = $pdf->GetY();
+        $startPage = $pdf->getPage();
+
+        // PHASE 1: measure both columns (single-page case for vAlign)
+        $unused = [];
+        $pdf->startTransaction();
+        $pdf->SetMargins($mLeft, $mTop, $leftRightM);
+        $pdf->SetAutoPageBreak(true, $mBottom);
+        $pdf->setPage($startPage);
+        $pdf->SetXY($mLeft, $startY);
+        $this->renderBlocks(
+            $pdf, $leftBlocks, $headingsByLevel, $styles, $numberingEnabled,
+            $mLeft, $mTop, $leftRightM, $mBottom,
+            $forNode, $report, $summaryPageMap, $unused,
+            true,
+        );
+        $leftMeasuredEndY = $pdf->GetY();
+        $leftMeasuredEndPage = $pdf->getPage();
+        $pdf->rollbackTransaction(true);
+
+        $unused = [];
+        $pdf->startTransaction();
+        $pdf->SetMargins($rightLeftM, $mTop, $mRight);
+        $pdf->SetAutoPageBreak(true, $mBottom);
+        $pdf->setPage($startPage);
+        $pdf->SetXY($rightLeftM, $startY);
+        $this->renderBlocks(
+            $pdf, $rightBlocks, $headingsByLevel, $styles, $numberingEnabled,
+            $rightLeftM, $mTop, $mRight, $mBottom,
+            $forNode, $report, $summaryPageMap, $unused,
+            true,
+        );
+        $rightMeasuredEndY = $pdf->GetY();
+        $rightMeasuredEndPage = $pdf->getPage();
+        $pdf->rollbackTransaction(true);
+
+        $singlePage = ($leftMeasuredEndPage === $startPage) && ($rightMeasuredEndPage === $startPage);
+        $leftOffset = 0.0;
+        $rightOffset = 0.0;
+        if ($singlePage) {
+            $leftH = max(0.0, $leftMeasuredEndY - $startY);
+            $rightH = max(0.0, $rightMeasuredEndY - $startY);
+            $blockH = max($leftH, $rightH);
+            $leftOffset = $this->valignOffset($leftVAlign, $leftH, $blockH);
+            $rightOffset = $this->valignOffset($rightVAlign, $rightH, $blockH);
+        }
+
+        // PHASE 2: render LEFT column
+        $pdf->SetMargins($mLeft, $mTop, $leftRightM);
+        $pdf->SetAutoPageBreak(true, $mBottom);
+        $pdf->setPage($startPage);
+        $pdf->SetXY($mLeft, $startY + $leftOffset);
+        $this->renderBlocks(
+            $pdf, $leftBlocks, $headingsByLevel, $styles, $numberingEnabled,
+            $mLeft, $mTop, $leftRightM, $mBottom,
+            $forNode, $report, $summaryPageMap, $collectedPageMap,
+            true,
+        );
+        $leftEndY = $pdf->GetY();
+        $leftEndPage = $pdf->getPage();
+
+        // PHASE 3: render RIGHT column
+        $pdf->SetMargins($rightLeftM, $mTop, $mRight);
+        $pdf->SetAutoPageBreak(true, $mBottom);
+        $pdf->setPage($startPage);
+        $pdf->SetXY($rightLeftM, $startY + $rightOffset);
+        $this->renderBlocks(
+            $pdf, $rightBlocks, $headingsByLevel, $styles, $numberingEnabled,
+            $rightLeftM, $mTop, $mRight, $mBottom,
+            $forNode, $report, $summaryPageMap, $collectedPageMap,
+            true,
+        );
+        $rightEndY = $pdf->GetY();
+        $rightEndPage = $pdf->getPage();
+
+        // PHASE 4: restore margins, sync cursor to deeper column
+        $pdf->SetMargins($mLeft, $mTop, $mRight);
+        $pdf->SetAutoPageBreak(true, $mBottom);
+        if ($leftEndPage > $rightEndPage) {
+            $pdf->setPage($leftEndPage);
+            $pdf->SetXY($mLeft, $leftEndY);
+        } elseif ($rightEndPage > $leftEndPage) {
+            $pdf->setPage($rightEndPage);
+            $pdf->SetXY($mLeft, $rightEndY);
+        } else {
+            $pdf->SetXY($mLeft, max($leftEndY, $rightEndY));
+        }
+    }
+
+    private function valignOffset(string $align, float $h, float $blockH): float
+    {
+        if ($align === 'middle') return max(0.0, ($blockH - $h) / 2.0);
+        if ($align === 'bottom') return max(0.0, $blockH - $h);
+        return 0.0;
+    }
+
+    /**
+     * Apply a scope inherited from a parent "conditional" block onto a child.
+     *
+     * $parentScope is shaped as { scope: 'all'|'tag'|'nodes', nodeIds?: int[], tagIds?: int[] }
+     * (produced by BlockConditionEvaluator::extractInheritedScope). The mapping
+     * adapts each block type's scope-field convention:
+     *   - compliance_recommendations:  scope = 'all'|'tag'|'device' (+ nodeTagIds, nodeIds)
+     *   - chart_inventory:             deviceSelectionMode = 'all'|'tag'|'device'
+     *   - inventory_diff:              scope = 'all'|'tag'|'node' (single nodeId)
+     *   - rule_recommendation:         single nodeId
+     *   - rule_non_compliant / rule_nodes_table / inventory_table / cli_command / timeline:
+     *       multi-node nodeIds (or tagIds for cli_command)
+     *
+     * Children that opt out via inheritFromParent === false are returned unchanged.
+     * Containers (two_column) recurse so their inner blocks also inherit. A nested
+     * conditional defines its own scope and is left alone.
+     */
+    private function overlayScopeOnBlock(array $block, array $parentScope): array
+    {
+        if (array_key_exists('inheritFromParent', $block) && $block['inheritFromParent'] === false) {
+            return $block;
+        }
+        $type = (string) ($block['type'] ?? '');
+        $scope = (string) ($parentScope['scope'] ?? 'all');
+        $nodeIds = array_values(array_map('intval', (array) ($parentScope['nodeIds'] ?? [])));
+        $tagIds = array_values(array_map('intval', (array) ($parentScope['tagIds'] ?? [])));
+
+        switch ($type) {
+            case 'compliance_recommendations':
+                if ($scope === 'nodes') {
+                    $block['scope'] = 'device';
+                    $block['nodeIds'] = $nodeIds;
+                } elseif ($scope === 'tag') {
+                    $block['scope'] = 'tag';
+                    $block['nodeTagIds'] = $tagIds;
+                } else {
+                    $block['scope'] = 'all';
+                }
+                break;
+
+            case 'rule_non_compliant':
+            case 'rule_nodes_table':
+            case 'inventory_table':
+                if ($scope === 'nodes') {
+                    $block['nodeIds'] = $nodeIds;
+                }
+                // 'tag' / 'all' do not have a direct equivalent on these blocks.
+                break;
+
+            case 'rule_recommendation':
+                if ($scope === 'nodes' && !empty($nodeIds)) {
+                    $block['nodeId'] = $nodeIds[0];
+                }
+                break;
+
+            case 'chart_inventory':
+                if ($scope === 'nodes') {
+                    $block['deviceSelectionMode'] = 'device';
+                    $block['nodeIds'] = $nodeIds;
+                } elseif ($scope === 'tag') {
+                    $block['deviceSelectionMode'] = 'tag';
+                    $block['tagIds'] = $tagIds;
+                } else {
+                    $block['deviceSelectionMode'] = 'all';
+                }
+                break;
+
+            case 'inventory_diff':
+                if ($scope === 'nodes' && !empty($nodeIds)) {
+                    $block['scope'] = 'node';
+                    $block['nodeId'] = $nodeIds[0];
+                } elseif ($scope === 'tag') {
+                    $block['scope'] = 'tag';
+                    $block['tagIds'] = $tagIds;
+                } else {
+                    $block['scope'] = 'all';
+                }
+                break;
+
+            case 'cli_command':
+                if ($scope === 'nodes') {
+                    $block['nodeIds'] = $nodeIds;
+                    $block['tagIds'] = [];
+                } elseif ($scope === 'tag') {
+                    $block['tagIds'] = $tagIds;
+                    $block['nodeIds'] = [];
+                }
+                break;
+
+            case 'timeline':
+                if ($scope === 'nodes') {
+                    $block['mode'] = 'node';
+                    $block['nodeIds'] = $nodeIds;
+                }
+                break;
+
+            case 'two_column':
+                $block['leftBlocks'] = array_map(
+                    fn($c) => is_array($c) ? $this->overlayScopeOnBlock($c, $parentScope) : $c,
+                    $block['leftBlocks'] ?? [],
+                );
+                $block['rightBlocks'] = array_map(
+                    fn($c) => is_array($c) ? $this->overlayScopeOnBlock($c, $parentScope) : $c,
+                    $block['rightBlocks'] ?? [],
+                );
+                break;
+
+            // 'conditional': nested conditional defines its own scope; leave untouched.
+        }
+
+        return $block;
+    }
+
+    /**
+     * Walk the block tree to compute TOC entries. Mirrors the rendering pass:
+     *   - "conditional" branches recurse only when their condition evaluates true
+     *   - "two_column" recurses into both columns
+     *   - any other "first" content block consumes the implicit AddPage of renderBlocks
+     */
+    private function collectTocEntries(
+        array $blocks,
+        int &$pageNum,
+        bool &$firstBlockDone,
+        array &$tocEntries,
+        ?Node $forNode,
+        ?Report $report,
+    ): void {
+        foreach ($blocks as $block) {
+            $type = (string) ($block['type'] ?? '');
+
+            if ($type === 'heading') {
+                if (!$firstBlockDone) {
+                    $pageNum++;
+                    $firstBlockDone = true;
+                } elseif (!empty($block['pageBreakBefore'])) {
+                    $pageNum++;
+                }
+                $tocEntries[] = [
+                    'level' => $block['level'] ?? 1,
+                    'title' => $this->resolveNodeVariables($block['content'] ?? '', $forNode, $report),
+                    'page' => $pageNum,
+                ];
+            } elseif ($type === 'two_column') {
+                if (!$firstBlockDone) {
+                    $pageNum++;
+                    $firstBlockDone = true;
+                } elseif (!empty($block['pageBreakBefore'])) {
+                    $pageNum++;
+                }
+                $left = is_array($block['leftBlocks'] ?? null) ? $block['leftBlocks'] : [];
+                $right = is_array($block['rightBlocks'] ?? null) ? $block['rightBlocks'] : [];
+                $this->collectTocEntries($left, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
+                $this->collectTocEntries($right, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
+            } elseif ($type === 'conditional') {
+                $shouldRender = $this->blockConditionEvaluator->evaluate(
+                    is_array($block['condition'] ?? null) ? $block['condition'] : null,
+                    $forNode,
+                    $report,
+                );
+                if ($shouldRender) {
+                    if (!$firstBlockDone) {
+                        $pageNum++;
+                        $firstBlockDone = true;
+                    } elseif (!empty($block['pageBreakBefore'])) {
+                        $pageNum++;
+                    }
+                    $children = is_array($block['children'] ?? null) ? $block['children'] : [];
+                    $this->collectTocEntries($children, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
+                }
+            } else {
+                // Any other content block contributes only by consuming the implicit first AddPage.
+                if (!$firstBlockDone) {
+                    $pageNum++;
+                    $firstBlockDone = true;
+                }
             }
         }
     }

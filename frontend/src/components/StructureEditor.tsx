@@ -57,6 +57,13 @@ import {
   GitCompare,
   Columns3,
   ArrowLeftRight,
+  Columns2,
+  GitBranch,
+  AlignVerticalJustifyStart,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
+  Link as LinkIcon,
+  Unlink as UnlinkIcon,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -576,6 +583,75 @@ export interface InventoryDiffBlock {
   pageBreakBefore?: boolean;
 }
 
+// === Container blocks ===
+export type ColumnVAlign = "top" | "middle" | "bottom";
+
+export interface TwoColumnBlock {
+  id: string;
+  type: "two_column";
+  leftWidthPct: number; // 10..90 (right = 100 - left)
+  gapMm: number; // mm between columns
+  leftVAlign: ColumnVAlign;
+  rightVAlign: ColumnVAlign;
+  leftBlocks: ReportBlock[];
+  rightBlocks: ReportBlock[];
+  pageBreakBefore?: boolean;
+}
+
+export type ConditionLeafKind =
+  | "node_compliance"
+  | "scope_compliance"
+  | "rule_compliance"
+  | "inventory_present";
+
+export type ComplianceLeafStatus =
+  | "compliant"
+  | "non_compliant"
+  | "error"
+  | "not_applicable"
+  | "skipped";
+
+export type ConditionScopeKind = "all" | "tag" | "nodes";
+
+export type ConditionMatchMode = "any" | "all" | "none";
+
+export interface ConditionLeaf {
+  id: string;
+  kind: ConditionLeafKind;
+  // node_compliance
+  nodeId?: number | null;
+  // scope_compliance / rule_compliance / inventory_present
+  scope?: ConditionScopeKind;
+  tagIds?: number[];
+  nodeIds?: number[];
+  status?: ComplianceLeafStatus[];
+  matchMode?: ConditionMatchMode;
+  // rule_compliance
+  ruleId?: number | null;
+  policyId?: number | null;
+  // inventory_present
+  categoryName?: string;
+  entryKey?: string;
+}
+
+export interface ConditionGroup {
+  id: string;
+  kind: "group";
+  op: "and" | "or";
+  negate?: boolean;
+  items: (ConditionLeaf | ConditionGroup)[];
+}
+
+export interface ConditionalBlock {
+  id: string;
+  type: "conditional";
+  label: string; // free-form name shown in the editor list
+  condition: ConditionGroup;
+  inheritScopeToChildren: boolean; // default true; propagates condition scope to children with inheritFromParent !== false
+  children: ReportBlock[];
+  pageBreakBefore?: boolean;
+}
+
 // === Timeline ===
 export interface TimelineBlock {
   id: string;
@@ -600,7 +676,33 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | StaticRecommendationsBlock | RecommendationSummaryBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
+export type ReportBlock = (
+  | HeadingBlock
+  | ParagraphBlock
+  | ImageBlock
+  | TableBlock
+  | InventoryTableBlock
+  | CliCommandBlock
+  | EquipmentListBlock
+  | ActionListBlock
+  | CommandListBlock
+  | TopologyBlock
+  | ComplianceMatrixBlock
+  | RuleNonCompliantBlock
+  | RuleNodesTableBlock
+  | RuleRecommendationBlock
+  | ComplianceRecommendationsBlock
+  | StaticRecommendationsBlock
+  | RecommendationSummaryBlock
+  | ChartStaticBlock
+  | ChartInventoryBlock
+  | TimelineBlock
+  | ComparisonSummaryBlock
+  | ComparisonDetailBlock
+  | InventoryDiffBlock
+  | TwoColumnBlock
+  | ConditionalBlock
+) & { inheritFromParent?: boolean };
 
 interface ReportNodeRef {
   id: number;
@@ -615,6 +717,15 @@ interface Props {
   t: (key: string, params?: Record<string, string>) => string;
   reportType?: "general" | "node";
   reportNodes?: ReportNodeRef[];
+  // When true, this editor is rendered inside another modal/container.
+  // We disable overflow clipping on the root so popover menus (Add block,
+  // inline insert handle) can escape the column wrapper, and bump z-index
+  // so they layer above sibling columns.
+  embedded?: boolean;
+  // When true, the parent (a "conditional" with inheritScopeToChildren) is
+  // overlaying its scope on every child whose inheritFromParent !== false.
+  // We surface a per-row toggle so the user can opt a single child out.
+  parentInherits?: boolean;
 }
 
 function uid() {
@@ -708,6 +819,14 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "inventory_diff", labelKey: "structure.addInventoryDiff", icon: <ArrowLeftRight className="h-4 w-4 text-pink-500" /> },
     ],
   },
+  {
+    labelKey: "structure.catContainers",
+    icon: <Columns2 className="h-4 w-4 text-slate-500" />,
+    items: [
+      { type: "two_column", labelKey: "structure.addTwoColumn", icon: <Columns2 className="h-4 w-4 text-slate-500" /> },
+      { type: "conditional", labelKey: "structure.addConditional", icon: <GitBranch className="h-4 w-4 text-slate-500" /> },
+    ],
+  },
 ];
 
 function BlockMenu({
@@ -764,7 +883,7 @@ function BlockMenu({
   );
 }
 
-export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes }: Props) {
+export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes, embedded = false, parentInherits = false }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -909,6 +1028,28 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         tagIds: [],
         showOnlyDiffs: false,
         showHeader: true,
+        pageBreakBefore: false,
+      };
+    } else if (type === "two_column") {
+      block = {
+        id,
+        type: "two_column",
+        leftWidthPct: 50,
+        gapMm: 4,
+        leftVAlign: "top",
+        rightVAlign: "top",
+        leftBlocks: [],
+        rightBlocks: [],
+        pageBreakBefore: false,
+      };
+    } else if (type === "conditional") {
+      block = {
+        id,
+        type: "conditional",
+        label: "",
+        condition: { id: uid(), kind: "group", op: "and", items: [] },
+        inheritScopeToChildren: true,
+        children: [],
         pageBreakBefore: false,
       };
     } else {
@@ -1159,6 +1300,20 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyInventoryDiff")}</span>;
     }
+    if (block.type === "two_column") {
+      const lc = block.leftBlocks.length;
+      const rc = block.rightBlocks.length;
+      return <span className="text-slate-500 text-xs">{t("structure.twoColumn")} — {block.leftWidthPct}/{100 - block.leftWidthPct} — {lc} | {rc}</span>;
+    }
+    if (block.type === "conditional") {
+      const childCount = block.children.length;
+      const itemCount = block.condition.items.length;
+      const label = block.label || t("structure.conditional");
+      if (itemCount === 0) {
+        return <span className="italic text-slate-400">{t("structure.emptyConditional")}</span>;
+      }
+      return <span className="text-slate-500 text-xs">{label} — {itemCount} {block.condition.op.toUpperCase()} — {childCount} {t("structure.condChildBlocks")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -1320,6 +1475,20 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         </span>
       );
     }
+    if (block.type === "two_column") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-500/15 px-2 py-0.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+          <Columns2 className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "conditional") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-500/15 px-2 py-0.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+          <GitBranch className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
         P
@@ -1329,7 +1498,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
 
   return (
     <>
-      <div className="flex flex-col h-full min-h-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      <div className={`flex flex-col h-full min-h-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm ${embedded ? "overflow-visible" : "overflow-hidden"}`}>
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -1345,7 +1514,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               <ChevronDownIcon className="h-3.5 w-3.5" />
             </button>
             {addMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-30 w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg">
+              <div className={`absolute right-0 top-full mt-1 ${embedded ? "z-[60]" : "z-30"} w-56 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg`}>
                 <BlockMenu
                   onPick={(type) => { addBlock(type); setAddMenuOpen(false); }}
                   side="left"
@@ -1422,6 +1591,27 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                             <FileDown className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                           )}
 
+                          {/* Inheritance toggle (only when parent is a conditional with inheritScopeToChildren) */}
+                          {parentInherits && block.type !== "conditional" && (
+                            (() => {
+                              const inheriting = block.inheritFromParent !== false;
+                              const Icon = inheriting ? LinkIcon : UnlinkIcon;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    updateBlock(block.id, { inheritFromParent: inheriting ? false : true } as Partial<ReportBlock>);
+                                  }}
+                                  className={`shrink-0 p-1 rounded-md transition-colors ${inheriting ? "text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10" : "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+                                  title={inheriting ? t("structure.inheritOnHint") : t("structure.inheritOffHint")}
+                                >
+                                  <Icon className="h-3.5 w-3.5" />
+                                </button>
+                              );
+                            })()
+                          )}
+
                           {/* Content preview */}
                           <button
                             onClick={() => setEditingId(block.id)}
@@ -1486,7 +1676,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
           onClick={(e) => { if (e.target === e.currentTarget) setEditingId(null); }}
         >
           <div
-            className="relative flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+            className={`relative flex flex-col bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 ${editingBlock.type === "two_column" ? "overflow-visible" : "overflow-hidden"}`}
             style={{ width: "80vw", height: "90vh" }}
           >
             {/* Modal header */}
@@ -1504,7 +1694,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
             </div>
 
             {/* Modal body */}
-            <div className={`flex-1 min-h-0 px-6 py-5 ${editingBlock.type === "paragraph" ? "flex flex-col" : "overflow-y-auto"}`}>
+            <div className={`flex-1 min-h-0 px-6 py-5 ${editingBlock.type === "paragraph" ? "flex flex-col" : editingBlock.type === "two_column" ? "flex flex-col overflow-visible" : "overflow-y-auto"}`}>
               {editingBlock.type === "heading" && (
                 <HeadingProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
@@ -1573,6 +1763,12 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "inventory_diff" && (
                 <InventoryDiffProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "two_column" && (
+                <TwoColumnProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} parentInherits={parentInherits} />
+              )}
+              {editingBlock.type === "conditional" && (
+                <ConditionalProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
               )}
             </div>
           </div>
@@ -9180,3 +9376,615 @@ function ComparisonDetailProperties({
   );
 }
 
+
+// --- Container blocks: TwoColumn / Conditional ---
+
+const VALIGN_OPTIONS: { value: ColumnVAlign; icon: ReactNode; labelKey: string }[] = [
+  { value: "top", icon: <AlignVerticalJustifyStart className="h-4 w-4" />, labelKey: "structure.vAlignTop" },
+  { value: "middle", icon: <AlignVerticalJustifyCenter className="h-4 w-4" />, labelKey: "structure.vAlignMiddle" },
+  { value: "bottom", icon: <AlignVerticalJustifyEnd className="h-4 w-4" />, labelKey: "structure.vAlignBottom" },
+];
+
+function TwoColumnProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+  reportNodes,
+  parentInherits,
+}: {
+  block: TwoColumnBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
+  parentInherits?: boolean;
+}) {
+  const updateField = <K extends keyof TwoColumnBlock>(key: K, value: TwoColumnBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  const leftPct = Math.max(10, Math.min(90, block.leftWidthPct));
+  const rightPct = 100 - leftPct;
+
+  return (
+    <div className="flex flex-col h-full min-h-0 gap-5">
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.twoColWidth")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={10}
+            max={90}
+            step={5}
+            value={leftPct}
+            onChange={(e) => updateField("leftWidthPct", Number(e.target.value))}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-20 text-right">
+            {leftPct} / {rightPct}
+          </span>
+        </div>
+        <div className="flex h-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-700">
+          <div className="bg-blue-200 dark:bg-blue-500/30" style={{ width: `${leftPct}%` }} />
+          <div className="bg-emerald-200 dark:bg-emerald-500/30" style={{ width: `${rightPct}%` }} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4 items-end">
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.twoColGap")}</label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={0.5}
+              value={block.gapMm}
+              onChange={(e) => updateField("gapMm", Number(e.target.value) || 0)}
+              className={inputClass}
+            />
+            <span className="text-xs text-slate-500">mm</span>
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.twoColLeftVAlign")}</label>
+          <div className="flex gap-1">
+            {VALIGN_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => updateField("leftVAlign", o.value)}
+                title={t(o.labelKey)}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  block.leftVAlign === o.value
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                {o.icon}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>{t("structure.twoColRightVAlign")}</label>
+          <div className="flex gap-1">
+            {VALIGN_OPTIONS.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => updateField("rightVAlign", o.value)}
+                title={t(o.labelKey)}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  block.rightVAlign === o.value
+                    ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                }`}
+              >
+                {o.icon}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="flex items-center gap-2 cursor-pointer pb-2">
+          <input
+            type="checkbox"
+            checked={!!block.pageBreakBefore}
+            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200 dark:border-slate-700 flex-1 min-h-0 overflow-visible">
+        <div className="flex flex-col min-h-0 gap-1.5">
+          <label className={labelClass}>{t("structure.twoColLeftBlocks")} ({block.leftBlocks.length})</label>
+          <div className="rounded-xl border border-blue-200 dark:border-blue-700/40 bg-blue-50/30 dark:bg-blue-950/20 flex-1 min-h-0 flex flex-col overflow-visible">
+            <StructureEditor
+              blocks={block.leftBlocks}
+              onChange={(b) => updateField("leftBlocks", b)}
+              t={t}
+              reportType={reportType}
+              reportNodes={reportNodes}
+              embedded
+              parentInherits={parentInherits}
+            />
+          </div>
+        </div>
+        <div className="flex flex-col min-h-0 gap-1.5">
+          <label className={labelClass}>{t("structure.twoColRightBlocks")} ({block.rightBlocks.length})</label>
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-700/40 bg-emerald-50/30 dark:bg-emerald-950/20 flex-1 min-h-0 flex flex-col overflow-visible">
+            <StructureEditor
+              blocks={block.rightBlocks}
+              onChange={(b) => updateField("rightBlocks", b)}
+              t={t}
+              reportType={reportType}
+              reportNodes={reportNodes}
+              embedded
+              parentInherits={parentInherits}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const COND_LEAF_KINDS: { value: ConditionLeafKind; labelKey: string }[] = [
+  { value: "node_compliance", labelKey: "structure.condKindNodeCompliance" },
+  { value: "scope_compliance", labelKey: "structure.condKindScopeCompliance" },
+  { value: "rule_compliance", labelKey: "structure.condKindRuleCompliance" },
+  { value: "inventory_present", labelKey: "structure.condKindInventoryPresent" },
+];
+
+const COND_STATUSES: ComplianceLeafStatus[] = ["compliant", "non_compliant", "error", "not_applicable", "skipped"];
+
+function ConditionalProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+  reportNodes,
+}: {
+  block: ConditionalBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
+}) {
+  const updateField = <K extends keyof ConditionalBlock>(key: K, value: ConditionalBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.condLabel")}</label>
+        <input
+          type="text"
+          value={block.label}
+          onChange={(e) => updateField("label", e.target.value)}
+          placeholder={t("structure.condLabelPlaceholder")}
+          className={inputClass}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.condCondition")}</label>
+        <ConditionEditor
+          group={block.condition}
+          onChange={(g) => updateField("condition", g)}
+          t={t}
+          depth={0}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-slate-200 dark:border-slate-700">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.inheritScopeToChildren}
+            onChange={(e) => updateField("inheritScopeToChildren", e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.condInheritScope")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!block.pageBreakBefore}
+            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5 pt-2 border-t border-slate-200 dark:border-slate-700">
+        <label className={labelClass}>{t("structure.condChildren")} ({block.children.length})</label>
+        <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-900/30 min-h-[40vh] max-h-[60vh] overflow-visible flex flex-col">
+          <StructureEditor
+            blocks={block.children}
+            onChange={(b) => updateField("children", b)}
+            t={t}
+            reportType={reportType}
+            reportNodes={reportNodes}
+            embedded
+            parentInherits={block.inheritScopeToChildren}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ConditionEditor({
+  group,
+  onChange,
+  t,
+  depth,
+}: {
+  group: ConditionGroup;
+  onChange: (g: ConditionGroup) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  depth: number;
+}) {
+  const updateGroup = (patch: Partial<ConditionGroup>) => onChange({ ...group, ...patch });
+
+  const updateItem = (idx: number, item: ConditionLeaf | ConditionGroup) => {
+    const next = [...group.items];
+    next[idx] = item;
+    updateGroup({ items: next });
+  };
+
+  const removeItem = (idx: number) => {
+    updateGroup({ items: group.items.filter((_, i) => i !== idx) });
+  };
+
+  const addLeaf = () => {
+    const leaf: ConditionLeaf = {
+      id: uid(),
+      kind: "scope_compliance",
+      scope: "all",
+      tagIds: [],
+      nodeIds: [],
+      status: ["non_compliant"],
+      matchMode: "any",
+    };
+    updateGroup({ items: [...group.items, leaf] });
+  };
+
+  const addGroup = () => {
+    const g: ConditionGroup = { id: uid(), kind: "group", op: "and", items: [] };
+    updateGroup({ items: [...group.items, g] });
+  };
+
+  const indent = depth > 0 ? "ml-3" : "";
+  const borderColor =
+    depth === 0 ? "border-slate-300 dark:border-slate-600"
+    : depth === 1 ? "border-blue-300 dark:border-blue-700/60"
+    : "border-violet-300 dark:border-violet-700/60";
+
+  return (
+    <div className={`rounded-lg border ${borderColor} bg-white dark:bg-slate-800/40 p-3 space-y-2 ${indent}`}>
+      <div className="flex items-center gap-2">
+        <div className="flex gap-1 rounded-md bg-slate-100 dark:bg-slate-800 p-0.5">
+          {(["and", "or"] as const).map((op) => (
+            <button
+              key={op}
+              type="button"
+              onClick={() => updateGroup({ op })}
+              className={`rounded px-2 py-1 text-xs font-bold ${
+                group.op === op
+                  ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {op.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!group.negate}
+            onChange={(e) => updateGroup({ negate: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600"
+          />
+          NOT
+        </label>
+        <span className="text-[11px] text-slate-400">{group.items.length} {t("structure.condItems")}</span>
+        <div className="ml-auto flex gap-1">
+          <button
+            type="button"
+            onClick={addLeaf}
+            className="rounded-md bg-blue-50 dark:bg-blue-500/10 px-2 py-1 text-xs font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-100"
+          >
+            + {t("structure.condAddLeaf")}
+          </button>
+          <button
+            type="button"
+            onClick={addGroup}
+            className="rounded-md bg-violet-50 dark:bg-violet-500/10 px-2 py-1 text-xs font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-100"
+          >
+            + {t("structure.condAddGroup")}
+          </button>
+        </div>
+      </div>
+
+      {group.items.length === 0 && (
+        <p className="text-xs italic text-slate-400 dark:text-slate-500 py-2">{t("structure.condEmpty")}</p>
+      )}
+
+      <div className="space-y-2">
+        {group.items.map((item, idx) => (
+          <div key={item.id} className="flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              {item.kind === "group" ? (
+                <ConditionEditor
+                  group={item}
+                  onChange={(g) => updateItem(idx, g)}
+                  t={t}
+                  depth={depth + 1}
+                />
+              ) : (
+                <ConditionLeafEditor
+                  leaf={item}
+                  onChange={(l) => updateItem(idx, l)}
+                  t={t}
+                />
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => removeItem(idx)}
+              className="mt-1 p-1 rounded text-slate-400 hover:text-red-500"
+              title={t("structure.condRemove")}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ConditionLeafEditor({
+  leaf,
+  onChange,
+  t,
+}: {
+  leaf: ConditionLeaf;
+  onChange: (leaf: ConditionLeaf) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [policies, setPolicies] = useState<CompliancePolicyOption[]>([]);
+  const [rules, setRules] = useState<ComplianceRuleOption[]>([]);
+  const [nodes, setNodes] = useState<NodeItem[]>([]);
+  const [tags, setTags] = useState<ReportNodeTagOption[]>([]);
+  const [structure, setStructure] = useState<InvStructureCategory[]>([]);
+
+  useEffect(() => {
+    if (!current) return;
+    fetch(`/api/nodes?context=${current.id}`).then((r) => (r.ok ? r.json() : [])).then((d: NodeItem[]) => setNodes(Array.isArray(d) ? d : [])).catch(() => {});
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => (r.ok ? r.json() : [])).then((d: ReportNodeTagOption[]) => setTags(Array.isArray(d) ? d : [])).catch(() => {});
+    if (leaf.kind === "rule_compliance") {
+      fetch(`/api/compliance-policies?context=${current.id}`).then((r) => (r.ok ? r.json() : [])).then((d) => setPolicies(Array.isArray(d) ? d : [])).catch(() => {});
+    }
+    if (leaf.kind === "inventory_present") {
+      fetch(`/api/inventory-categories/structure?context=${current.id}`).then((r) => (r.ok ? r.json() : [])).then(setStructure).catch(() => {});
+    }
+  }, [current, leaf.kind]);
+
+  useEffect(() => {
+    if (leaf.kind !== "rule_compliance" || !leaf.policyId) { setRules([]); return; }
+    fetch(`/api/compliance-policies/${leaf.policyId}/rules`)
+      .then((r) => (r.ok ? r.json() : { folder: null, extraRules: [] }))
+      .then((d) => {
+        const fromTree = flattenRulesFromTree(d?.folder);
+        const extras: ComplianceRuleOption[] = Array.isArray(d?.extraRules) ? d.extraRules : [];
+        const merged: ComplianceRuleOption[] = [];
+        const seen = new Set<number>();
+        for (const r of [...fromTree, ...extras]) {
+          if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); }
+        }
+        merged.sort((a, b) => (a.identifier ?? "").localeCompare(b.identifier ?? "") || a.name.localeCompare(b.name));
+        setRules(merged);
+      });
+  }, [leaf.kind, leaf.policyId]);
+
+  const update = (patch: Partial<ConditionLeaf>) => onChange({ ...leaf, ...patch });
+
+  const toggleStatus = (s: ComplianceLeafStatus) => {
+    const cur = leaf.status ?? [];
+    update({ status: cur.includes(s) ? cur.filter((x) => x !== s) : [...cur, s] });
+  };
+
+  const toggleTagId = (id: number) => {
+    const cur = leaf.tagIds ?? [];
+    update({ tagIds: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+
+  const toggleNodeId = (id: number) => {
+    const cur = leaf.nodeIds ?? [];
+    update({ nodeIds: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] });
+  };
+
+  const categoryNames = useMemo(() => structure.map((c) => c.categoryName), [structure]);
+  const entriesForCat = useMemo(() => {
+    const cat = structure.find((c) => c.categoryName === leaf.categoryName);
+    return cat?.entries ?? [];
+  }, [structure, leaf.categoryName]);
+
+  return (
+    <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/40 p-2.5 space-y-2">
+      <div className="flex items-center gap-2">
+        <select
+          value={leaf.kind}
+          onChange={(e) => onChange({ id: leaf.id, kind: e.target.value as ConditionLeafKind, scope: "all", tagIds: [], nodeIds: [], status: ["non_compliant"], matchMode: "any" })}
+          className={`${inputClass} flex-1`}
+        >
+          {COND_LEAF_KINDS.map((k) => (
+            <option key={k.value} value={k.value}>{t(k.labelKey)}</option>
+          ))}
+        </select>
+      </div>
+
+      {(leaf.kind === "node_compliance" || leaf.kind === "scope_compliance" || leaf.kind === "rule_compliance") && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap gap-1">
+            {COND_STATUSES.map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => toggleStatus(s)}
+                className={`rounded px-2 py-0.5 text-[11px] font-medium border transition-colors ${
+                  (leaf.status ?? []).includes(s)
+                    ? "border-blue-500 bg-blue-100 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-500"
+                }`}
+              >
+                {t(`structure.condStatus_${s}`)}
+              </button>
+            ))}
+          </div>
+          {leaf.kind !== "node_compliance" && (
+            <div className="flex gap-1">
+              {(["any", "all", "none"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => update({ matchMode: m })}
+                  className={`flex-1 rounded px-2 py-1 text-[11px] font-medium border ${
+                    (leaf.matchMode ?? "any") === m
+                      ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-500"
+                  }`}
+                >
+                  {t(`structure.condMatch_${m}`)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {leaf.kind === "node_compliance" && (
+        <select
+          value={leaf.nodeId ?? ""}
+          onChange={(e) => update({ nodeId: e.target.value ? Number(e.target.value) : null })}
+          className={inputClass}
+        >
+          <option value="">{t("structure.condPickNode")}</option>
+          {nodes.map((n) => (
+            <option key={n.id} value={n.id}>{(n.hostname || n.name || n.ipAddress)} ({n.ipAddress})</option>
+          ))}
+        </select>
+      )}
+
+      {leaf.kind === "rule_compliance" && (
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={leaf.policyId ?? ""}
+            onChange={(e) => update({ policyId: e.target.value ? Number(e.target.value) : null, ruleId: null })}
+            className={inputClass}
+          >
+            <option value="">{t("structure.condPickPolicy")}</option>
+            {policies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select
+            value={leaf.ruleId ?? ""}
+            onChange={(e) => update({ ruleId: e.target.value ? Number(e.target.value) : null })}
+            disabled={!leaf.policyId}
+            className={inputClass}
+          >
+            <option value="">{t("structure.condPickRule")}</option>
+            {rules.map((r) => <option key={r.id} value={r.id}>{r.identifier ? `[${r.identifier}] ` : ""}{r.name}</option>)}
+          </select>
+        </div>
+      )}
+
+      {leaf.kind === "inventory_present" && (
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={leaf.categoryName ?? ""}
+            onChange={(e) => update({ categoryName: e.target.value, entryKey: "" })}
+            className={inputClass}
+          >
+            <option value="">{t("structure.condPickCategory")}</option>
+            {categoryNames.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select
+            value={leaf.entryKey ?? ""}
+            onChange={(e) => update({ entryKey: e.target.value })}
+            disabled={!leaf.categoryName}
+            className={inputClass}
+          >
+            <option value="">{t("structure.condEntryAny")}</option>
+            {entriesForCat.map((e) => <option key={e.key} value={e.key}>{e.key}</option>)}
+          </select>
+        </div>
+      )}
+
+      {leaf.kind !== "node_compliance" && (
+        <div className="space-y-1.5">
+          <div className="flex gap-1">
+            {(["all", "tag", "nodes"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => update({ scope: s })}
+                className={`flex-1 rounded px-2 py-1 text-[11px] font-medium border ${
+                  (leaf.scope ?? "all") === s
+                    ? "border-blue-500 bg-blue-50 dark:bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-500"
+                }`}
+              >
+                {t(`structure.condScope_${s}`)}
+              </button>
+            ))}
+          </div>
+          {leaf.scope === "tag" && (
+            <div className="rounded border border-slate-200 dark:border-slate-700 max-h-32 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {tags.length === 0 && <div className="px-2 py-1.5 text-[11px] text-slate-400">—</div>}
+              {tags.map((tg) => (
+                <label key={tg.id} className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <input
+                    type="checkbox"
+                    checked={(leaf.tagIds ?? []).includes(tg.id)}
+                    onChange={() => toggleTagId(tg.id)}
+                    className="h-3.5 w-3.5 rounded border-slate-300"
+                  />
+                  <span className="inline-flex items-center gap-1.5 text-xs">
+                    <span className="h-2 w-2 rounded-full" style={{ backgroundColor: tg.color }} />
+                    {tg.name}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {leaf.scope === "nodes" && (
+            <div className="rounded border border-slate-200 dark:border-slate-700 max-h-32 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {nodes.length === 0 && <div className="px-2 py-1.5 text-[11px] text-slate-400">—</div>}
+              {nodes.map((n) => (
+                <label key={n.id} className="flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <input
+                    type="checkbox"
+                    checked={(leaf.nodeIds ?? []).includes(n.id)}
+                    onChange={() => toggleNodeId(n.id)}
+                    className="h-3.5 w-3.5 rounded border-slate-300"
+                  />
+                  <span className="text-xs">{(n.hostname || n.name || n.ipAddress)} ({n.ipAddress})</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
