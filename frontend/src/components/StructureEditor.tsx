@@ -586,6 +586,12 @@ export interface InventoryDiffBlock {
 // === Container blocks ===
 export type ColumnVAlign = "top" | "middle" | "bottom";
 
+// Visual depth of a container in the structure list:
+//  - number 1..6: align with that heading level (H1 = depth 0, H6 = depth 5)
+//  - 'follow':    inherit the depth of the previous real heading
+//  - undefined:   defaults to 1 (root, like an H1)
+export type StructureDepth = 1 | 2 | 3 | 4 | 5 | 6 | "follow";
+
 export interface TwoColumnBlock {
   id: string;
   type: "two_column";
@@ -596,6 +602,10 @@ export interface TwoColumnBlock {
   leftBlocks: ReportBlock[];
   rightBlocks: ReportBlock[];
   pageBreakBefore?: boolean;
+  // Editor-only: position of the block in the structure list.
+  structureDepth?: StructureDepth;
+  // @deprecated migrated to structureDepth: 'follow'. Kept for backward read.
+  useParentDepth?: boolean;
 }
 
 export type ConditionLeafKind =
@@ -650,6 +660,10 @@ export interface ConditionalBlock {
   inheritScopeToChildren: boolean; // default true; propagates condition scope to children with inheritFromParent !== false
   children: ReportBlock[];
   pageBreakBefore?: boolean;
+  // Editor-only: position of the block in the structure list.
+  structureDepth?: StructureDepth;
+  // @deprecated migrated to structureDepth: 'follow'. Kept for backward read.
+  useParentDepth?: boolean;
 }
 
 // === Timeline ===
@@ -732,7 +746,24 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// Compute visual depth for each block based on heading hierarchy
+// Resolve the structure depth for a container block, applying back-compat
+// rules: explicit `structureDepth` wins, the legacy `useParentDepth` boolean
+// maps to `'follow'`, and absent/invalid values fall back to 1 (H1 / root).
+function resolveStructureDepth(block: TwoColumnBlock | ConditionalBlock): StructureDepth {
+  const sd = block.structureDepth;
+  if (sd === "follow") return "follow";
+  if (typeof sd === "number" && sd >= 1 && sd <= 6) return sd as StructureDepth;
+  if (block.useParentDepth) return "follow";
+  return 1;
+}
+
+// Compute visual depth for each block based on heading hierarchy.
+// Container blocks (conditional, two_column) take the depth of their chosen
+// `structureDepth` (default 1 = H1 / root). They act as "anchors": the active
+// heading depth is rebased to that level so subsequent siblings line up with
+// the container instead of staying indented under the prior outer heading.
+// `'follow'` opts out and inherits the previous heading's depth without
+// affecting siblings.
 function computeDepths(blocks: ReportBlock[]): number[] {
   const depths: number[] = [];
   let lastHeadingLevel = 0;
@@ -740,6 +771,15 @@ function computeDepths(blocks: ReportBlock[]): number[] {
     if (block.type === "heading") {
       lastHeadingLevel = block.level;
       depths.push(block.level - 1);
+    } else if (block.type === "conditional" || block.type === "two_column") {
+      const sd = resolveStructureDepth(block);
+      if (sd === "follow") {
+        depths.push(lastHeadingLevel);
+      } else {
+        const d = sd - 1;
+        depths.push(d);
+        lastHeadingLevel = d;
+      }
     } else {
       depths.push(lastHeadingLevel);
     }
@@ -9487,15 +9527,25 @@ function TwoColumnProperties({
             ))}
           </div>
         </div>
-        <label className="flex items-center gap-2 cursor-pointer pb-2">
-          <input
-            type="checkbox"
-            checked={!!block.pageBreakBefore}
-            onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
-        </label>
+        <div className="flex flex-col gap-1.5 pb-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!block.pageBreakBefore}
+              onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.structureDepthLabel")}</span>
+            <StructureDepthSelect
+              value={block.structureDepth ?? (block.useParentDepth ? "follow" : 1)}
+              onChange={(v) => updateField("structureDepth", v)}
+              t={t}
+            />
+          </label>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200 dark:border-slate-700 flex-1 min-h-0 overflow-visible">
@@ -9529,6 +9579,32 @@ function TwoColumnProperties({
         </div>
       </div>
     </div>
+  );
+}
+
+function StructureDepthSelect({
+  value,
+  onChange,
+  t,
+}: {
+  value: StructureDepth;
+  onChange: (v: StructureDepth) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  return (
+    <select
+      value={value === "follow" ? "follow" : String(value)}
+      onChange={(e) => {
+        const v = e.target.value;
+        onChange(v === "follow" ? "follow" : (Number(v) as StructureDepth));
+      }}
+      className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-1 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-400/20"
+    >
+      <option value="follow">{t("structure.structureDepthFollow")}</option>
+      {[1, 2, 3, 4, 5, 6].map((n) => (
+        <option key={n} value={n}>{t("structure.structureDepthLevel", { n: String(n) })}</option>
+      ))}
+    </select>
   );
 }
 
@@ -9590,6 +9666,14 @@ function ConditionalProperties({
             className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
           />
           <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.condInheritScope")}</span>
+        </label>
+        <label className="flex items-center gap-2">
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.structureDepthLabel")}</span>
+          <StructureDepthSelect
+            value={block.structureDepth ?? (block.useParentDepth ? "follow" : 1)}
+            onChange={(v) => updateField("structureDepth", v)}
+            t={t}
+          />
         </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input

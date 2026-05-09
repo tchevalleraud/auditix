@@ -326,10 +326,7 @@ class GenerateReportMessageHandler
     private function generatePdf(Report $report, string $filePath, ?Node $forNode = null): void
     {
         $blocks = $report->getBlocks();
-        $hasSummary = false;
-        foreach ($blocks as $b) {
-            if (($b['type'] ?? '') === 'recommendation_summary') { $hasSummary = true; break; }
-        }
+        $hasSummary = $this->containsRecommendationSummary($blocks);
 
         $pageMap = [];
         if ($hasSummary) {
@@ -474,8 +471,12 @@ class GenerateReportMessageHandler
         $pdf->SetMargins($mLeft, $mTop, $mRight);
         $pdf->SetAutoPageBreak(true, $mBottom);
 
-        // Render structure blocks
-        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report, $summaryPageMap, $collectedPageMap);
+        // Render structure blocks. The heading counters are passed by reference
+        // so nested calls (conditional, two_column) keep numbering continuous —
+        // matching the TOC pass which walks all visible headings in a single
+        // counter scope.
+        $headingCounters = [];
+        $this->renderBlocks($pdf, $blocks, $headingsByLevel, $styles, $numberingEnabled, $mLeft, $mTop, $mRight, $mBottom, $forNode, $report, $summaryPageMap, $collectedPageMap, false, $headingCounters);
 
         // Post-processing: render headers and footers on all pages except cover (page 1)
         $totalPages = $pdf->getNumPages();
@@ -812,6 +813,7 @@ class GenerateReportMessageHandler
         array $summaryPageMap = [],
         array &$collectedPageMap = [],
         bool $isNestedCall = false,
+        ?array &$externalCounters = null,
     ): void {
         if (empty($blocks)) return;
 
@@ -828,8 +830,17 @@ class GenerateReportMessageHandler
         $pSpaceBefore = (float) ($paragraphStyle['spaceBefore'] ?? 2);
         $pSpaceAfter = (float) ($paragraphStyle['spaceAfter'] ?? 2);
 
-        // Heading numbering counters
-        $counters = [];
+        // Heading numbering counters. When a parent shares its counters via
+        // $externalCounters, alias the local $counters onto it so all nested
+        // calls (conditional, two_column) increment a single sequence. Without
+        // this, every nested renderBlocks() would restart counters at 1 and
+        // diverge from the TOC which numbers continuously.
+        if ($externalCounters !== null) {
+            $counters = &$externalCounters;
+        } else {
+            $localCounters = [];
+            $counters = &$localCounters;
+        }
         // Nested calls (two_column, conditional) skip the implicit AddPage on the
         // first block so the cursor stays where the parent placed it.
         $firstBlock = !$isNestedCall;
@@ -912,12 +923,33 @@ class GenerateReportMessageHandler
                 $pdf->SetFont($font, $bold . $italic, $size);
                 $lineH = $size * 0.3528 + 1;
 
+                // Keep-with-next: a heading must never be split across pages, and
+                // it should not be left as an orphan at the bottom of a page with
+                // its first body line on the next page. Estimate the heading
+                // height (wrap included) and require at least two body-line
+                // heights of follow-up space; if there is not enough room on the
+                // current page, force a fresh page before rendering. Skipped
+                // when we just started a fresh page above.
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $headingTextW = $background ? $contentW : $contentW;
+                $headingLineH = $background ? $lineH + 2 : $lineH;
+                $headingHeight = $pdf->getStringHeight($headingTextW, $prefix . $content);
+                if ($headingHeight < $headingLineH) $headingHeight = $headingLineH;
+                $minFollowH = max(($bodySize * 0.3528 + 1) * 2, 8.0);
+                $pageBottomLimit = $pdf->getPageHeight() - $mBottom;
+                if (
+                    !$pageBreakBefore
+                    && !$firstBlock
+                    && ($pdf->GetY() + $headingHeight + $spaceAfter + $minFollowH) > $pageBottomLimit
+                ) {
+                    $pdf->AddPage();
+                }
+
                 // Background color
                 if ($background) {
                     $bgRgb = $this->hexToRgb($background);
                     $pdf->SetFillColor($bgRgb[0], $bgRgb[1], $bgRgb[2]);
-                    $pageW = $pdf->getPageWidth();
-                    $contentW = $pageW - $mLeft - $mRight;
                     $pdf->MultiCell($contentW, $lineH + 2, ' ' . $prefix . $content, 0, 'L', true);
                 } else {
                     $pdf->MultiCell(0, $lineH, $prefix . $content, 0, 'L');
@@ -1131,6 +1163,24 @@ class GenerateReportMessageHandler
                         $pdf->SetFont($bodyFont, 'B', $p['size']);
                         $cellH = $pdf->getStringHeight($colWidths[$c], $p['plain']);
                         $maxH = max($maxH, $cellH + 2);
+                    }
+
+                    // Keep-with-next: avoid leaving the header alone at the
+                    // bottom of a page with the body starting on the next one.
+                    // Estimate the first data row's height and force a new page
+                    // when header + first row would not fit together.
+                    $firstRowH = $minLineH;
+                    if (!empty($rows) && is_array($rows[0])) {
+                        for ($c = 0; $c < $colCount; $c++) {
+                            $cell = $rows[0][$c] ?? '';
+                            $p = $prepareCellData($cell, $tableFontSize, false);
+                            $pdf->SetFont($bodyFont, '', $p['size']);
+                            $cellH = $pdf->getStringHeight($colWidths[$c], $p['plain']);
+                            $firstRowH = max($firstRowH, $cellH + 2);
+                        }
+                    }
+                    if ($pdf->GetY() + $maxH + $firstRowH > $pdf->getPageHeight() - $mBottom) {
+                        $pdf->AddPage();
                     }
 
                     $startY = $pdf->GetY();
@@ -3691,10 +3741,19 @@ class GenerateReportMessageHandler
                 ];
                 $rsSevOrder = ['critical' => 5, 'high' => 4, 'medium' => 3, 'low' => 2, 'info' => 1];
 
-                // Walk all blocks of the document to collect recommendation items
+                // Walk all blocks of the document to collect recommendation items.
+                // Use the *root* document tree (not the local $blocks scope) and
+                // recurse into containers, so recommendation sources nested
+                // inside a conditional or a two_column are also considered. We
+                // honor conditional evaluation: items from a false-conditional
+                // branch were not rendered, so they are absent from
+                // $summaryPageMap and must not appear in the summary.
                 $rsItems = [];
                 $rsInsertion = 0;
-                foreach ($blocks as $rsBlock) {
+                $rsSourceBlocks = $report
+                    ? $this->collectRecommendationSources($report->getBlocks(), $forNode, $report)
+                    : $blocks;
+                foreach ($rsSourceBlocks as $rsBlock) {
                     $rsBlockType = $rsBlock['type'] ?? '';
                     if ($rsBlockType === 'compliance_recommendations') {
                         $rsPolicyIds = array_values(array_filter(array_map('intval', $rsBlock['policyIds'] ?? []), fn($x) => $x > 0));
@@ -4788,7 +4847,8 @@ class GenerateReportMessageHandler
                 $this->renderTwoColumn(
                     $pdf, $block, $headingsByLevel, $styles, $numberingEnabled,
                     $mLeft, $mTop, $mRight, $mBottom,
-                    $forNode, $report, $summaryPageMap, $collectedPageMap
+                    $forNode, $report, $summaryPageMap, $collectedPageMap,
+                    $counters
                 );
                 $prevType = 'two_column';
 
@@ -4817,6 +4877,7 @@ class GenerateReportMessageHandler
                         $mLeft, $mTop, $mRight, $mBottom,
                         $forNode, $report, $summaryPageMap, $collectedPageMap,
                         true,
+                        $counters,
                     );
                     $prevType = 'conditional';
                 }
@@ -4853,6 +4914,7 @@ class GenerateReportMessageHandler
         ?Report $report,
         array $summaryPageMap,
         array &$collectedPageMap,
+        array &$counters,
     ): void {
         $leftPct = (float) ($block['leftWidthPct'] ?? 50);
         if ($leftPct < 10) $leftPct = 10;
@@ -4875,8 +4937,12 @@ class GenerateReportMessageHandler
         $startY = $pdf->GetY();
         $startPage = $pdf->getPage();
 
-        // PHASE 1: measure both columns (single-page case for vAlign)
+        // PHASE 1: measure both columns (single-page case for vAlign).
+        // Use a SNAPSHOT of $counters: TCPDF rolls back its own state but PHP
+        // arrays keep their mutations, so without this the measure passes would
+        // pre-increment heading numbers and the real render would skip them.
         $unused = [];
+        $measureCounters = $counters;
         $pdf->startTransaction();
         $pdf->SetMargins($mLeft, $mTop, $leftRightM);
         $pdf->SetAutoPageBreak(true, $mBottom);
@@ -4886,13 +4952,14 @@ class GenerateReportMessageHandler
             $pdf, $leftBlocks, $headingsByLevel, $styles, $numberingEnabled,
             $mLeft, $mTop, $leftRightM, $mBottom,
             $forNode, $report, $summaryPageMap, $unused,
-            true,
+            true, $measureCounters,
         );
         $leftMeasuredEndY = $pdf->GetY();
         $leftMeasuredEndPage = $pdf->getPage();
         $pdf->rollbackTransaction(true);
 
         $unused = [];
+        $measureCounters = $counters;
         $pdf->startTransaction();
         $pdf->SetMargins($rightLeftM, $mTop, $mRight);
         $pdf->SetAutoPageBreak(true, $mBottom);
@@ -4902,7 +4969,7 @@ class GenerateReportMessageHandler
             $pdf, $rightBlocks, $headingsByLevel, $styles, $numberingEnabled,
             $rightLeftM, $mTop, $mRight, $mBottom,
             $forNode, $report, $summaryPageMap, $unused,
-            true,
+            true, $measureCounters,
         );
         $rightMeasuredEndY = $pdf->GetY();
         $rightMeasuredEndPage = $pdf->getPage();
@@ -4928,7 +4995,7 @@ class GenerateReportMessageHandler
             $pdf, $leftBlocks, $headingsByLevel, $styles, $numberingEnabled,
             $mLeft, $mTop, $leftRightM, $mBottom,
             $forNode, $report, $summaryPageMap, $collectedPageMap,
-            true,
+            true, $counters,
         );
         $leftEndY = $pdf->GetY();
         $leftEndPage = $pdf->getPage();
@@ -4942,7 +5009,7 @@ class GenerateReportMessageHandler
             $pdf, $rightBlocks, $headingsByLevel, $styles, $numberingEnabled,
             $rightLeftM, $mTop, $mRight, $mBottom,
             $forNode, $report, $summaryPageMap, $collectedPageMap,
-            true,
+            true, $counters,
         );
         $rightEndY = $pdf->GetY();
         $rightEndPage = $pdf->getPage();
@@ -5145,6 +5212,76 @@ class GenerateReportMessageHandler
                 }
             }
         }
+    }
+
+    /**
+     * Walk the block tree and return a flat list of recommendation source
+     * blocks (`compliance_recommendations`, `static_recommendations`) in document
+     * order, descending into containers exactly like the rendering pass:
+     *   - two_column: visit leftBlocks then rightBlocks
+     *   - conditional: visit children only when the condition evaluates true,
+     *     applying the same scope inheritance as renderBlocks() so the
+     *     produced blocks match what was actually rendered.
+     * The returned blocks can then be looked up against $summaryPageMap which
+     * is populated during the rendering pass.
+     */
+    private function collectRecommendationSources(array $blocks, ?Node $forNode, ?Report $report): array
+    {
+        $out = [];
+        foreach ($blocks as $b) {
+            if (!is_array($b)) continue;
+            $type = (string) ($b['type'] ?? '');
+            if ($type === 'compliance_recommendations' || $type === 'static_recommendations') {
+                $out[] = $b;
+            } elseif ($type === 'two_column') {
+                $left = is_array($b['leftBlocks'] ?? null) ? $b['leftBlocks'] : [];
+                $right = is_array($b['rightBlocks'] ?? null) ? $b['rightBlocks'] : [];
+                foreach ($this->collectRecommendationSources($left, $forNode, $report) as $x) $out[] = $x;
+                foreach ($this->collectRecommendationSources($right, $forNode, $report) as $x) $out[] = $x;
+            } elseif ($type === 'conditional') {
+                $cond = is_array($b['condition'] ?? null) ? $b['condition'] : null;
+                if (!$this->blockConditionEvaluator->evaluate($cond, $forNode, $report)) continue;
+                $children = is_array($b['children'] ?? null) ? $b['children'] : [];
+                if (!empty($b['inheritScopeToChildren'])) {
+                    $parentScope = $this->blockConditionEvaluator->extractInheritedScope($cond);
+                    if ($parentScope !== null) {
+                        $children = array_map(
+                            fn($c) => is_array($c) ? $this->overlayScopeOnBlock($c, $parentScope) : $c,
+                            $children,
+                        );
+                    }
+                }
+                foreach ($this->collectRecommendationSources($children, $forNode, $report) as $x) $out[] = $x;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * True when a `recommendation_summary` block exists anywhere in the tree
+     * (top-level, in two_column columns, or nested inside conditionals — even
+     * conditionals whose condition is currently false). The check is
+     * unconditional on purpose: it triggers the two-pass render that builds
+     * $summaryPageMap, so a false positive only costs an extra pass while a
+     * false negative would silently break page numbering in the summary.
+     */
+    private function containsRecommendationSummary(array $blocks): bool
+    {
+        foreach ($blocks as $b) {
+            if (!is_array($b)) continue;
+            $type = (string) ($b['type'] ?? '');
+            if ($type === 'recommendation_summary') return true;
+            if ($type === 'two_column') {
+                $left = is_array($b['leftBlocks'] ?? null) ? $b['leftBlocks'] : [];
+                $right = is_array($b['rightBlocks'] ?? null) ? $b['rightBlocks'] : [];
+                if ($this->containsRecommendationSummary($left)) return true;
+                if ($this->containsRecommendationSummary($right)) return true;
+            } elseif ($type === 'conditional') {
+                $children = is_array($b['children'] ?? null) ? $b['children'] : [];
+                if ($this->containsRecommendationSummary($children)) return true;
+            }
+        }
+        return false;
     }
 
     /**
