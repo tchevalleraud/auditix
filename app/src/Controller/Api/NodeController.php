@@ -644,6 +644,7 @@ class NodeController extends AbstractController
                 'message' => $r->getMessage(),
                 'messageLong' => $r->getMessageLong(),
                 'recommendation' => $r->getRecommendation(),
+                'recommendationType' => $r->getRecommendationType(),
                 'evaluatedAt' => $r->getEvaluatedAt()->format('c'),
             ];
 

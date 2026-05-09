@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch, Lightbulb } from "lucide-react";
+import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch, Lightbulb, Terminal } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
 interface Model { id: number; name: string; manufacturer?: { id: number } | null }
@@ -84,6 +84,7 @@ interface ComplianceResultEntry {
   message: string | null;
   messageLong: string | null;
   recommendation: string | null;
+  recommendationType: "text" | "cli" | null;
   evaluatedAt: string;
 }
 
@@ -1526,11 +1527,15 @@ export default function NodeDetailPage() {
                                       className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 transition-colors"
                                     >
                                       {recoExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                      <Lightbulb className="h-3 w-3" />
+                                      {r.recommendationType === "cli" ? <Terminal className="h-3 w-3" /> : <Lightbulb className="h-3 w-3" />}
                                       {t("compliance.recommendation")}
                                     </button>
                                     {recoExpanded && (
-                                      <pre className="mt-1.5 px-3 py-2 rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px] font-mono text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words">{r.recommendation}</pre>
+                                      r.recommendationType === "cli" ? (
+                                        <pre className="mt-1.5 px-3 py-2 rounded-md bg-slate-900 dark:bg-slate-950 border border-slate-700 text-[11px] font-mono text-slate-100 whitespace-pre-wrap break-words">{r.recommendation}</pre>
+                                      ) : (
+                                        <pre className="mt-1.5 px-3 py-2 rounded-md bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 whitespace-pre-wrap break-words font-sans">{r.recommendation}</pre>
+                                      )
                                     )}
                                   </div>
                                 )}

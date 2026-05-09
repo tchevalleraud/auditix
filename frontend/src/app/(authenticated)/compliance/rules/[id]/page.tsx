@@ -105,6 +105,7 @@ interface ConditionResult {
   messageLong?: string;
   severity?: "info" | "low" | "medium" | "high" | "critical";
   recommendation?: string;
+  recommendationType?: "text" | "cli";
 }
 
 interface NodeTagItem { id: number; name: string; color: string; }
@@ -948,7 +949,28 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.recommendation")}</label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[10px] font-semibold text-slate-400 uppercase">{t("compliance_rules.recommendation")}</label>
+                      <div className="flex gap-1 rounded-md border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-50 dark:bg-slate-800">
+                        {(["text", "cli"] as const).map((rt) => {
+                          const active = (block.result?.recommendationType ?? "text") === rt;
+                          return (
+                            <button
+                              key={rt}
+                              type="button"
+                              onClick={() => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, recommendationType: rt } }))}
+                              className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                                active
+                                  ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
+                                  : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                              }`}
+                            >
+                              {t(`compliance_rules.recommendationType_${rt}`)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                     <VariableTextarea
                       value={block.result.recommendation || ""}
                       onChange={(v) => onUpdate(path, (b) => ({ ...b, result: { ...b.result!, recommendation: v || undefined } }))}

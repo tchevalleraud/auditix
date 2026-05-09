@@ -1891,6 +1891,8 @@
     "recommendationDisplayMode": "Anzeigemodus",
     "recommendationModeText": "Einfacher Text",
     "recommendationModeCli": "CLI-Block",
+    "recommendationTypeFromBranch": "Das Format (Text oder CLI) wird aus dem auf dem Geraet ausgewerteten Ergebniszweig der Regel uebernommen.",
+    "complianceRecFormatFromRule": "Das Format (Text oder CLI) wird durch jeden Ergebniszweig der Regel definiert.",
     "recommendationContent": "Empfehlung",
     "recommendationPlaceholder": "Z.B. SSH v2 aktivieren und HTTP-Server deaktivieren. Siehe interne Dokumentation {{hostname}}...",
     "recommendationVariablesHint": "Verfuegbare Variablen: {{hostname}}, {{name}}, {{ipAddress}}, {{node.kategorie.schluessel}} fuer Inventarwerte.",

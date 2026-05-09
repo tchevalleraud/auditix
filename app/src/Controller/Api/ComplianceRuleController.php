@@ -577,6 +577,9 @@ class ComplianceRuleController extends AbstractController
                 if (($result['status'] ?? '') === 'non_compliant' && !in_array($result['severity'] ?? '', $validSeverities)) {
                     throw new \Symfony\Component\HttpKernel\Exception\BadRequestHttpException('Non-compliant results require a valid severity');
                 }
+                if (isset($result['recommendationType']) && !in_array($result['recommendationType'], ['text', 'cli'], true)) {
+                    throw new \Symfony\Component\HttpKernel\Exception\BadRequestHttpException('Invalid recommendationType (expected "text" or "cli")');
+                }
             }
         }
     }

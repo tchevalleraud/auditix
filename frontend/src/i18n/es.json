@@ -1891,6 +1891,8 @@
     "recommendationDisplayMode": "Modo de visualizacion",
     "recommendationModeText": "Texto simple",
     "recommendationModeCli": "Bloque CLI",
+    "recommendationTypeFromBranch": "El formato (texto o CLI) se toma de la rama de resultado de la regla evaluada en el equipo.",
+    "complianceRecFormatFromRule": "El formato (texto o CLI) lo define cada rama de resultado de la regla.",
     "recommendationContent": "Recomendacion",
     "recommendationPlaceholder": "Ej. Activar SSH v2 y desactivar el servidor HTTP integrado. Ver documentacion interna {{hostname}}...",
     "recommendationVariablesHint": "Variables disponibles: {{hostname}}, {{name}}, {{ipAddress}}, {{node.categoria.clave}} para valores de inventario.",

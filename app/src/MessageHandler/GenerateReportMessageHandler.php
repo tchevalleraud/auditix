@@ -3243,27 +3243,29 @@ class GenerateReportMessageHandler
                 $rcoNode = $this->em->getRepository(Node::class)->find($rcoNodeId);
                 if (!$rcoRule || !$rcoNode) continue;
 
-                $rcoMode = ($block['displayMode'] ?? 'text') === 'cli' ? 'cli' : 'text';
                 $rcoSource = ($block['source'] ?? 'static') === 'dynamic' ? 'dynamic' : 'static';
                 $rcoShowHeader = !empty($block['showHeader']);
                 $rcoPageBreak = !empty($block['pageBreakBefore']);
-                $rcoFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : ($rcoMode === 'cli' ? 9.0 : (float) $bodySize);
 
                 $rcoHostname = $rcoNode->getHostname() ?? '';
                 $rcoName = $rcoNode->getName() ?? '';
                 $rcoIp = $rcoNode->getIpAddress() ?? '';
 
+                // Always evaluate the rule live to derive the recommendation type from the matched branch.
+                // In dynamic source we also use the eval'd recommendation text; in static we keep the user's typed text.
+                try {
+                    $rcoEval = $this->complianceEvaluator->evaluateRule($rcoRule, $rcoNode);
+                } catch (\Throwable $rcoErr) {
+                    $rcoEval = ['recommendation' => null, 'recommendationType' => null, 'message' => 'Evaluation error: ' . $rcoErr->getMessage()];
+                }
+                $rcoMode = ($rcoEval['recommendationType'] ?? 'text') === 'cli' ? 'cli' : 'text';
+
                 if ($rcoSource === 'dynamic') {
-                    // Re-evaluate the rule live to capture the dynamic recommendation
-                    try {
-                        $rcoEval = $this->complianceEvaluator->evaluateRule($rcoRule, $rcoNode);
-                    } catch (\Throwable $rcoErr) {
-                        $rcoEval = ['recommendation' => null, 'message' => 'Evaluation error: ' . $rcoErr->getMessage()];
-                    }
                     $rcoText = (string) ($rcoEval['recommendation'] ?? $rcoEval['message'] ?? '');
                 } else {
                     $rcoText = (string) ($block['recommendation'] ?? '');
                 }
+                $rcoFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : ($rcoMode === 'cli' ? 9.0 : (float) $bodySize);
 
                 // Variable substitution
                 $rcoText = strtr($rcoText, [
@@ -3391,7 +3393,6 @@ class GenerateReportMessageHandler
                 $crNodeTagIds = array_values(array_filter(array_map('intval', $block['nodeTagIds'] ?? []), fn($x) => $x > 0));
                 $crNodeIds = array_values(array_filter(array_map('intval', $block['nodeIds'] ?? []), fn($x) => $x > 0));
                 $crShowReco = !empty($block['showRecommendation']);
-                $crRecoFormat = ($block['recommendationFormat'] ?? 'text') === 'cli' ? 'cli' : 'text';
                 $crPageBreak = !empty($block['pageBreakBefore']);
                 $crFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
 
@@ -3480,6 +3481,7 @@ class GenerateReportMessageHandler
                     $crLong = (string) ($crRes->getMessageLong() ?? '');
                     if ($crLong === '') $crLong = (string) ($crRes->getMessage() ?? '');
                     $crReco = $crShowReco ? (string) ($crRes->getRecommendation() ?? '') : '';
+                    $crRecoFormat = $crRes->getRecommendationType() === 'cli' ? 'cli' : 'text';
 
                     // Closure renders the full item from current Y; called twice when checking page fit
                     $renderCrItem = function () use (

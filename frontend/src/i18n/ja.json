@@ -1891,6 +1891,8 @@
     "recommendationDisplayMode": "表示モード",
     "recommendationModeText": "プレーンテキスト",
     "recommendationModeCli": "CLIブロック",
+    "recommendationTypeFromBranch": "形式（テキストまたはCLI）は、機器に対して評価されたルールの結果ブランチから取得されます。",
+    "complianceRecFormatFromRule": "形式（テキストまたはCLI）は、ルールの各結果ブランチで定義されます。",
     "recommendationContent": "推奨事項",
     "recommendationPlaceholder": "例: SSH v2を有効にし、内蔵HTTPサーバーを無効にする。{{hostname}}の社内ドキュメント参照…",
     "recommendationVariablesHint": "利用可能な変数: {{hostname}}, {{name}}, {{ipAddress}}, インベントリ値は {{node.カテゴリ.キー}}。",

@@ -42,6 +42,9 @@ class ComplianceResult
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $recommendation = null;
 
+    #[ORM\Column(length: 10, nullable: true)]
+    private ?string $recommendationType = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $evaluatedAt;
 
@@ -67,6 +70,8 @@ class ComplianceResult
     public function setMessageLong(?string $v): static { $this->messageLong = $v; return $this; }
     public function getRecommendation(): ?string { return $this->recommendation; }
     public function setRecommendation(?string $v): static { $this->recommendation = $v; return $this; }
+    public function getRecommendationType(): ?string { return $this->recommendationType; }
+    public function setRecommendationType(?string $v): static { $this->recommendationType = $v === null ? null : ($v === 'cli' ? 'cli' : 'text'); return $this; }
     public function getEvaluatedAt(): \DateTimeImmutable { return $this->evaluatedAt; }
     public function setEvaluatedAt(\DateTimeImmutable $v): static { $this->evaluatedAt = $v; return $this; }
 }

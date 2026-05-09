@@ -358,7 +358,6 @@ export interface RuleRecommendationBlock {
   ruleId: number | null;
   nodeId: number | null;
   source?: "static" | "dynamic";
-  displayMode: "text" | "cli";
   recommendation: string;
   showHeader: boolean;
   pageBreakBefore?: boolean;
@@ -376,7 +375,6 @@ export interface ComplianceRecommendationsBlock {
   nodeTagIds: number[];
   nodeIds: number[];
   showRecommendation: boolean;
-  recommendationFormat: "text" | "cli";
   pageBreakBefore?: boolean;
   fontSize?: number;
 }
@@ -968,9 +966,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     } else if (type === "rule_nodes_table") {
       block = { id, type: "rule_nodes_table", policyId: null, ruleId: null, showRuleDescription: true, showMessage: false, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
     } else if (type === "rule_recommendation") {
-      block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", displayMode: "text", recommendation: "", showHeader: true, pageBreakBefore: false };
+      block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", recommendation: "", showHeader: true, pageBreakBefore: false };
     } else if (type === "compliance_recommendations") {
-      block = { id, type: "compliance_recommendations", policyIds: [], ruleIds: [], scope: "all", nodeTagIds: [], nodeIds: [], showRecommendation: false, recommendationFormat: "text", pageBreakBefore: false };
+      block = { id, type: "compliance_recommendations", policyIds: [], ruleIds: [], scope: "all", nodeTagIds: [], nodeIds: [], showRecommendation: false, pageBreakBefore: false };
     } else if (type === "static_recommendations") {
       block = { id, type: "static_recommendations", title: "", items: [], showRecommendation: true, pageBreakBefore: false };
     } else if (type === "recommendation_summary") {
@@ -1274,7 +1272,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     if (block.type === "rule_recommendation") {
       if (block.ruleId && block.nodeId) {
         const src = (block.source ?? "static") === "dynamic" ? "DYN" : "STA";
-        return <span className="text-slate-500 text-xs">{t("structure.ruleRecommendation")} — rule #{block.ruleId} / device #{block.nodeId} ({src} / {block.displayMode === "cli" ? "CLI" : "TXT"})</span>;
+        return <span className="text-slate-500 text-xs">{t("structure.ruleRecommendation")} — rule #{block.ruleId} / device #{block.nodeId} ({src})</span>;
       }
       return <span className="italic text-slate-400">{t("structure.emptyRuleRecommendation")}</span>;
     }
@@ -6664,10 +6662,8 @@ function RuleRecommendationProperties({
       });
   }, [block.policyId]);
 
-  const recPlaceholder =
-    block.displayMode === "cli"
-      ? "configure terminal\ninterface Vlan10\n no ip http server\nend\n! {{hostname}}"
-      : t("structure.recommendationPlaceholder");
+  const isStaticSource = (block.source ?? "static") === "static";
+  const recPlaceholder = t("structure.recommendationPlaceholder");
 
   return (
     <div className="space-y-4">
@@ -6746,35 +6742,11 @@ function RuleRecommendationProperties({
         </p>
       </div>
 
-      <div className="space-y-1.5">
-        <label className={labelClass}>{t("structure.recommendationDisplayMode")}</label>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => updateBlock(block.id, { displayMode: "text" })}
-            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-              block.displayMode === "text"
-                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-            }`}
-          >
-            {t("structure.recommendationModeText")}
-          </button>
-          <button
-            type="button"
-            onClick={() => updateBlock(block.id, { displayMode: "cli" })}
-            className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-              block.displayMode === "cli"
-                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-            }`}
-          >
-            {t("structure.recommendationModeCli")}
-          </button>
-        </div>
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 px-3 py-2 text-[11px] text-slate-600 dark:text-slate-400">
+        {t("structure.recommendationTypeFromBranch")}
       </div>
 
-      {(block.source ?? "static") === "static" && (
+      {isStaticSource && (
         <div className="space-y-1.5">
           <label className={labelClass}>{t("structure.recommendationContent")}</label>
           <textarea
@@ -6782,7 +6754,7 @@ function RuleRecommendationProperties({
             onChange={(e) => updateBlock(block.id, { recommendation: e.target.value })}
             placeholder={recPlaceholder}
             rows={10}
-            className={`${inputClass} resize-y ${block.displayMode === "cli" ? "font-mono text-xs" : ""}`}
+            className={`${inputClass} resize-y`}
           />
           <p className="text-[10px] text-slate-400 italic">{t("structure.recommendationVariablesHint")}</p>
         </div>
@@ -6817,11 +6789,11 @@ function RuleRecommendationProperties({
             min={6}
             max={14}
             step={0.5}
-            value={block.fontSize ?? (block.displayMode === "cli" ? 9 : 11)}
+            value={block.fontSize ?? 11}
             onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
             className="flex-1 accent-blue-600"
           />
-          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? (block.displayMode === "cli" ? 9 : 11)}pt</span>
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 11}pt</span>
         </div>
       </div>
     </div>
@@ -7026,25 +6998,7 @@ function ComplianceRecommendationsProperties({
         </label>
 
         {block.showRecommendation && (
-          <div className="ml-6 space-y-1.5">
-            <label className={labelClass}>{t("structure.complianceRecRecommendationFormat")}</label>
-            <div className="flex gap-2">
-              {(["text", "cli"] as const).map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => updateBlock(block.id, { recommendationFormat: f })}
-                  className={`flex-1 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-                    block.recommendationFormat === f
-                      ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
-                      : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-                  }`}
-                >
-                  {t(`structure.complianceRecFormat_${f}`)}
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="ml-6 text-[10px] text-slate-400 italic">{t("structure.complianceRecFormatFromRule")}</p>
         )}
 
         <label className="flex items-center gap-2 cursor-pointer">

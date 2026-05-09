@@ -79,6 +79,7 @@ class EvaluateComplianceMessageHandler
             $result->setMessage($evaluation['message'] ?? null);
             $result->setMessageLong($evaluation['messageLong'] ?? null);
             $result->setRecommendation($evaluation['recommendation'] ?? null);
+            $result->setRecommendationType($evaluation['recommendationType'] ?? null);
             $result->setEvaluatedAt(new \DateTimeImmutable());
             $this->em->persist($result);
 

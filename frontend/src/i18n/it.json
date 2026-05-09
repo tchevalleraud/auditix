@@ -1891,6 +1891,8 @@
     "recommendationDisplayMode": "Modalita di visualizzazione",
     "recommendationModeText": "Testo semplice",
     "recommendationModeCli": "Blocco CLI",
+    "recommendationTypeFromBranch": "Il formato (testo o CLI) viene preso dal ramo di risultato della regola valutato sul dispositivo.",
+    "complianceRecFormatFromRule": "Il formato (testo o CLI) e definito da ciascun ramo di risultato della regola.",
     "recommendationContent": "Raccomandazione",
     "recommendationPlaceholder": "Es. Abilitare SSH v2 e disabilitare il server HTTP integrato. Vedi documentazione interna {{hostname}}...",
     "recommendationVariablesHint": "Variabili disponibili: {{hostname}}, {{name}}, {{ipAddress}}, {{node.categoria.chiave}} per i valori di inventario.",
