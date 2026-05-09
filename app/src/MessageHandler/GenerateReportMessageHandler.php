@@ -813,7 +813,7 @@ class GenerateReportMessageHandler
 
         // TCPDF appends a phantom line break when HTML ends with a closing list tag
         if (preg_match('/<\/(ul|ol)>\s*$/i', $html)) {
-            $lineH = $pdf->getCellHeight($pdf->FontSize);
+            $lineH = $pdf->getCellHeight($pdf->getFontSize());
             $pdf->SetY($pdf->GetY() - $lineH);
         }
     }
