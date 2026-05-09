@@ -3472,6 +3472,129 @@ class GenerateReportMessageHandler
 
                 $prevType = 'compliance_recommendations';
 
+            } elseif ($type === 'static_recommendations') {
+                $srTitle = $this->resolveNodeVariables((string) ($block['title'] ?? ''), $forNode, $report);
+                $srItems = is_array($block['items'] ?? null) ? $block['items'] : [];
+                $srShowReco = !isset($block['showRecommendation']) || !empty($block['showRecommendation']);
+                $srPageBreak = !empty($block['pageBreakBefore']);
+                $srFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 9.0;
+
+                if (empty($srItems)) {
+                    continue;
+                }
+
+                $srLocale = $report ? $report->getLocale() : 'en';
+                $srCl = self::COMPLIANCE_LABELS[$srLocale] ?? self::COMPLIANCE_LABELS['en'];
+
+                if ($srPageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $srContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+
+                if ($srTitle !== '') {
+                    $srTitleFont = $this->mapFont(($headingsByLevel[1] ?? [])['font'] ?? $bodyFont);
+                    $pdf->SetFont($srTitleFont, 'B', $bodySize + 1);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell(0, ($bodySize + 1) * 0.3528 + 1, $srTitle, 0, 'L');
+                    $pdf->Ln(2);
+                }
+
+                $srSevColors = [
+                    'critical' => [239, 68, 68],
+                    'high' => [249, 115, 22],
+                    'medium' => [234, 179, 8],
+                    'low' => [59, 130, 246],
+                    'info' => [148, 163, 184],
+                ];
+
+                foreach ($srItems as $srItem) {
+                    if (!is_array($srItem)) continue;
+                    $srSev = (string) ($srItem['severity'] ?? 'info');
+                    if (!isset($srSevColors[$srSev])) $srSev = 'info';
+                    $srColor = $srSevColors[$srSev];
+                    $srSevLabel = $srCl['sev_' . $srSev] ?? $srSev;
+
+                    $srShort = $this->resolveNodeVariables((string) ($srItem['shortDescription'] ?? ''), $forNode, $report);
+                    $srLong = $this->resolveNodeVariables((string) ($srItem['longDescription'] ?? ''), $forNode, $report);
+                    $srReco = $this->resolveNodeVariables((string) ($srItem['recommendation'] ?? ''), $forNode, $report);
+                    $srRecoFormat = ($srItem['recommendationFormat'] ?? 'text') === 'cli' ? 'cli' : 'text';
+
+                    $srBoxStartY = $pdf->GetY();
+                    $srBarW = 1.2;
+                    $srBadgeW = 22;
+                    $srBadgeH = $srFontSize * 0.3528 + 1.5;
+
+                    $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
+                    $pdf->SetTextColor(255, 255, 255);
+                    $pdf->SetFont($bodyFont, 'B', $srFontSize - 1);
+                    $pdf->Rect($mLeft, $srBoxStartY, $srBadgeW, $srBadgeH, 'F');
+                    $pdf->SetXY($mLeft, $srBoxStartY);
+                    $pdf->Cell($srBadgeW, $srBadgeH, strtoupper($srSevLabel), 0, 0, 'C');
+
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, 'B', $srFontSize);
+                    $pdf->SetXY($mLeft + $srBadgeW + 2, $srBoxStartY);
+                    $pdf->Cell($srContentW - $srBadgeW - 2, $srBadgeH, $srShort, 0, 1, 'L');
+
+                    $pdf->SetFont($bodyFont, '', $srFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    if ($srLong !== '') {
+                        if (!preg_match('/<[a-z][^>]*>/i', $srLong)) {
+                            $srLong = '<p>' . nl2br(htmlspecialchars($srLong, ENT_QUOTES, 'UTF-8')) . '</p>';
+                        }
+                        $pdf->writeHTMLCell($srContentW, 0, $mLeft, $pdf->GetY() + 0.5, $srLong, 0, 1, false, true, 'L', true);
+                    }
+
+                    if ($srShowReco && $srReco !== '') {
+                        if ($srRecoFormat === 'cli') {
+                            $srCliStyle = $styles['cliCommand'] ?? ReportTheme::DEFAULT_STYLES['cliCommand'];
+                            $srCliFont = $this->mapFont($srCliStyle['font'] ?? 'Consolas');
+                            $srCliBg = $this->hexToRgb($srCliStyle['bgColor'] ?? '#f1f5f9');
+                            $srCliText = $this->hexToRgb($srCliStyle['textColor'] ?? '#1e293b');
+                            $srCliBorder = $this->hexToRgb($srCliStyle['borderColor'] ?? '#e2e8f0');
+                            $srCliPadding = (float) ($srCliStyle['padding'] ?? 3);
+                            $srLines = explode("\n", $srReco);
+                            $srLineH = $srFontSize * 0.3528 * 1.4;
+                            $srBodyH = ($srCliPadding * 2) + (count($srLines) * $srLineH);
+                            $srStartY = $pdf->GetY() + 1;
+                            if ($srStartY + $srBodyH > $pdf->getPageHeight() - $mBottom) {
+                                $pdf->AddPage();
+                                $srStartY = $pdf->GetY();
+                            }
+                            $pdf->SetDrawColor($srCliBorder[0], $srCliBorder[1], $srCliBorder[2]);
+                            $pdf->SetFillColor($srCliBg[0], $srCliBg[1], $srCliBg[2]);
+                            $pdf->Rect($mLeft, $srStartY, $srContentW, $srBodyH, 'DF');
+                            $pdf->SetFont($srCliFont, '', $srFontSize);
+                            $pdf->SetTextColor($srCliText[0], $srCliText[1], $srCliText[2]);
+                            $srCurY = $srStartY + $srCliPadding;
+                            foreach ($srLines as $srLine) {
+                                $pdf->SetXY($mLeft + $srCliPadding, $srCurY);
+                                $pdf->Cell($srContentW - ($srCliPadding * 2), $srLineH, $srLine, 0, 0, 'L');
+                                $srCurY += $srLineH;
+                            }
+                            $pdf->SetY($srStartY + $srBodyH);
+                        } else {
+                            $pdf->Ln(0.5);
+                            $srRecoEsc = nl2br(htmlspecialchars($srReco, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                            $pdf->writeHTMLCell($srContentW, 0, $mLeft, $pdf->GetY(), '<i>' . $srRecoEsc . '</i>', 0, 1, false, true, 'L', true);
+                        }
+                    }
+
+                    $srBoxEndY = $pdf->GetY();
+                    $pdf->SetFillColor($srColor[0], $srColor[1], $srColor[2]);
+                    $pdf->Rect($mLeft - 1.8, $srBoxStartY, $srBarW, $srBoxEndY - $srBoxStartY, 'F');
+
+                    $pdf->Ln(2);
+                }
+
+                $prevType = 'static_recommendations';
+
             } elseif ($type === 'chart_static') {
                 $chKind = (string) ($block['chartKind'] ?? 'bar');
                 $chTitle = (string) ($block['title'] ?? '');

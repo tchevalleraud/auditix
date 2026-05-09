@@ -374,6 +374,27 @@ export interface ComplianceRecommendationsBlock {
   fontSize?: number;
 }
 
+export type StaticRecommendationSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+export interface StaticRecommendationItem {
+  id: string;
+  severity: StaticRecommendationSeverity;
+  shortDescription: string;
+  longDescription: string;
+  recommendation: string;
+  recommendationFormat: "text" | "cli";
+}
+
+export interface StaticRecommendationsBlock {
+  id: string;
+  type: "static_recommendations";
+  title: string;
+  items: StaticRecommendationItem[];
+  showRecommendation: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+}
+
 // === Charts ===
 export type ChartKind = "bar" | "stacked_bar" | "pie" | "radar" | "line" | "area" | "treemap";
 
@@ -566,7 +587,7 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
-export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
+export type ReportBlock = HeadingBlock | ParagraphBlock | ImageBlock | TableBlock | InventoryTableBlock | CliCommandBlock | EquipmentListBlock | ActionListBlock | CommandListBlock | TopologyBlock | ComplianceMatrixBlock | RuleNonCompliantBlock | RuleNodesTableBlock | RuleRecommendationBlock | ComplianceRecommendationsBlock | StaticRecommendationsBlock | ChartStaticBlock | ChartInventoryBlock | TimelineBlock | ComparisonSummaryBlock | ComparisonDetailBlock | InventoryDiffBlock;
 
 interface ReportNodeRef {
   id: number;
@@ -651,6 +672,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "rule_nodes_table", labelKey: "structure.addRuleNodesTable", icon: <Activity className="h-4 w-4 text-sky-500" /> },
       { type: "rule_recommendation", labelKey: "structure.addRuleRecommendation", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
       { type: "compliance_recommendations", labelKey: "structure.addComplianceRecommendations", icon: <ShieldAlert className="h-4 w-4 text-amber-500" /> },
+      { type: "static_recommendations", labelKey: "structure.addStaticRecommendations", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
     ],
   },
   {
@@ -776,6 +798,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", displayMode: "text", recommendation: "", showHeader: true, pageBreakBefore: false };
     } else if (type === "compliance_recommendations") {
       block = { id, type: "compliance_recommendations", policyIds: [], ruleIds: [], scope: "all", nodeTagIds: [], nodeIds: [], showRecommendation: false, recommendationFormat: "text", pageBreakBefore: false };
+    } else if (type === "static_recommendations") {
+      block = { id, type: "static_recommendations", title: "", items: [], showRecommendation: true, pageBreakBefore: false };
     } else if (type === "chart_static") {
       block = {
         id,
@@ -1066,6 +1090,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="text-slate-500 text-xs">{t("structure.complianceRecommendations")} — {polCount} pol / {ruleCount} rules / {scopeStr}</span>;
     }
+    if (block.type === "static_recommendations") {
+      const count = (block.items ?? []).length;
+      if (count === 0) {
+        return <span className="italic text-slate-400">{t("structure.emptyStaticRecommendations")}</span>;
+      }
+      return <span className="text-slate-500 text-xs">{block.title || t("structure.staticRecommendations")} — {count} {count > 1 ? t("structure.staticRecItemsPlural") : t("structure.staticRecItemsSingular")}</span>;
+    }
     if (block.type === "chart_static") {
       const seriesCount = block.series.length;
       const labelCount = block.labels.length;
@@ -1210,6 +1241,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
           <ShieldAlert className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "static_recommendations") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-500/15 px-2 py-0.5 text-[11px] font-bold text-amber-600 dark:text-amber-400">
+          <Lightbulb className="h-3 w-3" />
         </span>
       );
     }
@@ -1484,6 +1522,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "compliance_recommendations" && (
                 <ComplianceRecommendationsProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "static_recommendations" && (
+                <StaticRecommendationsProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "chart_static" && (
                 <ChartStaticProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -6753,6 +6794,361 @@ function ComplianceRecommendationsProperties({
 
       <div className="space-y-1.5">
         <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={6}
+            max={14}
+            step={0.5}
+            value={block.fontSize ?? 9}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// === Static recommendations properties ===============================
+// =====================================================================
+
+const STATIC_REC_SEVERITIES: StaticRecommendationSeverity[] = ["critical", "high", "medium", "low", "info"];
+
+const STATIC_REC_SEVERITY_STYLES: Record<StaticRecommendationSeverity, { color: string; bg: string; border: string }> = {
+  critical: { color: "text-red-700 dark:text-red-400", bg: "bg-red-50 dark:bg-red-500/10", border: "border-red-200 dark:border-red-500/20" },
+  high: { color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50 dark:bg-orange-500/10", border: "border-orange-200 dark:border-orange-500/20" },
+  medium: { color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50 dark:bg-amber-500/10", border: "border-amber-200 dark:border-amber-500/20" },
+  low: { color: "text-blue-700 dark:text-blue-400", bg: "bg-blue-50 dark:bg-blue-500/10", border: "border-blue-200 dark:border-blue-500/20" },
+  info: { color: "text-slate-700 dark:text-slate-400", bg: "bg-slate-50 dark:bg-slate-500/10", border: "border-slate-200 dark:border-slate-500/20" },
+};
+
+function StaticRecLongEditor({
+  value,
+  onChange,
+  t,
+}: {
+  value: string;
+  onChange: (html: string) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({ heading: false, codeBlock: false, code: false, blockquote: false, horizontalRule: false }),
+      UnderlineExt,
+    ],
+    content: value || "<p></p>",
+    onUpdate: ({ editor: ed }) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        onChange(ed.getHTML());
+      }, 250);
+    },
+    onBlur: ({ editor: ed }) => {
+      if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null; }
+      onChange(ed.getHTML());
+    },
+    editorProps: {
+      attributes: { class: "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[110px] px-3 py-2 text-sm" },
+    },
+  });
+
+  if (!editor) return null;
+
+  const btnClass = (active: boolean) =>
+    `p-1.5 rounded-md transition-colors ${active ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`;
+
+  return (
+    <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 overflow-hidden">
+      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shrink-0 flex-wrap">
+        <button type="button" onClick={() => editor.chain().focus().toggleBold().run()} className={btnClass(editor.isActive("bold"))} title={t("structure.bold")}><Bold className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => editor.chain().focus().toggleItalic().run()} className={btnClass(editor.isActive("italic"))} title={t("structure.italic")}><Italic className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => editor.chain().focus().toggleUnderline().run()} className={btnClass(editor.isActive("underline"))} title={t("structure.underline")}><UnderlineIcon className="h-3.5 w-3.5" /></button>
+        <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+        <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive("bulletList"))} title={t("structure.bulletList")}><List className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive("orderedList"))} title={t("structure.numberedList")}><ListOrdered className="h-3.5 w-3.5" /></button>
+      </div>
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+function StaticRecommendationsProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: StaticRecommendationsBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
+
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
+  const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+  const updateItem = (idx: number, patch: Partial<StaticRecommendationItem>) => {
+    const items = [...block.items];
+    items[idx] = { ...items[idx], ...patch };
+    updateBlock(block.id, { items });
+  };
+
+  const removeItem = (idx: number) => {
+    updateBlock(block.id, { items: block.items.filter((_, ii) => ii !== idx) });
+  };
+
+  const duplicateItem = (idx: number) => {
+    const src = block.items[idx];
+    if (!src) return;
+    const copy: StaticRecommendationItem = {
+      ...src,
+      id: Math.random().toString(36).slice(2, 10),
+    };
+    const items = [...block.items];
+    items.splice(idx + 1, 0, copy);
+    updateBlock(block.id, { items });
+  };
+
+  const reorderItem = (fromIdx: number, toIdx: number) => {
+    const items = [...block.items];
+    const [moved] = items.splice(fromIdx, 1);
+    items.splice(toIdx, 0, moved);
+    updateBlock(block.id, { items });
+    setDragIdx(null);
+    setDragOverIdx(null);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Title */}
+      <div>
+        <label className={labelCls}>{t("structure.staticRecTitle")}</label>
+        <input
+          type="text"
+          value={block.title}
+          onChange={(e) => updateBlock(block.id, { title: e.target.value })}
+          placeholder={t("structure.staticRecTitlePlaceholder")}
+          className={inputCls}
+        />
+      </div>
+
+      {/* Items */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <label className={labelCls}>{t("structure.staticRecItems")}</label>
+          <button
+            onClick={() => {
+              const id = Math.random().toString(36).slice(2, 10);
+              const items = [
+                ...block.items,
+                {
+                  id,
+                  severity: "medium" as StaticRecommendationSeverity,
+                  shortDescription: "",
+                  longDescription: "",
+                  recommendation: "",
+                  recommendationFormat: "text" as const,
+                },
+              ];
+              updateBlock(block.id, { items });
+              setEditingIdx(items.length - 1);
+            }}
+            className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t("structure.staticRecAdd")}
+          </button>
+        </div>
+
+        {block.items.length === 0 && (
+          <div className="text-center py-8 text-sm text-slate-400">{t("structure.staticRecEmpty")}</div>
+        )}
+
+        <div className="space-y-2">
+          {block.items.map((item, idx) => {
+            const isEditing = editingIdx === idx;
+            const sev = STATIC_REC_SEVERITY_STYLES[item.severity] ?? STATIC_REC_SEVERITY_STYLES.medium;
+
+            return (
+              <div
+                key={item.id}
+                className={`rounded-lg border overflow-hidden ${sev.border} ${dragOverIdx === idx && dragIdx !== idx ? "ring-2 ring-blue-400" : ""}`}
+                draggable={!isEditing}
+                onDragStart={() => setDragIdx(idx)}
+                onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
+                onDragLeave={() => setDragOverIdx(null)}
+                onDrop={(e) => { e.preventDefault(); if (dragIdx !== null && dragIdx !== idx) reorderItem(dragIdx, idx); }}
+                onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
+              >
+                {!isEditing && (
+                  <div
+                    className={`flex items-center gap-3 px-4 py-2.5 cursor-grab active:cursor-grabbing hover:opacity-80 transition-opacity ${sev.bg}`}
+                    onClick={() => setEditingIdx(idx)}
+                  >
+                    <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                    <span className={`shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${sev.color} ${sev.bg} border ${sev.border}`}>
+                      {t(`structure.staticRecSev_${item.severity}`)}
+                    </span>
+                    <span className="text-sm text-slate-900 dark:text-slate-100 truncate flex-1">
+                      {item.shortDescription || <span className="italic text-slate-400">{t("structure.staticRecShortPlaceholder")}</span>}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Pencil className="h-3 w-3 text-slate-400" />
+                      <button
+                        onClick={(e) => { e.stopPropagation(); duplicateItem(idx); }}
+                        title={t("structure.staticRecDuplicate")}
+                        className="p-0.5 rounded text-slate-400 hover:text-blue-500 transition-colors"
+                      >
+                        <Copy className="h-3 w-3" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); removeItem(idx); }}
+                        title={t("common.delete")}
+                        className="p-0.5 rounded text-slate-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {isEditing && (
+                  <div className="p-4 space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.staticRecSeverity")}</label>
+                      <div className="flex gap-1.5">
+                        {STATIC_REC_SEVERITIES.map((s) => {
+                          const sc = STATIC_REC_SEVERITY_STYLES[s];
+                          return (
+                            <button
+                              key={s}
+                              onClick={() => updateItem(idx, { severity: s })}
+                              className={`flex-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition-colors ${item.severity === s ? `${sc.bg} ${sc.color} ${sc.border} ring-1 ring-current` : "border-slate-200 dark:border-slate-700 text-slate-400 hover:border-slate-300"}`}
+                            >
+                              {t(`structure.staticRecSev_${s}`)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.staticRecShort")}</label>
+                      <input
+                        type="text"
+                        value={item.shortDescription}
+                        onChange={(e) => updateItem(idx, { shortDescription: e.target.value })}
+                        placeholder={t("structure.staticRecShortPlaceholder")}
+                        className={inputCls}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.staticRecLong")}</label>
+                      <StaticRecLongEditor
+                        value={item.longDescription}
+                        onChange={(html) => updateItem(idx, { longDescription: html })}
+                        t={t}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.staticRecRecommendationFormat")}</label>
+                      <div className="flex gap-2">
+                        {(["text", "cli"] as const).map((f) => (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => updateItem(idx, { recommendationFormat: f })}
+                            className={`flex-1 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                              item.recommendationFormat === f
+                                ? "border-amber-500 bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100"
+                            }`}
+                          >
+                            {t(`structure.complianceRecFormat_${f}`)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-medium text-slate-500 mb-1 block">{t("structure.staticRecRecommendation")}</label>
+                      <textarea
+                        value={item.recommendation}
+                        onChange={(e) => updateItem(idx, { recommendation: e.target.value })}
+                        placeholder={
+                          item.recommendationFormat === "cli"
+                            ? t("structure.staticRecRecommendationCliPlaceholder")
+                            : t("structure.staticRecRecommendationTextPlaceholder")
+                        }
+                        rows={5}
+                        className={`${inputCls} resize-none ${item.recommendationFormat === "cli" ? "font-mono text-xs" : ""}`}
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        onClick={() => { removeItem(idx); setEditingIdx(null); }}
+                        className="flex items-center gap-1 text-[11px] text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                        {t("common.delete")}
+                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => { duplicateItem(idx); setEditingIdx(idx + 1); }}
+                          className="flex items-center gap-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                        >
+                          <Copy className="h-3 w-3" />
+                          {t("structure.staticRecDuplicate")}
+                        </button>
+                        <button
+                          onClick={() => setEditingIdx(null)}
+                          className="flex items-center gap-1 rounded-md bg-slate-900 dark:bg-white px-3 py-1 text-[11px] font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                        >
+                          OK
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showRecommendation}
+            onChange={(e) => updateBlock(block.id, { showRecommendation: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-amber-600 focus:ring-amber-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.staticRecShowRecommendation")}</span>
+        </label>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelCls}>{t("structure.complianceFontSize")}</label>
         <div className="flex items-center gap-3">
           <input
             type="range"
