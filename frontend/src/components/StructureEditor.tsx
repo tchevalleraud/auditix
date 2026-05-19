@@ -293,6 +293,11 @@ export interface CommandListBlock {
 export interface TopologyBlock {
   id: string;
   type: "topology";
+  /** v2 topology (preferred). When set, takes priority over legacy topologyMapId. */
+  topologyId?: number | null;
+  /** v2 protocol filter: "manual" | protocol id */
+  protocolFilter?: "manual" | number | null;
+  /** v1 legacy fields (kept for backward compatibility on existing reports) */
   topologyMapId: number | null;
   width: number;
   protocol: string;
@@ -958,7 +963,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     } else if (type === "command_list") {
       block = { id, type: "command_list", manufacturerId: null, modelId: null, style: { fontSize: 9 } };
     } else if (type === "topology") {
-      block = { id, type: "topology", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
+      block = { id, type: "topology", topologyId: null, protocolFilter: "manual", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
     } else if (type === "compliance_matrix") {
       block = { id, type: "compliance_matrix", policyId: null, showRuleId: true, showTotal: true, pageBreakBefore: false };
     } else if (type === "rule_non_compliant") {
@@ -1246,6 +1251,11 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return <span className="italic text-slate-400">{t("structure.emptyCommandList")}</span>;
     }
     if (block.type === "topology") {
+      if (block.topologyId) {
+        const pf = block.protocolFilter;
+        const pfLabel = typeof pf === "number" ? `#${pf}` : (pf ?? "");
+        return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyId}{pfLabel ? ` (${pfLabel})` : ""}</span>;
+      }
       if (block.topologyMapId) {
         return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyMapId}{block.protocol ? ` (${block.protocol.toUpperCase()})` : ""}</span>;
       }
@@ -5599,23 +5609,43 @@ function TopologyBlockProperties({
   t: (key: string, params?: Record<string, string>) => string;
 }) {
   const { current } = useAppContext();
-  const [maps, setMaps] = useState<{ id: number; name: string; description: string | null }[]>([]);
+  const [topologies, setTopologies] = useState<{ id: number; name: string; description: string | null }[]>([]);
+  const [protocols, setProtocols] = useState<{ id: number; name: string; type: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!current) return;
     setLoading(true);
-    fetch(`/api/topology-maps?context=${current.id}`)
+    fetch(`/api/topologies?context=${current.id}`)
       .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setMaps(data))
+      .then((data) => setTopologies(data))
       .finally(() => setLoading(false));
   }, [current]);
 
-  const selectedMap = maps.find((m) => m.id === block.topologyMapId);
+  useEffect(() => {
+    if (!block.topologyId) { setProtocols([]); return; }
+    fetch(`/api/topologies/${block.topologyId}/protocols`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setProtocols(data))
+      .catch(() => setProtocols([]));
+  }, [block.topologyId]);
+
+  // Refresh the preview URL whenever the topology / protocol filter / frame changes.
+  // We request the FULL svg (auto-fit) for the preview, then overlay a rectangle on top
+  // representing the user-selected viewportFrame (if any).
+  useEffect(() => {
+    if (!block.topologyId) { setPreviewUrl(null); return; }
+    const pf = block.protocolFilter ?? "manual";
+    const pfStr = typeof pf === "number" ? String(pf) : pf;
+    setPreviewUrl(`/api/topologies/${block.topologyId}/svg?protocolFilter=${pfStr}&width=900&t=${Date.now()}`);
+  }, [block.topologyId, block.protocolFilter]);
+
+  const selectedTopology = topologies.find((m) => m.id === block.topologyId);
 
   return (
     <div className="space-y-4">
-      {/* Map selector */}
+      {/* Topology selector */}
       <div className="space-y-1.5">
         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
           {t("structure.topologyMap")} <span className="text-red-500">*</span>
@@ -5627,49 +5657,57 @@ function TopologyBlockProperties({
           </div>
         ) : (
           <select
-            value={block.topologyMapId ?? ""}
-            onChange={(e) => updateBlock(block.id, { topologyMapId: e.target.value ? Number(e.target.value) : null, viewportFrame: null })}
+            value={block.topologyId ?? ""}
+            onChange={(e) => updateBlock(block.id, {
+              topologyId: e.target.value ? Number(e.target.value) : null,
+              protocolFilter: "manual",
+              topologyMapId: null,
+              viewportFrame: null,
+            })}
             className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
           >
             <option value="">{t("structure.topologySelectMap")}</option>
-            {maps.map((m) => (
+            {topologies.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.name}
               </option>
             ))}
           </select>
         )}
-        {selectedMap?.description && (
-          <p className="text-xs text-slate-400 dark:text-slate-500">{selectedMap.description}</p>
+        {selectedTopology?.description && (
+          <p className="text-xs text-slate-400 dark:text-slate-500">{selectedTopology.description}</p>
         )}
       </div>
 
-      {/* Protocol filter */}
-      <div className="space-y-1.5">
-        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-          {t("structure.topologyProtocol")}
-        </label>
-        <select
-          value={block.protocol}
-          onChange={(e) => updateBlock(block.id, { protocol: e.target.value })}
-          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
-        >
-          <option value="">{t("topology.protocolAll")}</option>
-          <option value="lldp">LLDP</option>
-          <option value="stp">STP</option>
-          <option value="ospf">OSPF</option>
-          <option value="bgp">BGP</option>
-          <option value="isis">ISIS</option>
-        </select>
-      </div>
+      {/* Protocol filter (v2) */}
+      {block.topologyId && (
+        <div className="space-y-1.5">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+            {t("structure.topologyProtocol")}
+          </label>
+          <select
+            value={typeof block.protocolFilter === "number" ? String(block.protocolFilter) : (block.protocolFilter ?? "manual")}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateBlock(block.id, { protocolFilter: v === "manual" ? "manual" : Number(v) });
+            }}
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+          >
+            <option value="manual">{t("topology.filterManual")}</option>
+            {protocols.map((p) => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
-      {/* Viewport Frame Selector */}
-      {block.topologyMapId && (
-        <ViewportFrameSelector
-          mapId={block.topologyMapId}
-          protocol={block.protocol}
+      {/* Preview with interactive viewport frame selection */}
+      {previewUrl && block.topologyId && (
+        <TopologyPreviewSelector
+          previewUrl={previewUrl}
           frame={block.viewportFrame ?? null}
-          onFrameChange={(frame) => updateBlock(block.id, { viewportFrame: frame })}
+          onChange={(f) => updateBlock(block.id, { viewportFrame: f })}
+          t={t}
         />
       )}
 
@@ -10023,6 +10061,255 @@ function ConditionLeafEditor({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+
+// --- Interactive viewport-frame selector on top of the topology preview ---
+interface ViewFrame { x: number; y: number; width: number; height: number }
+type DragMode =
+  | "new"
+  | "move"
+  | "nw" | "ne" | "sw" | "se"
+  | "n" | "s" | "w" | "e";
+
+function TopologyPreviewSelector({
+  previewUrl,
+  frame,
+  onChange,
+  t,
+}: {
+  previewUrl: string;
+  frame: ViewFrame | null;
+  onChange: (f: ViewFrame | null) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const [viewBox, setViewBox] = useState<ViewFrame | null>(null);
+  const [drag, setDrag] = useState<{
+    sx: number; sy: number; cx: number; cy: number;
+    mode: DragMode;
+    initFrame: ViewFrame | null;
+  } | null>(null);
+  const [hoverMode, setHoverMode] = useState<DragMode>("new");
+  const [, setImgReady] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setViewBox(null); // reset so a stale viewBox doesn't get mixed with the new image
+    fetch(previewUrl)
+      .then((r) => (r.ok ? r.text() : ""))
+      .then((txt) => {
+        if (cancelled) return;
+        const m = txt.match(/viewBox=["']([^"']+)["']/);
+        if (!m) return;
+        const parts = m[1].trim().split(/\s+/).map((s) => parseFloat(s));
+        if (parts.length === 4 && parts.every((p) => !Number.isNaN(p))) {
+          setViewBox({ x: parts[0], y: parts[1], width: parts[2], height: parts[3] });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [previewUrl]);
+
+  const pixelToWorld = (px: number, py: number): { x: number; y: number } | null => {
+    const img = imgRef.current;
+    if (!img || !viewBox) return null;
+    const rect = img.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: viewBox.x + (px / rect.width) * viewBox.width,
+      y: viewBox.y + (py / rect.height) * viewBox.height,
+    };
+  };
+
+  const worldToPixel = (wx: number, wy: number): { x: number; y: number } | null => {
+    const img = imgRef.current;
+    if (!img || !viewBox) return null;
+    const rect = img.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: ((wx - viewBox.x) / viewBox.width) * rect.width,
+      y: ((wy - viewBox.y) / viewBox.height) * rect.height,
+    };
+  };
+
+  // Decide the drag mode based on where the mouse pressed relative to the existing frame.
+  const hitMode = (px: number, py: number): DragMode => {
+    if (!frame) return "new";
+    const a = worldToPixel(frame.x, frame.y);
+    const b = worldToPixel(frame.x + frame.width, frame.y + frame.height);
+    if (!a || !b) return "new";
+    const left = Math.min(a.x, b.x);
+    const right = Math.max(a.x, b.x);
+    const top = Math.min(a.y, b.y);
+    const bottom = Math.max(a.y, b.y);
+    const HANDLE = 8;
+    const inside = px >= left - HANDLE && px <= right + HANDLE && py >= top - HANDLE && py <= bottom + HANDLE;
+    if (!inside) return "new";
+    const onLeft = Math.abs(px - left) <= HANDLE;
+    const onRight = Math.abs(px - right) <= HANDLE;
+    const onTop = Math.abs(py - top) <= HANDLE;
+    const onBottom = Math.abs(py - bottom) <= HANDLE;
+    if (onTop && onLeft) return "nw";
+    if (onTop && onRight) return "ne";
+    if (onBottom && onLeft) return "sw";
+    if (onBottom && onRight) return "se";
+    if (onTop) return "n";
+    if (onBottom) return "s";
+    if (onLeft) return "w";
+    if (onRight) return "e";
+    return "move";
+  };
+
+  const cursorFor = (mode: DragMode): string => ({
+    new: "crosshair",
+    move: "move",
+    nw: "nwse-resize", se: "nwse-resize",
+    ne: "nesw-resize", sw: "nesw-resize",
+    n: "ns-resize", s: "ns-resize",
+    w: "ew-resize", e: "ew-resize",
+  }[mode]);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    const img = imgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const mode = hitMode(px, py);
+    setDrag({ sx: px, sy: py, cx: px, cy: py, mode, initFrame: frame ? { ...frame } : null });
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const img = imgRef.current;
+    if (!img) return;
+    const rect = img.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    if (!drag) {
+      const m = hitMode(px, py);
+      if (m !== hoverMode) setHoverMode(m);
+      return;
+    }
+    setDrag({ ...drag, cx: px, cy: py });
+  };
+
+  const dragToFrame = (): ViewFrame | null => {
+    if (!drag) return null;
+    if (drag.mode === "new") {
+      const x0 = Math.min(drag.sx, drag.cx);
+      const y0 = Math.min(drag.sy, drag.cy);
+      const x1 = Math.max(drag.sx, drag.cx);
+      const y1 = Math.max(drag.sy, drag.cy);
+      if (x1 - x0 < 6 || y1 - y0 < 6) return null;
+      const p0 = pixelToWorld(x0, y0);
+      const p1 = pixelToWorld(x1, y1);
+      if (!p0 || !p1) return null;
+      return { x: p0.x, y: p0.y, width: p1.x - p0.x, height: p1.y - p0.y };
+    }
+    if (!drag.initFrame || !viewBox) return null;
+    const img = imgRef.current;
+    if (!img) return null;
+    const rect = img.getBoundingClientRect();
+    const sxW = viewBox.width / Math.max(1, rect.width);
+    const syW = viewBox.height / Math.max(1, rect.height);
+    const dxW = (drag.cx - drag.sx) * sxW;
+    const dyW = (drag.cy - drag.sy) * syW;
+    let { x, y, width, height } = drag.initFrame;
+    if (drag.mode === "move") {
+      x += dxW; y += dyW;
+    } else {
+      if (drag.mode === "w" || drag.mode === "nw" || drag.mode === "sw") { x += dxW; width -= dxW; }
+      if (drag.mode === "e" || drag.mode === "ne" || drag.mode === "se") { width += dxW; }
+      if (drag.mode === "n" || drag.mode === "nw" || drag.mode === "ne") { y += dyW; height -= dyW; }
+      if (drag.mode === "s" || drag.mode === "sw" || drag.mode === "se") { height += dyW; }
+      if (width < 0) { x += width; width = -width; }
+      if (height < 0) { y += height; height = -height; }
+    }
+    return { x, y, width, height };
+  };
+
+  const handleMouseUp = () => {
+    if (!drag) return;
+    const next = dragToFrame();
+    setDrag(null);
+    if (next && next.width > 1 && next.height > 1) onChange(next);
+  };
+
+  let displayFramePx: { left: number; top: number; width: number; height: number } | null = null;
+  const showFrame = drag ? dragToFrame() : frame;
+  if (showFrame) {
+    const a = worldToPixel(showFrame.x, showFrame.y);
+    const b = worldToPixel(showFrame.x + showFrame.width, showFrame.y + showFrame.height);
+    if (a && b) displayFramePx = { left: a.x, top: a.y, width: b.x - a.x, height: b.y - a.y };
+  }
+
+  const cursor = drag ? cursorFor(drag.mode) : cursorFor(hoverMode);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyPreview")}
+        </label>
+        {frame && (
+          <button
+            type="button"
+            onClick={() => onChange(null)}
+            className="text-xs text-slate-500 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1"
+          >
+            {t("structure.topologyResetFrame")}
+          </button>
+        )}
+      </div>
+      <div className="flex justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white p-2 overflow-hidden">
+        <div
+          className="relative inline-block select-none"
+          style={{ cursor }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={() => { if (drag) handleMouseUp(); }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={imgRef}
+            src={previewUrl}
+            alt="topology preview"
+            className="block max-h-[520px] w-auto pointer-events-none"
+            draggable={false}
+            onLoad={() => setImgReady((n) => n + 1)}
+          />
+          {displayFramePx && (
+            <>
+              <div
+                className="absolute border-2 border-blue-500 bg-blue-500/10 pointer-events-none"
+                style={{
+                  left: displayFramePx.left,
+                  top: displayFramePx.top,
+                  width: displayFramePx.width,
+                  height: displayFramePx.height,
+                }}
+              />
+              {(["nw","ne","sw","se"] as const).map((c) => {
+                const hx = c === "nw" || c === "sw" ? displayFramePx!.left : displayFramePx!.left + displayFramePx!.width;
+                const hy = c === "nw" || c === "ne" ? displayFramePx!.top : displayFramePx!.top + displayFramePx!.height;
+                return (
+                  <div
+                    key={c}
+                    className="absolute bg-white border-2 border-blue-500 rounded-sm pointer-events-none"
+                    style={{ left: hx - 4, top: hy - 4, width: 8, height: 8 }}
+                  />
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        {t("structure.topologyFrameHint")}
+      </p>
     </div>
   );
 }

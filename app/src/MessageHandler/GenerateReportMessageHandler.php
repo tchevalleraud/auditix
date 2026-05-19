@@ -32,6 +32,7 @@ class GenerateReportMessageHandler
         private readonly SystemUpdateScoreCalculator $lifecycleCalculator,
         private readonly BlockConditionEvaluator $blockConditionEvaluator,
         private readonly LoggerInterface $logger,
+        private readonly \App\Service\TopologyV2SvgRenderer $topologyV2Renderer,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -2765,21 +2766,51 @@ class GenerateReportMessageHandler
                 $prevType = 'command_list';
 
             } elseif ($type === 'topology') {
-                $mapId = $block['topologyMapId'] ?? null;
+                $topoId = $block['topologyId'] ?? null;     // v2 (preferred)
+                $mapId = $block['topologyMapId'] ?? null;   // v1 legacy fallback
                 $topoWidth = (float) ($block['width'] ?? 100);
-                $topoProto = $block['protocol'] ?? '';
-                $showLabels = !empty($block['showLabels']);
-                $showLegend = !empty($block['showLegend']);
                 $caption = $block['caption'] ?? '';
                 $pageBreak = !empty($block['pageBreakBefore']);
-                $showMonitoring = !empty($block['showMonitoring']);
-                $showCompliance = !empty($block['showCompliance']);
-                $viewportFrame = $block['viewportFrame'] ?? null;
 
-                if (!$mapId) continue;
+                if (!$topoId && !$mapId) continue;
 
-                $map = $this->em->getRepository(\App\Entity\TopologyMap::class)->find($mapId);
-                if (!$map) continue;
+                $svg = null;
+                if ($topoId) {
+                    $topology = $this->em->getRepository(\App\Entity\Topology::class)->find($topoId);
+                    if (!$topology) continue;
+                    $pf = $block['protocolFilter'] ?? 'manual';
+                    if ($pf !== 'manual' && is_numeric($pf)) $pf = (int)$pf;
+                    $opts = [
+                        'protocolFilter' => $pf,
+                        'canvasWidth' => 1200,
+                    ];
+                    $vf = $block['viewportFrame'] ?? null;
+                    if (is_array($vf) && isset($vf['x'], $vf['y'], $vf['width'], $vf['height'])) {
+                        $opts['viewportFrame'] = [
+                            'x' => (float)$vf['x'],
+                            'y' => (float)$vf['y'],
+                            'width' => (float)$vf['width'],
+                            'height' => (float)$vf['height'],
+                        ];
+                    }
+                    $renderer = $this->topologyV2Renderer ?? null;
+                    if ($renderer) {
+                        $svg = $renderer->render($topology, $opts);
+                    }
+                }
+
+                if ($svg === null && $mapId) {
+                    $map = $this->em->getRepository(\App\Entity\TopologyMap::class)->find($mapId);
+                    if (!$map) continue;
+                    $topoProto = $block['protocol'] ?? '';
+                    $showLabels = !empty($block['showLabels']);
+                    $showLegend = !empty($block['showLegend']);
+                    $showMonitoring = !empty($block['showMonitoring']);
+                    $showCompliance = !empty($block['showCompliance']);
+                    $viewportFrame = $block['viewportFrame'] ?? null;
+                    $svg = $this->renderTopologySvg($map, $topoProto, $showLabels, $showLegend, $showMonitoring, $showCompliance, $viewportFrame);
+                }
+                if ($svg === null) continue;
 
                 if ($pageBreak || $firstBlock) {
                     $pdf->SetMargins($mLeft, $mTop, $mRight);
@@ -2789,8 +2820,6 @@ class GenerateReportMessageHandler
                 } else {
                     $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
                 }
-
-                $svg = $this->renderTopologySvg($map, $topoProto, $showLabels, $showLegend, $showMonitoring, $showCompliance, $viewportFrame);
 
                 // Embed SVG directly via TCPDF
                 $tmpSvg = tempnam(sys_get_temp_dir(), 'topo_') . '.svg';

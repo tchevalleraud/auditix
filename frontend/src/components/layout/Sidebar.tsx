@@ -46,6 +46,7 @@ interface NavItem {
   key: string;
   href: string;
   icon: LucideIcon;
+  badge?: string;
 }
 
 interface NavCategory {
@@ -59,6 +60,7 @@ const contextNav: NavCategory[] = [
     items: [
       { key: "sidebar.dashboard", href: "/", icon: LayoutDashboard },
       { key: "sidebar.topology", href: "/topology", icon: Network },
+      { key: "sidebar.topologyOld", href: "/topology-old", icon: Network, badge: "old" },
       { key: "sidebar.nodes", href: "/nodes", icon: Server },
     ],
   },
@@ -194,6 +196,9 @@ function CollapsibleSection({ isOpen, children }: { isOpen: boolean; children: R
 function isItemActive(itemHref: string, pathname: string): boolean {
   if (itemHref === "/admin") return pathname === "/admin";
   if (itemHref === "/") return pathname === "/";
+  if (itemHref === "/topology") {
+    return pathname === "/topology" || pathname.startsWith("/topology/");
+  }
   return pathname.startsWith(itemHref);
 }
 
@@ -275,7 +280,12 @@ export default function Sidebar() {
                   }`}
                 >
                   <item.icon className="h-5 w-5 shrink-0" />
-                  {t(item.key)}
+                  <span className="flex-1">{t(item.key)}</span>
+                  {item.badge && (
+                    <span className="ml-auto inline-flex items-center rounded-full bg-orange-100 dark:bg-orange-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-orange-600 dark:text-orange-400">
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             });
