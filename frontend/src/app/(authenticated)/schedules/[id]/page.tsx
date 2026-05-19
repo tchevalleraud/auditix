@@ -27,6 +27,7 @@ import {
   Layers,
   FileText,
   Sparkles,
+  Terminal,
 } from "lucide-react";
 import CronBuilder from "@/components/CronBuilder";
 
@@ -38,6 +39,7 @@ type TabKey =
   | "extract"
   | "cleanup"
   | "compliance"
+  | "enforce"
   | "report"
   | "mail"
   | "settings";
@@ -59,6 +61,7 @@ interface ScheduleDetail {
   extractEnabled: boolean;
   cleanupEnabled: boolean;
   complianceEnabled: boolean;
+  enforceEnabled: boolean;
   reportIds: number[] | null;
   mailReportIds: number[] | null;
   createdAt: string;
@@ -91,7 +94,7 @@ interface NodeTag {
   color: string;
 }
 
-const PHASE_ORDER = ["collect", "extract", "cleanup", "compliance", "report", "mail"] as const;
+const PHASE_ORDER = ["collect", "extract", "cleanup", "compliance", "enforce", "report", "mail"] as const;
 
 export default function ScheduleDetailPage() {
   const { id } = useParams();
@@ -120,6 +123,7 @@ export default function ScheduleDetailPage() {
   const [extractEnabled, setExtractEnabled] = useState(false);
   const [cleanupEnabled, setCleanupEnabled] = useState(false);
   const [complianceEnabled, setComplianceEnabled] = useState(false);
+  const [enforceEnabled, setEnforceEnabled] = useState(false);
   const [reportEnabled, setReportEnabled] = useState(false);
   const [mailEnabled, setMailEnabled] = useState(false);
 
@@ -167,6 +171,7 @@ export default function ScheduleDetailPage() {
     setExtractEnabled(data.extractEnabled);
     setCleanupEnabled(data.cleanupEnabled);
     setComplianceEnabled(data.complianceEnabled);
+    setEnforceEnabled(data.enforceEnabled);
     setReportEnabled(data.reportIds !== null);
     setMailEnabled(data.mailReportIds !== null);
     setReportIds(data.reportIds || []);
@@ -258,7 +263,7 @@ export default function ScheduleDetailPage() {
     return 0;
   }, [nodeMode, nodeTagId, nodeIds, contextNodes]);
 
-  const requiresNodes = collectEnabled || extractEnabled || complianceEnabled;
+  const requiresNodes = collectEnabled || extractEnabled || complianceEnabled || enforceEnabled;
   const nodeModeValid =
     !requiresNodes ||
     nodeMode === "all" ||
@@ -282,6 +287,7 @@ export default function ScheduleDetailPage() {
           extractEnabled,
           cleanupEnabled,
           complianceEnabled,
+          enforceEnabled,
           reportIds: reportEnabled ? reportIds : null,
           mailReportIds: mailEnabled ? mailReportIds : null,
         }),
@@ -326,6 +332,7 @@ export default function ScheduleDetailPage() {
     extract: { label: t("schedules.tabExtract"), icon: Sparkles, enabled: extractEnabled },
     cleanup: { label: t("schedules.tabCleanup"), icon: Trash2, enabled: cleanupEnabled },
     compliance: { label: t("schedules.tabCompliance"), icon: ShieldCheck, enabled: complianceEnabled },
+    enforce: { label: t("schedules.tabEnforce"), icon: Terminal, enabled: enforceEnabled },
     report: { label: t("schedules.tabReport"), icon: FileBarChart, enabled: reportEnabled },
     mail: { label: t("schedules.tabMail"), icon: Mail, enabled: mailEnabled },
   };
@@ -341,6 +348,7 @@ export default function ScheduleDetailPage() {
     { key: "extract", label: t("schedules.tabExtract"), icon: Sparkles, phaseKey: "extract" },
     { key: "cleanup", label: t("schedules.tabCleanup"), icon: Trash2, phaseKey: "cleanup" },
     { key: "compliance", label: t("schedules.tabCompliance"), icon: ShieldCheck, phaseKey: "compliance" },
+    { key: "enforce", label: t("schedules.tabEnforce"), icon: Terminal, phaseKey: "enforce" },
     { key: "report", label: t("schedules.tabReport"), icon: FileBarChart, phaseKey: "report" },
     { key: "mail", label: t("schedules.tabMail"), icon: Mail, phaseKey: "mail" },
   ];
@@ -707,6 +715,14 @@ export default function ScheduleDetailPage() {
             complianceEnabled,
             setComplianceEnabled,
             t("schedules.complianceDesc"),
+          )}
+
+        {activeTab === "enforce" &&
+          renderPhaseTabContent(
+            "enforce",
+            enforceEnabled,
+            setEnforceEnabled,
+            t("schedules.enforceDesc"),
           )}
 
         {activeTab === "report" &&

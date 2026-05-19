@@ -67,6 +67,9 @@ class Node
     #[ORM\Column(length: 10, nullable: true)]
     private ?string $complianceEvaluating = null; // null, "pending", "running"
 
+    #[ORM\Column(length: 10, nullable: true)]
+    private ?string $enforcing = null; // null, "pending", "running"
+
     #[ORM\Column(nullable: true)]
     private ?bool $isReachable = null;
 
@@ -119,6 +122,8 @@ class Node
     public function setPolicy(string $v): static { $this->policy = $v; return $this; }
     public function getComplianceEvaluating(): ?string { return $this->complianceEvaluating; }
     public function setComplianceEvaluating(?string $v): static { $this->complianceEvaluating = $v; return $this; }
+    public function getEnforcing(): ?string { return $this->enforcing; }
+    public function setEnforcing(?string $v): static { $this->enforcing = $v; return $this; }
     public function getIsReachable(): ?bool { return $this->isReachable; }
     public function setIsReachable(?bool $v): static { $this->isReachable = $v; return $this; }
     public function getLastPingAt(): ?\DateTimeImmutable { return $this->lastPingAt; }

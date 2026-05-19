@@ -33,6 +33,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   RefreshCw,
+  Terminal,
 } from "lucide-react";
 import CsvImportModal from "@/components/CsvImportModal";
 import { renderCell, getSortValue, type NodeRow, type NodeExtras, type FieldRef } from "@/components/NodeCellRenderer";
@@ -274,6 +275,7 @@ export default function NodesPage() {
       url.searchParams.append("topic", `collections/node/${n.id}`);
       url.searchParams.append("topic", `compliance/node/${n.id}`);
       url.searchParams.append("topic", `extractions/node/${n.id}`);
+      url.searchParams.append("topic", `enforce/node/${n.id}`);
     });
     const es = new EventSource(url);
     es.onmessage = (event) => {
@@ -364,6 +366,15 @@ export default function NodesPage() {
         });
         loadComplianceStats();
         loadExtras();
+      }
+      if (data.event === "enforce.node.status") {
+        const nodeId = Number(data.nodeId ?? 0);
+        if (!nodeId) return;
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === nodeId ? { ...n, enforcing: data.enforcing ?? null } : n
+          )
+        );
       }
       // Nodes without a compliance policy go through RecalculateNodeScoreMessage,
       // which only emits vulnerability.score. Treat it like an evaluation end
@@ -560,6 +571,16 @@ export default function NodesPage() {
     } finally {
       setCollecting(false);
     }
+  };
+
+  const handleEnforceSelected = async () => {
+    if (selected.size === 0) return;
+    const nodeIds = Array.from(selected);
+    await fetch("/api/enforce/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeIds }),
+    });
   };
 
   const handleEvaluateCompliance = async () => {
@@ -847,6 +868,10 @@ export default function NodesPage() {
                       <button onClick={() => { handleEvaluateCompliance(); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                         <ShieldCheck className="h-4 w-4 text-violet-500" />
                         {t("nodes.evaluateSelected", { count: String(selected.size) })}
+                      </button>
+                      <button onClick={() => { handleEnforceSelected(); setActionMenuOpen(false); }} className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                        <Terminal className="h-4 w-4 text-orange-500" />
+                        {t("nodes.enforceSelected", { count: String(selected.size) })}
                       </button>
                     </div>
                   </>

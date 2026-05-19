@@ -94,6 +94,7 @@ framework:
             App\Message\SnmpPollNodeMessage: monitoring
             App\Message\CollectNodeMessage: collector
             App\Message\ProcessInventoryMessage: collector
+            App\Message\EnforceNodeMessage: collector
 
             App\Message\EvaluateComplianceMessage: compliance
             App\Message\GenerateReportMessage: generator

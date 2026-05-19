@@ -28,6 +28,7 @@ interface NodeDetail {
   discoveredVersion: string | null;
   productModel: string | null;
   complianceEvaluating: string | null;
+  enforcing: string | null;
   isReachable: boolean | null;
   lastPingAt: string | null;
   monitoringEnabled: boolean;
@@ -385,6 +386,7 @@ export default function NodeDetailPage() {
     url.searchParams.append("topic", `nodes/context/${current.id}`);
     url.searchParams.append("topic", `collections/node/${nodeId}`);
     url.searchParams.append("topic", `compliance/node/${nodeId}`);
+    url.searchParams.append("topic", `enforce/node/${nodeId}`);
     url.searchParams.append("topic", `snmp/node/${nodeId}`);
     const es = new EventSource(url);
     es.onmessage = (event) => {
@@ -440,6 +442,9 @@ export default function NodeDetailPage() {
       }
       if (data.event === "snmp.polled" && data.nodeId === Number(nodeId)) {
         loadMonitoring(true);
+      }
+      if (data.event === "enforce.node.status" && data.nodeId === Number(nodeId)) {
+        setNode((prev) => (prev ? { ...prev, enforcing: data.enforcing } : prev));
       }
     };
     return () => es.close();
@@ -550,6 +555,18 @@ export default function NodeDetailPage() {
         setComplianceEvaluating(true);
         setNode((prev) => prev ? { ...prev, score: null } : prev);
       }
+    }
+  };
+
+  const handleEnforce = async () => {
+    if (!node || node.policy !== "enforce") return;
+    const res = await fetch(`/api/enforce/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nodeIds: [Number(nodeId)] }),
+    });
+    if (res.ok) {
+      setNode((prev) => (prev ? { ...prev, enforcing: "pending" } : prev));
     }
   };
 
@@ -695,6 +712,12 @@ export default function NodeDetailPage() {
                     <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
                   )}
                 </span>
+                {node.enforcing && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 dark:bg-orange-500/20 px-2.5 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t("nodes.enforcing")}
+                  </span>
+                )}
               </h1>
               <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
                 {node.manufacturer && (
@@ -822,6 +845,15 @@ export default function NodeDetailPage() {
                   >
                     {complianceEvaluating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4 text-violet-500" />}
                     {complianceEvaluating ? t("compliance.evaluating") : t("compliance.evaluateCompliance")}
+                  </button>
+                  <button
+                    onClick={() => { setActionsOpen(false); handleEnforce(); }}
+                    disabled={!node || node.policy !== "enforce" || !!node.enforcing}
+                    title={node && node.policy !== "enforce" ? t("nodes.enforceDisabledHint") : undefined}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {node?.enforcing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4 text-orange-500" />}
+                    {node?.enforcing ? t("nodes.enforcing") : t("nodes.enforce")}
                   </button>
                 </div>
               )}

@@ -7,6 +7,7 @@ use App\Entity\Collection;
 use App\Entity\CollectionTag;
 use App\Entity\CompliancePolicy;
 use App\Entity\ComplianceResult;
+use App\Entity\EnforceResult;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
@@ -67,6 +68,7 @@ class NodeController extends AbstractController
             'discoveredVersion' => $n->getDiscoveredVersion(),
             'productModel' => $n->getProductModel(),
             'complianceEvaluating' => $n->getComplianceEvaluating(),
+            'enforcing' => $n->getEnforcing(),
             'isReachable' => $n->getIsReachable(),
             'lastPingAt' => $n->getLastPingAt()?->format('c'),
             'monitoringEnabled' => $context?->isMonitoringEnabled() ?? false,
@@ -492,6 +494,30 @@ class NodeController extends AbstractController
         $em->flush();
 
         return $this->json(['dispatched' => $dispatched]);
+    }
+
+    #[Route('/{id}/enforce-results', methods: ['GET'])]
+    public function enforceResults(Node $node, EntityManagerInterface $em): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
+
+        $results = $em->getRepository(EnforceResult::class)->findRecentByNode($node, 200);
+
+        return $this->json(array_map(function (EnforceResult $r) {
+            $rule = $r->getRule();
+            $policy = $r->getPolicy();
+            return [
+                'id' => $r->getId(),
+                'rule' => $rule ? ['id' => $rule->getId(), 'name' => $rule->getName()] : null,
+                'policy' => $policy ? ['id' => $policy->getId(), 'name' => $policy->getName()] : null,
+                'command' => $r->getCommand(),
+                'output' => $r->getOutput(),
+                'status' => $r->getStatus(),
+                'attempts' => $r->getAttempts(),
+                'error' => $r->getError(),
+                'executedAt' => $r->getExecutedAt()->format('c'),
+            ];
+        }, $results));
     }
 
     #[Route('/compliance-stats', methods: ['GET'])]

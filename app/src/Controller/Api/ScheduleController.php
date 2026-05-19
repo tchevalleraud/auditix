@@ -40,6 +40,7 @@ class ScheduleController extends AbstractController
             'extractEnabled' => $s->isExtractEnabled(),
             'cleanupEnabled' => $s->isCleanupEnabled(),
             'complianceEnabled' => $s->isComplianceEnabled(),
+            'enforceEnabled' => $s->isEnforceEnabled(),
             'reportIds' => $s->getReportIds(),
             'mailReportIds' => $s->getMailReportIds(),
             'createdAt' => $s->getCreatedAt()->format('c'),
@@ -98,6 +99,9 @@ class ScheduleController extends AbstractController
         }
         if (array_key_exists('complianceEnabled', $data)) {
             $schedule->setComplianceEnabled((bool) $data['complianceEnabled']);
+        }
+        if (array_key_exists('enforceEnabled', $data)) {
+            $schedule->setEnforceEnabled((bool) $data['enforceEnabled']);
         }
         if (array_key_exists('reportIds', $data)) {
             $schedule->setReportIds(!empty($data['reportIds']) ? array_map('intval', $data['reportIds']) : null);

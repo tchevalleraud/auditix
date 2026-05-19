@@ -36,6 +36,7 @@ export interface NodeRow {
   discoveredVersion: string | null;
   productModel: string | null;
   complianceEvaluating: string | null;
+  enforcing: string | null;
   isReachable: boolean | null;
   lastPingAt: string | null;
   monitoringEnabled: boolean;
@@ -382,12 +383,17 @@ export function renderCell(node: NodeRow, ref: FieldRef, ctx: CellContext, varia
 
     case "policy": {
       return (
-        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-          node.policy === "enforce"
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+          node.enforcing
+            ? "bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400"
+            : node.policy === "enforce"
             ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400"
             : "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400"
         }`}>
-          {node.policy === "enforce" ? ctx.t("nodes.policyEnforce") : ctx.t("nodes.policyAudit")}
+          {node.enforcing && <Loader2 className="h-3 w-3 animate-spin" />}
+          {node.enforcing
+            ? ctx.t("nodes.enforcing")
+            : node.policy === "enforce" ? ctx.t("nodes.policyEnforce") : ctx.t("nodes.policyAudit")}
         </span>
       );
     }

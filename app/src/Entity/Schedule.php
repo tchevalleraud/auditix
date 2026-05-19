@@ -13,6 +13,7 @@ class Schedule
     public const PHASE_EXTRACT = 'extract';
     public const PHASE_CLEANUP = 'cleanup';
     public const PHASE_COMPLIANCE = 'compliance';
+    public const PHASE_ENFORCE = 'enforce';
     public const PHASE_REPORT = 'report';
     public const PHASE_MAIL = 'mail';
 
@@ -77,6 +78,9 @@ class Schedule
     #[ORM\Column]
     private bool $complianceEnabled = false;
 
+    #[ORM\Column]
+    private bool $enforceEnabled = false;
+
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $reportIds = null;
 
@@ -130,6 +134,8 @@ class Schedule
     public function setCleanupEnabled(bool $v): static { $this->cleanupEnabled = $v; return $this; }
     public function isComplianceEnabled(): bool { return $this->complianceEnabled; }
     public function setComplianceEnabled(bool $v): static { $this->complianceEnabled = $v; return $this; }
+    public function isEnforceEnabled(): bool { return $this->enforceEnabled; }
+    public function setEnforceEnabled(bool $v): static { $this->enforceEnabled = $v; return $this; }
     public function getReportIds(): ?array { return $this->reportIds; }
     public function setReportIds(?array $v): static { $this->reportIds = $v; return $this; }
     public function getMailReportIds(): ?array { return $this->mailReportIds; }
@@ -151,6 +157,7 @@ class Schedule
         if ($this->extractEnabled) return self::PHASE_EXTRACT;
         if ($this->cleanupEnabled) return self::PHASE_CLEANUP;
         if ($this->complianceEnabled) return self::PHASE_COMPLIANCE;
+        if ($this->enforceEnabled) return self::PHASE_ENFORCE;
         if (!empty($this->reportIds)) return self::PHASE_REPORT;
         if (!empty($this->mailReportIds)) return self::PHASE_MAIL;
         return null;
@@ -163,6 +170,7 @@ class Schedule
             self::PHASE_EXTRACT,
             self::PHASE_CLEANUP,
             self::PHASE_COMPLIANCE,
+            self::PHASE_ENFORCE,
             self::PHASE_REPORT,
             self::PHASE_MAIL,
         ];
@@ -174,6 +182,7 @@ class Schedule
             if ($p === self::PHASE_EXTRACT && $this->extractEnabled) return $p;
             if ($p === self::PHASE_CLEANUP && $this->cleanupEnabled) return $p;
             if ($p === self::PHASE_COMPLIANCE && $this->complianceEnabled) return $p;
+            if ($p === self::PHASE_ENFORCE && $this->enforceEnabled) return $p;
             if ($p === self::PHASE_REPORT && !empty($this->reportIds)) return $p;
             if ($p === self::PHASE_MAIL && !empty($this->mailReportIds)) return $p;
         }

@@ -9,6 +9,7 @@ use App\Entity\Node;
 use App\Entity\Report;
 use App\Entity\Schedule;
 use App\Message\CollectNodeMessage;
+use App\Message\EnforceNodeMessage;
 use App\Message\EvaluateComplianceMessage;
 use App\Message\GenerateReportMessage;
 use App\Message\ProcessInventoryMessage;
@@ -125,6 +126,7 @@ class ScheduleOrchestratorCommand extends Command
                 Schedule::PHASE_EXTRACT,
                 Schedule::PHASE_CLEANUP,
                 Schedule::PHASE_COMPLIANCE,
+                Schedule::PHASE_ENFORCE,
                 Schedule::PHASE_REPORT,
                 Schedule::PHASE_MAIL,
             ],
@@ -163,6 +165,9 @@ class ScheduleOrchestratorCommand extends Command
                 break;
             case Schedule::PHASE_COMPLIANCE:
                 $this->dispatchCompliance($schedule, $output);
+                break;
+            case Schedule::PHASE_ENFORCE:
+                $this->dispatchEnforce($schedule, $output);
                 break;
             case Schedule::PHASE_REPORT:
                 $this->dispatchReport($schedule, $output);
@@ -318,6 +323,47 @@ class ScheduleOrchestratorCommand extends Command
         $output->writeln(sprintf('  Dispatched %d compliance evaluation(s)', $dispatched));
     }
 
+    private function dispatchEnforce(Schedule $schedule, OutputInterface $output): void
+    {
+        $nodeIds = $schedule->resolveNodeIds($this->em);
+        $nodes = $nodeIds ? $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]) : [];
+        $dispatched = 0;
+
+        foreach ($nodes as $node) {
+            if ($node->getPolicy() !== 'enforce') {
+                continue;
+            }
+            if ($node->getEnforcing() !== null) {
+                continue;
+            }
+            $node->setEnforcing('pending');
+            $this->bus->dispatch(new EnforceNodeMessage($node->getId()));
+            $dispatched++;
+        }
+
+        $schedule->setCurrentPhaseStatus(Schedule::STATUS_RUNNING);
+        $this->em->flush();
+        $this->events->publish($schedule, 'schedule.phase.dispatched');
+
+        $output->writeln(sprintf('  Dispatched %d enforce job(s)', $dispatched));
+    }
+
+    private function isEnforceDone(Schedule $schedule): bool
+    {
+        $nodeIds = $schedule->resolveNodeIds($this->em);
+        if (empty($nodeIds)) {
+            return true;
+        }
+
+        $nodes = $this->em->getRepository(Node::class)->findBy(['id' => $nodeIds]);
+        foreach ($nodes as $node) {
+            if ($node->getEnforcing() !== null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private function dispatchReport(Schedule $schedule, OutputInterface $output): void
     {
         $reportIds = $schedule->getReportIds() ?? [];
@@ -376,6 +422,9 @@ class ScheduleOrchestratorCommand extends Command
                 break;
             case Schedule::PHASE_COMPLIANCE:
                 $allDone = $this->isComplianceDone($schedule);
+                break;
+            case Schedule::PHASE_ENFORCE:
+                $allDone = $this->isEnforceDone($schedule);
                 break;
             case Schedule::PHASE_REPORT:
                 $allDone = $this->isReportDone($schedule);
