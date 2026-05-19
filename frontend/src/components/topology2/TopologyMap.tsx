@@ -84,6 +84,9 @@ interface GraphClusterStyle {
   labelPosition: "top" | "bottom" | "none";
   labelFontSize: number;
   labelColor: string;
+  // Free-form offset applied to the auto-computed label anchor. Lets the user drag
+  // the area label to a custom spot relative to the cluster centroid.
+  labelOffset?: { dx: number; dy: number };
 }
 
 interface GraphCluster {
@@ -243,6 +246,11 @@ export default function TopologyMap({ topologyId }: Props) {
   const dragMoved = useRef(false);
   const panStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cluster label drag state. Tracks the original offset at mousedown so we can
+  // accumulate the cursor delta without quantizing each move.
+  const draggingClusterLabelId = useRef<number | null>(null);
+  const clusterLabelDragStart = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const clusterLabelDragMoved = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -362,6 +370,18 @@ export default function TopologyMap({ topologyId }: Props) {
     dragMoved.current = false;
   };
 
+  const handleClusterLabelMouseDown = (clusterId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!data) return;
+    const cluster = data.clusters?.find((c) => c.id === clusterId);
+    if (!cluster) return;
+    const p = toSVGPoint(e.clientX, e.clientY);
+    const off = cluster.style.labelOffset ?? { dx: 0, dy: 0 };
+    draggingClusterLabelId.current = clusterId;
+    clusterLabelDragStart.current = { x: p.x, y: p.y, ox: off.dx, oy: off.dy };
+    clusterLabelDragMoved.current = false;
+  };
+
   const handleSvgMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     const target = e.target as SVGElement;
@@ -413,6 +433,21 @@ export default function TopologyMap({ topologyId }: Props) {
       const nx = Math.round(dragStart.current.nx + dx);
       const ny = Math.round(dragStart.current.ny + dy);
       setPositions((prev) => ({ ...prev, [draggingNodeId.current as number]: { x: nx, y: ny } }));
+      return;
+    }
+    if (draggingClusterLabelId.current !== null && clusterLabelDragStart.current) {
+      const p = toSVGPoint(e.clientX, e.clientY);
+      const dx = (p.x - clusterLabelDragStart.current.x) / zoom;
+      const dy = (p.y - clusterLabelDragStart.current.y) / zoom;
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) clusterLabelDragMoved.current = true;
+      const ndx = clusterLabelDragStart.current.ox + dx;
+      const ndy = clusterLabelDragStart.current.oy + dy;
+      setData((prev) => prev ? {
+        ...prev,
+        clusters: prev.clusters.map((c) => c.id === draggingClusterLabelId.current
+          ? { ...c, style: { ...c.style, labelOffset: { dx: ndx, dy: ndy } } }
+          : c),
+      } : prev);
       return;
     }
     if (panStart.current) {
@@ -470,6 +505,23 @@ export default function TopologyMap({ topologyId }: Props) {
         setSelectedEdgeId(null);
       } else {
         scheduleSave(positions);
+      }
+    }
+    if (draggingClusterLabelId.current !== null) {
+      const movedClusterId = draggingClusterLabelId.current;
+      const moved = clusterLabelDragMoved.current;
+      draggingClusterLabelId.current = null;
+      clusterLabelDragStart.current = null;
+      clusterLabelDragMoved.current = false;
+      if (moved && data) {
+        const cluster = data.clusters?.find((c) => c.id === movedClusterId);
+        if (cluster) {
+          fetch(`/api/topologies/${topologyId}/clusters/${movedClusterId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ style: { labelOffset: cluster.style.labelOffset ?? { dx: 0, dy: 0 } } }),
+          });
+        }
       }
     }
     if (panStart.current) {
@@ -909,7 +961,7 @@ export default function TopologyMap({ topologyId }: Props) {
             ))}
             {(data.clusters ?? [])
               .filter((cluster) => cluster.protocolId == null || cluster.protocolId === protocolFilter)
-              .map((cluster) => renderCluster(cluster, positions, data.nodes, getDesign, mapCentroid, data.clusters ?? []))}
+              .map((cluster) => renderCluster(cluster, positions, data.nodes, getDesign, mapCentroid, data.clusters ?? [], handleClusterLabelMouseDown))}
             {data.topology.mapOptions?.aggregateParallelLinks && aggregationGroups.map((g) => {
               const sp = positions[g.sourceNodeId];
               const tp = positions[g.targetNodeId];
@@ -2317,6 +2369,7 @@ function renderCluster(
   getDesign: (n: GraphNode) => NodeDesign,
   mapCentroid: { x: number; y: number } | null,
   allClusters: GraphCluster[],
+  onLabelMouseDown: (clusterId: number, e: React.MouseEvent) => void,
 ): React.ReactNode {
   const memberPositions = cluster.nodeIds
     .map((nid) => {
@@ -2484,6 +2537,11 @@ function renderCluster(
     labelCy = style.labelPosition === "top" ? ry - fontSize * 0.4 - 2 : ry + rh + fontSize * 1.0 + 2;
   }
 
+  // Apply user-controlled label offset (set via drag) on top of the auto-computed anchor.
+  const labelOff = style.labelOffset ?? { dx: 0, dy: 0 };
+  labelCx += labelOff.dx;
+  labelCy += labelOff.dy;
+
   // Compute label pill (colored, mid-opacity background + readable text)
   let labelNode: React.ReactNode = null;
   if (labelText) {
@@ -2498,7 +2556,10 @@ function renderCluster(
     const pillX = centerOnLabelAnchor ? labelCx - pillW / 2 : labelCx;
     const pillY = labelCy - pillH / 2;
     labelNode = (
-      <g>
+      <g
+        style={{ pointerEvents: "auto", cursor: "move" }}
+        onMouseDown={(e) => onLabelMouseDown(cluster.id, e)}
+      >
         <rect
           x={pillX}
           y={pillY}

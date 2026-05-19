@@ -423,6 +423,9 @@ class TopologyV2SvgRenderer
             : 'fill="' . $style['fillColor'] . '" fill-opacity="0.18"';
         $fontSize = (float)$style['labelFontSize'];
         $labelText = $style['labelPosition'] !== 'none' ? $c->getName() : '';
+        $labelOffset = (is_array($style['labelOffset'] ?? null))
+            ? ['dx' => (float)($style['labelOffset']['dx'] ?? 0), 'dy' => (float)($style['labelOffset']['dy'] ?? 0)]
+            : ['dx' => 0.0, 'dy' => 0.0];
 
         if ($shape === 'hull') {
             $anchors = $this->computeClusterAnchors($c, $memberIds, $nodeInfo, $allClusters, $pad);
@@ -457,7 +460,7 @@ class TopologyV2SvgRenderer
                 $labelCx = $sumX / count($expanded) + $ox;
                 $labelCy = $sumY / count($expanded) + $oy;
             }
-            $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx, $labelCy, $fontSize, $style) : '';
+            $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx + $labelOffset['dx'], $labelCy + $labelOffset['dy'], $fontSize, $style) : '';
             return $body . $label;
         }
 
@@ -479,7 +482,7 @@ class TopologyV2SvgRenderer
         $body = '<rect x="' . $this->fmt($rx) . '" y="' . $this->fmt($ry) . '" width="' . $this->fmt($rw) . '" height="' . $this->fmt($rh) . '" rx="' . $r . '" ry="' . $r . '" ' . $fillProps . ' stroke="' . $style['borderColor'] . '" stroke-width="' . $style['borderWidth'] . '"' . ($dash ? ' stroke-dasharray="' . $dash . '"' : '') . '/>';
         $labelCx = $rx + 12;
         $labelCy = $style['labelPosition'] === 'top' ? $ry - $fontSize * 0.4 - 2 : $ry + $rh + $fontSize + 2;
-        $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx, $labelCy, $fontSize, $style, false) : '';
+        $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx + $labelOffset['dx'], $labelCy + $labelOffset['dy'], $fontSize, $style, false) : '';
         return $body . $label;
     }
 

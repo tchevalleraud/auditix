@@ -1008,8 +1008,25 @@ class TopologyController extends AbstractController
             }
         }
 
-        // Refresh "zone" clusters reflecting ISIS areas: wipe previous auto-clusters,
-        // then create one cluster per area containing every node touched by that area.
+        // Inventory is the source of truth for area membership: a node belongs to
+        // every area declared in its own ISIS area inventory (typically HOME and any
+        // REMOTE entries for L1/L2 routers). Edges alone miss the HOME area when a
+        // router only adjacents into other areas (e.g. an inter-area-only L1/L2 hop).
+        foreach ($nodeQualifierToArea as $nodeId => $qualifierMap) {
+            foreach ($qualifierMap as $areaValue) {
+                if ($areaValue === '' || $areaValue === null) continue;
+                $nodesByArea[(string)$areaValue][$nodeId] = true;
+            }
+        }
+
+        // Refresh "zone" clusters reflecting ISIS areas. Preserve previous styles
+        // keyed by area name so user customizations (colors, label offset, etc.)
+        // survive a regeneration; only fall back to defaults for brand-new areas.
+        $existingClusters = $em->getRepository(TopologyCluster::class)->findBy(['protocol' => $protocol]);
+        $preservedStyles = [];
+        foreach ($existingClusters as $ec) {
+            $preservedStyles[$ec->getName()] = $ec->getStyle();
+        }
         $em->createQuery('DELETE FROM App\Entity\TopologyCluster c WHERE c.protocol = :p')
             ->setParameter('p', $protocol)->execute();
         $em->flush();
@@ -1018,11 +1035,7 @@ class TopologyController extends AbstractController
         $areaIdx = 0;
         foreach ($nodesByArea as $area => $nodeIdsMap) {
             $color = $palette[$areaIdx % count($palette)];
-            $cluster = new TopologyCluster();
-            $cluster->setTopology($topology);
-            $cluster->setProtocol($protocol);
-            $cluster->setName($area);
-            $cluster->setStyle([
+            $defaultStyle = [
                 'shape' => 'hull',  // adaptive shape: circle / ellipse / convex hull
                 'borderColor' => $color,
                 'borderWidth' => 1,
@@ -1034,7 +1047,16 @@ class TopologyController extends AbstractController
                 'labelPosition' => 'top',
                 'labelFontSize' => 11,
                 'labelColor' => $color,
-            ]);
+                'labelOffset' => ['dx' => 0, 'dy' => 0],
+            ];
+            $cluster = new TopologyCluster();
+            $cluster->setTopology($topology);
+            $cluster->setProtocol($protocol);
+            $cluster->setName((string)$area);
+            $cluster->setStyle(isset($preservedStyles[$area])
+                ? array_merge($defaultStyle, $preservedStyles[$area])
+                : $defaultStyle
+            );
             $em->persist($cluster);
             $em->flush();
 

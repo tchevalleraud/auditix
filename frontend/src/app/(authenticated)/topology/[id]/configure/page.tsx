@@ -10,6 +10,7 @@ import {
   Loader2,
   Network,
   Plus,
+  RotateCcw,
   Save,
   Search,
   Trash2,
@@ -101,6 +102,7 @@ interface Edge {
 }
 
 interface ClusterStyle {
+  shape?: "rectangle" | "hull";
   borderColor: string;
   borderWidth: number;
   dash: "solid" | "dashed" | "dotted";
@@ -111,6 +113,7 @@ interface ClusterStyle {
   labelPosition: "top" | "bottom" | "none";
   labelFontSize: number;
   labelColor: string;
+  labelOffset?: { dx: number; dy: number };
 }
 
 interface Cluster {
@@ -118,6 +121,7 @@ interface Cluster {
   name: string;
   style: ClusterStyle;
   nodeIds: number[];
+  protocolId: number | null;
 }
 
 function defaultClusterStyle(): ClusterStyle {
@@ -228,6 +232,7 @@ const TABS = [
   { key: "design", labelKey: "topology.tabDesign" },
   { key: "links", labelKey: "topology.tabLinks" },
   { key: "clusters", labelKey: "topology.tabClusters" },
+  { key: "areas", labelKey: "topology.tabAreas" },
   { key: "protocols", labelKey: "topology.tabProtocols" },
 ] as const;
 
@@ -1471,11 +1476,13 @@ export default function TopologyConfigurePage() {
         );
       })()}
 
-      {tab === "clusters" && (
+      {tab === "clusters" && (() => {
+        const manualClusters = clusters.filter((c) => c.protocolId == null);
+        return (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="text-sm text-slate-600 dark:text-slate-300">
-              {clusters.length} {t("topology.clustersLabel")}
+              {manualClusters.length} {t("topology.clustersLabel")}
             </div>
             <button
               onClick={async () => {
@@ -1491,7 +1498,7 @@ export default function TopologyConfigurePage() {
             </button>
           </div>
 
-          {clusters.length === 0 ? (
+          {manualClusters.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-12 text-center">
               <p className="text-sm text-slate-500 dark:text-slate-400">{t("topology.clustersEmpty")}</p>
             </div>
@@ -1507,7 +1514,7 @@ export default function TopologyConfigurePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {clusters.map((cluster) => (
+                  {manualClusters.map((cluster) => (
                     <tr
                       key={cluster.id}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
@@ -1553,12 +1560,118 @@ export default function TopologyConfigurePage() {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
+
+      {tab === "areas" && (() => {
+        // Group auto-generated clusters by their protocol. Each protocol's areas are
+        // shown together so we can later mix ISIS, OSPF, etc. in the same view.
+        const areaClusters = clusters.filter((c) => c.protocolId != null);
+        const protocolsById = new Map(protocols.map((p) => [p.id, p]));
+        const grouped = new Map<number, Cluster[]>();
+        for (const c of areaClusters) {
+          const pid = c.protocolId as number;
+          const list = grouped.get(pid) ?? [];
+          list.push(c);
+          grouped.set(pid, list);
+        }
+        return (
+          <div className="space-y-4">
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              {areaClusters.length} {t("topology.areasLabel")}
+            </div>
+            {areaClusters.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-12 text-center">
+                <p className="text-sm text-slate-500 dark:text-slate-400">{t("topology.areasEmpty")}</p>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {Array.from(grouped.entries()).map(([pid, areas]) => {
+                  const proto = protocolsById.get(pid);
+                  const protoLabel = proto ? `${proto.name} (${proto.type.toUpperCase()})` : `#${pid}`;
+                  return (
+                    <div key={pid} className="space-y-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        {protoLabel}
+                      </div>
+                      <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+                        <table className="w-full">
+                          <thead className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                            <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                              <th className="px-4 py-2">{t("topology.areaName")}</th>
+                              <th className="px-4 py-2">{t("topology.clusterMembers")}</th>
+                              <th className="px-4 py-2">{t("topology.clusterStyle")}</th>
+                              <th className="px-4 py-2 text-right">{t("topology.colActions")}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {areas.map((cluster) => {
+                              const off = cluster.style.labelOffset ?? { dx: 0, dy: 0 };
+                              const hasOffset = Math.abs(off.dx) > 0.5 || Math.abs(off.dy) > 0.5;
+                              return (
+                                <tr
+                                  key={cluster.id}
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
+                                  onClick={() => setEditingClusterId(cluster.id)}
+                                >
+                                  <td className="px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white">
+                                    {cluster.name}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 text-[10px]">{cluster.nodeIds.length}</span>
+                                      <span className="truncate max-w-md">
+                                        {cluster.nodeIds.slice(0, 3).map((nid) => nodeLabel(nid)).join(", ")}
+                                        {cluster.nodeIds.length > 3 ? "…" : ""}
+                                      </span>
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-xs">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span
+                                        className="inline-block h-3 w-6 rounded"
+                                        style={{
+                                          border: `${cluster.style.borderWidth}px ${cluster.style.dash === "solid" ? "solid" : cluster.style.dash} ${cluster.style.borderColor}`,
+                                          background: cluster.style.transparent ? "transparent" : cluster.style.fillColor + "33",
+                                        }}
+                                      />
+                                      <span className="text-slate-500 dark:text-slate-400">{cluster.style.dash}</span>
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5 text-right">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!hasOffset) return;
+                                        updateClusterStyle(cluster.id, { labelOffset: { dx: 0, dy: 0 } });
+                                      }}
+                                      disabled={!hasOffset}
+                                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                                      title={t("topology.areaResetLabel")}
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {editingClusterId !== null && (() => {
         const cluster = clusters.find((c) => c.id === editingClusterId);
         if (!cluster) return null;
         const tooFew = cluster.nodeIds.length < 2;
+        const isArea = cluster.protocolId != null;
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -1570,7 +1683,7 @@ export default function TopologyConfigurePage() {
             >
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {t("topology.clusterEditTitle")}
+                  {isArea ? t("topology.areaEditTitle") : t("topology.clusterEditTitle")}
                 </h2>
                 <button
                   onClick={() => setEditingClusterId(null)}
@@ -1579,6 +1692,12 @@ export default function TopologyConfigurePage() {
                   ✕
                 </button>
               </div>
+
+              {isArea && (
+                <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300">
+                  {t("topology.areaAutoGenHint")}
+                </div>
+              )}
 
               <div className="space-y-1">
                 <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
@@ -2026,20 +2145,22 @@ export default function TopologyConfigurePage() {
                       </select>
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                      {p.type === "isis" ? t("topology.protocolCostColumn") : t("topology.protocolMetricColumn")}
-                    </label>
-                    <select
-                      value={p.mapping.metricColumn}
-                      onChange={(e) => updateProtocol(p.id, { mapping: { metricColumn: e.target.value } as ProtocolMapping })}
-                      disabled={cols.length === 0}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                    >
-                      <option value="">—</option>
-                      {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                    </select>
-                  </div>
+                  {p.type === "isis" && (
+                    <div className="space-y-1">
+                      <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                        {t("topology.protocolCostColumn")}
+                      </label>
+                      <select
+                        value={p.mapping.metricColumn}
+                        onChange={(e) => updateProtocol(p.id, { mapping: { metricColumn: e.target.value } as ProtocolMapping })}
+                        disabled={cols.length === 0}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
+                      >
+                        <option value="">—</option>
+                        {cols.map((col) => <option key={col} value={col}>{col}</option>)}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 {p.type === "isis" && (
