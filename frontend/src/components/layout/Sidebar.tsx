@@ -6,15 +6,10 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
   ShieldCheck,
-  Building2,
-  Users,
   Box,
   Cpu,
   KeyRound,
   Server,
-  HeartPulse,
-  ScrollText,
-  ListTodo,
   Terminal,
   FileSearch,
   Database,
@@ -30,13 +25,8 @@ import {
   FolderTree,
   Network,
   ShieldAlert,
-  RefreshCw,
   Layers,
-  Code2,
   Mail,
-  Globe,
-  Radio,
-  History,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -117,36 +107,6 @@ const contextNav: NavCategory[] = [
   },
 ];
 
-const adminNav: NavCategory[] = [
-  {
-    label: "sidebar.catGeneral",
-    items: [
-      { key: "sidebar.dashboard", href: "/admin", icon: LayoutDashboard },
-    ],
-  },
-  {
-    label: "sidebar.catManagement",
-    items: [
-      { key: "sidebar.contexts", href: "/admin/contexts", icon: Building2 },
-      { key: "sidebar.users", href: "/admin/users", icon: Users },
-      { key: "sidebar.authentication", href: "/admin/auth", icon: KeyRound },
-    ],
-  },
-  {
-    label: "sidebar.catServer",
-    items: [
-      { key: "sidebar.health", href: "/admin/health", icon: HeartPulse },
-      { key: "sidebar.workers", href: "/admin/server/workers", icon: Cpu },
-      { key: "sidebar.nginx", href: "/admin/server/nginx", icon: Globe },
-      { key: "sidebar.logs", href: "/admin/logs", icon: ScrollText },
-      { key: "sidebar.audit", href: "/admin/audit", icon: History },
-      { key: "sidebar.tasks", href: "/admin/tasks", icon: ListTodo },
-      { key: "sidebar.mailServers", href: "/admin/mail", icon: Mail },
-      { key: "sidebar.syslogServers", href: "/admin/syslog", icon: Radio },
-    ],
-  },
-];
-
 function CollapsibleSection({ isOpen, children }: { isOpen: boolean; children: React.ReactNode }) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
@@ -204,29 +164,21 @@ function isItemActive(itemHref: string, pathname: string): boolean {
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { adminMode, setAdminMode, current } = useAppContext();
+  const { current } = useAppContext();
   const { t } = useI18n();
   const [versionStatus, setVersionStatus] = useState<{ upToDate: boolean; latest: string | null } | null>(null);
   const [openCategory, setOpenCategory] = useState<string | null>(null);
 
   useEffect(() => {
-    const nav = adminMode ? adminNav : contextNav;
-    const active = nav.find(
+    const active = contextNav.find(
       (cat) => cat.label && cat.items.some((item) => isItemActive(item.href, pathname))
     );
     setOpenCategory(active?.label ?? null);
-  }, [adminMode]);
+  }, [pathname]);
 
   const toggleCategory = (label: string) => {
     setOpenCategory((prev) => (prev === label ? null : label));
   };
-
-  useEffect(() => {
-    const isAdminPath = pathname.startsWith("/admin");
-    if (isAdminPath !== adminMode) {
-      setAdminMode(isAdminPath);
-    }
-  }, [pathname, adminMode, setAdminMode]);
 
   useEffect(() => {
     const check = () => {
@@ -245,8 +197,6 @@ export default function Sidebar() {
     return () => { clearInterval(interval); window.removeEventListener("online", onOnline); window.removeEventListener("offline", onOffline); };
   }, []);
 
-  const navigation = adminMode ? adminNav : contextNav;
-
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800">
       <div className="flex h-16 items-center gap-3 px-6 border-b border-slate-200 dark:border-slate-800">
@@ -256,16 +206,8 @@ export default function Sidebar() {
         </span>
       </div>
 
-      {adminMode && (
-        <div className="mx-4 mt-4 mb-1">
-          <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-            {t("sidebar.administration")}
-          </h2>
-        </div>
-      )}
-
       <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-        {navigation.map((category, i) => {
+        {contextNav.map((category, i) => {
           const renderItems = (items: NavItem[]) =>
             items.map((item) => {
               const isActive = isItemActive(item.href, pathname);
@@ -322,7 +264,7 @@ export default function Sidebar() {
       </nav>
 
       <div className="px-3 py-3 space-y-0.5">
-        {!adminMode && current?.publicEnabled && (
+        {current?.publicEnabled && (
           <Link
             href="/labs"
             className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
@@ -335,32 +277,17 @@ export default function Sidebar() {
             {t("sidebar.labs")}
           </Link>
         )}
-        {!adminMode && (
-          <Link
-            href="/documentation"
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              pathname.startsWith("/documentation")
-                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-            }`}
-          >
-            <Code2 className="h-5 w-5 shrink-0" />
-            {t("sidebar.api")}
-          </Link>
-        )}
-        {!adminMode && (
-          <Link
-            href="/settings"
-            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-              pathname.startsWith("/settings")
-                ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-            }`}
-          >
-            <Settings className="h-5 w-5 shrink-0" />
-            {t("sidebar.settings")}
-          </Link>
-        )}
+        <Link
+          href="/settings"
+          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+            pathname.startsWith("/settings")
+              ? "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+              : "text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+          }`}
+        >
+          <Settings className="h-5 w-5 shrink-0" />
+          {t("sidebar.settings")}
+        </Link>
         <div className="border-t border-slate-200 dark:border-slate-800 mt-3 pt-3">
           <div className="flex items-center justify-center gap-2">
             <span className="text-xs text-slate-400 dark:text-slate-500">Auditix v{process.env.APP_VERSION}</span>

@@ -382,16 +382,20 @@ export function renderCell(node: NodeRow, ref: FieldRef, ctx: CellContext, varia
     case "dynamicTags": return renderTagList(node, "dynamic") ?? dash();
 
     case "policy": {
+      // "Enforcing..." only ever makes sense on an enforce-policy node. A stale
+      // enforcing flag on an audit-policy node (e.g. left over from a policy
+      // flip) shouldn't keep showing the spinner.
+      const showEnforcing = !!node.enforcing && node.policy === "enforce";
       return (
         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-          node.enforcing
+          showEnforcing
             ? "bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-400"
             : node.policy === "enforce"
             ? "bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400"
             : "bg-sky-100 dark:bg-sky-500/20 text-sky-700 dark:text-sky-400"
         }`}>
-          {node.enforcing && <Loader2 className="h-3 w-3 animate-spin" />}
-          {node.enforcing
+          {showEnforcing && <Loader2 className="h-3 w-3 animate-spin" />}
+          {showEnforcing
             ? ctx.t("nodes.enforcing")
             : node.policy === "enforce" ? ctx.t("nodes.policyEnforce") : ctx.t("nodes.policyAudit")}
         </span>

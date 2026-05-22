@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { CircleUser, LogOut, Moon, Sun, ChevronDown, Settings, ArrowLeft, UserCog } from "lucide-react";
+import { CircleUser, LogOut, Moon, Sun, ChevronDown, UserCog } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n, locales, type Locale } from "@/components/I18nProvider";
@@ -12,10 +11,9 @@ import ContextSwitcher from "@/components/layout/ContextSwitcher";
 
 export default function Topbar() {
   const { theme, setTheme, resolved } = useTheme();
-  const { adminMode, setAdminMode, userRoles, userInfo } = useAppContext();
+  const { userRoles, userInfo } = useAppContext();
   const isUserAdmin = userRoles.includes("ROLE_ADMIN");
   const { locale, setLocale, t } = useI18n();
-  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -39,20 +37,7 @@ export default function Topbar() {
   return (
     <header className="sticky top-0 z-40 flex h-16 items-center border-b border-slate-200 dark:border-slate-800 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm px-6 gap-4">
       <div className="flex flex-1 items-center gap-3">
-        {adminMode ? (
-          <button
-            onClick={() => {
-              setAdminMode(false);
-              router.push("/");
-            }}
-            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors text-sm font-medium text-slate-700 dark:text-slate-200"
-          >
-            <ArrowLeft className="h-4 w-4 text-slate-400 dark:text-slate-500" />
-            {t("topbar.backToContext")}
-          </button>
-        ) : (
-          <ContextSwitcher />
-        )}
+        <ContextSwitcher />
       </div>
 
       <div className="flex items-center gap-2">
@@ -94,27 +79,6 @@ export default function Topbar() {
         >
           {resolved === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
-
-        {isUserAdmin && (
-          <button
-            onClick={() => {
-              if (!adminMode) {
-                setAdminMode(true);
-                router.push("/admin");
-              } else {
-                setAdminMode(false);
-                router.push("/");
-              }
-            }}
-            className={`rounded-lg p-2 transition-colors ${
-              adminMode
-                ? "text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800"
-                : "text-slate-400 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-600 dark:hover:text-slate-300"
-            }`}
-          >
-            <Settings className="h-5 w-5" />
-          </button>
-        )}
 
         <div className="mx-2 h-8 w-px bg-slate-200 dark:bg-slate-700" />
 

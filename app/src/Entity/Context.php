@@ -42,6 +42,14 @@ class Context
     #[ORM\Column(length: 64, nullable: true)]
     private ?string $publicToken = null;
 
+    /**
+     * Whether the floating "Suggest a feature" button is rendered for users of
+     * this context. Disable for white-labelled / customer-facing installs where
+     * the external Featurebase link isn't appropriate.
+     */
+    #[ORM\Column(options: ['default' => true])]
+    private bool $feedbackButtonEnabled = true;
+
     #[ORM\Column]
     private bool $vulnerabilityEnabled = false;
 
@@ -195,6 +203,8 @@ class Context
 
     public function isPublicEnabled(): bool { return $this->publicEnabled; }
     public function setPublicEnabled(bool $v): static { $this->publicEnabled = $v; return $this; }
+    public function isFeedbackButtonEnabled(): bool { return $this->feedbackButtonEnabled; }
+    public function setFeedbackButtonEnabled(bool $v): static { $this->feedbackButtonEnabled = $v; return $this; }
     public function getPublicToken(): ?string { return $this->publicToken; }
     public function setPublicToken(?string $v): static { $this->publicToken = $v; return $this; }
 

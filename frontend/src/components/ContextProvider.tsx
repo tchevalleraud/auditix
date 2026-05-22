@@ -15,6 +15,7 @@ export interface AppContext {
   isDefault: boolean;
   publicEnabled: boolean;
   publicToken: string | null;
+  feedbackButtonEnabled: boolean;
   userCount: number;
   createdAt: string;
   vulnerabilityEnabled: boolean;
@@ -45,8 +46,6 @@ interface ContextValue {
   setCurrent: (ctx: AppContext | null) => void;
   reload: () => Promise<AppContext[] | void>;
   reloadUser: () => Promise<void>;
-  adminMode: boolean;
-  setAdminMode: (v: boolean) => void;
   userRoles: string[];
   userInfo: UserInfo | null;
 }
@@ -57,8 +56,6 @@ const Ctx = createContext<ContextValue>({
   setCurrent: () => {},
   reload: async () => {},
   reloadUser: async () => {},
-  adminMode: false,
-  setAdminMode: () => {},
   userRoles: [],
   userInfo: null,
 });
@@ -71,7 +68,6 @@ export default function ContextProvider({ children }: { children: React.ReactNod
   const [contexts, setContexts] = useState<AppContext[]>([]);
   const [current, setCurrentState] = useState<AppContext | null>(null);
   const [mounted, setMounted] = useState(false);
-  const [adminMode, setAdminMode] = useState(false);
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
@@ -192,7 +188,7 @@ export default function ContextProvider({ children }: { children: React.ReactNod
   if (!mounted) return null;
 
   return (
-    <Ctx.Provider value={{ contexts, current, setCurrent, reload, reloadUser, adminMode, setAdminMode, userRoles, userInfo }}>
+    <Ctx.Provider value={{ contexts, current, setCurrent, reload, reloadUser, userRoles, userInfo }}>
       {children}
     </Ctx.Provider>
   );

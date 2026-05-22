@@ -30,6 +30,7 @@ class ContextController extends AbstractController
             'isDefault' => $c->isDefault(),
             'publicEnabled' => $c->isPublicEnabled(),
             'publicToken' => $c->getPublicToken(),
+            'feedbackButtonEnabled' => $c->isFeedbackButtonEnabled(),
             'vulnerabilityEnabled' => $c->isVulnerabilityEnabled(),
             'nvdApiKey' => $c->getNvdApiKey() ? '••••••••' : null,
             'vulnerabilitySyncIntervalHours' => $c->getVulnerabilitySyncIntervalHours(),
@@ -128,6 +129,9 @@ class ContextController extends AbstractController
             if ($data['publicEnabled'] && !$context->getPublicToken()) {
                 $context->generatePublicToken();
             }
+        }
+        if (array_key_exists('feedbackButtonEnabled', $data)) {
+            $context->setFeedbackButtonEnabled((bool) $data['feedbackButtonEnabled']);
         }
         if (isset($data['regenerateToken']) && $data['regenerateToken']) {
             $context->generatePublicToken();

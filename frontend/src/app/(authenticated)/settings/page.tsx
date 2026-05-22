@@ -1,9 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import {
+  BookOpen,
+  ChevronRight,
   Loader2,
   Check,
   Search,
@@ -35,15 +39,22 @@ interface ApiTokenItem {
   expired: boolean;
 }
 
-type TabKey = "general" | "monitoring" | "retention" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "apiTokens";
+type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
+const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "nodeColumns", "members", "lab", "apiTokens"] as const;
+const isValidTab = (v: string | null): v is TabKey => !!v && (VALID_TABS as readonly string[]).includes(v);
+
 export default function SettingsPage() {
   const { t } = useI18n();
   const { current, reload } = useAppContext();
-  const [tab, setTab] = useState<TabKey>("general");
+  const searchParams = useSearchParams();
+  // Tab state is driven by ?tab=… so the vertical nav in the layout can deep-link
+  // to a section. Falls back to "general" when the param is missing or unknown.
+  const urlTab = searchParams.get("tab");
+  const tab: TabKey = isValidTab(urlTab) ? urlTab : "general";
 
   // General
   const [name, setName] = useState("");
@@ -53,6 +64,10 @@ export default function SettingsPage() {
 
   // Monitoring
   const [monitoringEnabled, setMonitoringEnabled] = useState(false);
+
+  // General — render switch for the floating "Suggest a feature" button.
+  // The flag is part of the General save payload, alongside name/description.
+  const [feedbackButtonEnabled, setFeedbackButtonEnabled] = useState(true);
 
   // Data Retention & Poll intervals
   const [snmpRetentionMinutes, setSnmpRetentionMinutes] = useState(120);
@@ -106,6 +121,7 @@ export default function SettingsPage() {
       setName(current.name);
       setDescription(current.description ?? "");
       setMonitoringEnabled(current.monitoringEnabled);
+      setFeedbackButtonEnabled(current.feedbackButtonEnabled ?? true);
       setSnmpRetentionMinutes(current.snmpRetentionMinutes ?? 120);
       setSnmpPollIntervalSeconds(current.snmpPollIntervalSeconds ?? 60);
       setIcmpPollIntervalSeconds(current.icmpPollIntervalSeconds ?? 60);
@@ -194,7 +210,7 @@ export default function SettingsPage() {
       const res = await fetch(`/api/contexts/${current.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description: description || null, monitoringEnabled }),
+        body: JSON.stringify({ name, description: description || null, monitoringEnabled, feedbackButtonEnabled }),
       });
       if (res.ok) {
         await reload();
@@ -206,17 +222,10 @@ export default function SettingsPage() {
     }
   };
 
-  const toggleMonitoring = async () => {
-    if (!current) return;
-    const next = !monitoringEnabled;
-    setMonitoringEnabled(next);
-    await fetch(`/api/contexts/${current.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, description: description || null, monitoringEnabled: next }),
-    });
-    await reload();
-  };
+  // Toggle is now local-only; the consolidated Monitoring tab persists
+  // monitoringEnabled together with the poll/retention intervals via
+  // handleSaveMonitoring, triggered from the header Save button.
+  const toggleMonitoring = () => setMonitoringEnabled((v) => !v);
 
   const toggleMember = (userId: number) => {
     setMemberIds((prev) => {
@@ -227,7 +236,8 @@ export default function SettingsPage() {
     });
   };
 
-  const saveMembers = async () => {
+  const saveMembers = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!current) return;
     setMembersSaving(true);
     setMembersSuccess(false);
@@ -247,8 +257,11 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveRetention = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Unified save for the merged Monitoring tab: pushes monitoringEnabled +
+  // the three intervals in a single PUT. Replaces the old toggle-on-flip
+  // auto-save and the separate retention save.
+  const handleSaveMonitoring = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!current) return;
     setRetentionSaving(true);
     setRetentionSaved(false);
@@ -268,7 +281,60 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveLab = async () => {
+  const handleSaveVulnerability = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!current?.id) return;
+    setVulnSaving(true);
+    try {
+      const res = await fetch(`/api/contexts/${current.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: current.name,
+          vulnerabilityEnabled: vulnEnabled,
+          nvdApiKey: nvdApiKey || null,
+          vulnerabilitySyncIntervalHours: vulnSyncInterval,
+          vulnerabilityScoreWeight: vulnWeight,
+        }),
+      });
+      if (res.ok) {
+        setVulnSaved(true);
+        setTimeout(() => setVulnSaved(false), 2000);
+        reload();
+      }
+    } finally {
+      setVulnSaving(false);
+    }
+  };
+
+  const handleSaveSystemUpdates = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!current) return;
+    setSuSaving(true);
+    try {
+      const compW = Math.round((1 - vulnWeight - suWeight) * 100) / 100;
+      await fetch(`/api/contexts/${current.id}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: current.name,
+          systemUpdateEnabled: suEnabled,
+          complianceScoreWeight: Math.max(0, compW),
+          vulnerabilityScoreWeight: vulnWeight,
+          systemUpdateScoreWeight: suWeight,
+        }),
+      });
+    } finally {
+      setSuSaving(false);
+      setSuSaved(true);
+      reload();
+      setTimeout(() => setSuSaved(false), 2000);
+    }
+  };
+
+  const handleSaveLab = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!current) return;
     setLabSaving(true);
     setLabSaved(false);
@@ -320,7 +386,6 @@ export default function SettingsPage() {
   const tabs: { key: TabKey; label: string }[] = [
     { key: "general", label: t("settings.tabGeneral") },
     { key: "monitoring", label: t("settings.tabMonitoring") },
-    { key: "retention", label: t("settings.tabRetention") },
     { key: "vulnerability", label: t("settings.tabVulnerability") },
     { key: "systemUpdates", label: t("settings.tabSystemUpdates") },
     { key: "nodeColumns" as TabKey, label: t("settings.tabNodeColumns") },
@@ -337,36 +402,51 @@ export default function SettingsPage() {
     );
   }
 
+  // Locate the current tab's label so we can show it as a subheading. The
+  // vertical nav (in the layout) already highlights the active item; this just
+  // gives the content pane its own title.
+  const activeLabel = tabs.find((item) => item.key === tab)?.label ?? "";
+
+  // Save action descriptor per tab. Each entry pairs a form id (so the header
+  // button can submit the matching <form> via the HTML5 `form` attribute) with
+  // the tab-local saving/saved state and any extra disable condition. Tabs
+  // without a save action (nodeColumns, apiTokens) get null.
+  const SAVE_ACTIONS: Partial<Record<TabKey, { formId: string; saving: boolean; saved: boolean; disabled?: boolean }>> = {
+    general: { formId: "settings-form-general", saving, saved, disabled: !name.trim() },
+    monitoring: { formId: "settings-form-monitoring", saving: retentionSaving, saved: retentionSaved },
+    vulnerability: { formId: "settings-form-vulnerability", saving: vulnSaving, saved: vulnSaved },
+    systemUpdates: { formId: "settings-form-systemUpdates", saving: suSaving, saved: suSaved },
+    members: { formId: "settings-form-members", saving: membersSaving, saved: membersSuccess },
+    lab: { formId: "settings-form-lab", saving: labSaving, saved: labSaved },
+  };
+  const saveAction = SAVE_ACTIONS[tab];
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{t("settings.title")}</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          {t("settings.subtitle", { name: current.name })}
-        </p>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
-        {tabs.map((item) => (
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">{activeLabel}</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            {t("settings.subtitle", { name: current.name })}
+          </p>
+        </div>
+        {saveAction && (
           <button
-            key={item.key}
-            onClick={() => setTab(item.key)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              tab === item.key
-                ? "border-slate-900 dark:border-white text-slate-900 dark:text-white"
-                : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
-            }`}
+            type="submit"
+            form={saveAction.formId}
+            disabled={saveAction.saving || saveAction.disabled}
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
           >
-            {item.label}
+            {saveAction.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saveAction.saved ? <Check className="h-4 w-4" /> : null}
+            {saveAction.saved ? t("settings.saved") : t("common.save")}
           </button>
-        ))}
+        )}
       </div>
 
       {/* General tab */}
       {tab === "general" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <form onSubmit={handleSaveGeneral} className="p-6 space-y-5">
+          <form id="settings-form-general" onSubmit={handleSaveGeneral} className="p-6 space-y-5">
             <div className="space-y-1.5">
               <label className={labelClass}>{t("settings.nameLabel")}</label>
               <input
@@ -387,15 +467,29 @@ export default function SettingsPage() {
                 placeholder={t("settings.descriptionPlaceholder")}
               />
             </div>
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              {saved && <span className="text-sm text-green-600 dark:text-green-400">{t("settings.saved")}</span>}
+            <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {t("settings.feedbackButtonLabel")}
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.feedbackButtonHelp")}
+                </p>
+              </div>
               <button
-                type="submit"
-                disabled={saving || !name.trim()}
-                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                type="button"
+                role="switch"
+                aria-checked={feedbackButtonEnabled}
+                onClick={() => setFeedbackButtonEnabled((v) => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                  feedbackButtonEnabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"
+                }`}
               >
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t("common.save")}
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                    feedbackButtonEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
           </form>
@@ -404,113 +498,103 @@ export default function SettingsPage() {
 
       {/* Monitoring tab */}
       {tab === "monitoring" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <div className="flex items-center justify-between px-6 py-5">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {t("settings.monitoringLabel")}
-              </h2>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                {t("settings.monitoringHelp")}
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={monitoringEnabled}
-              onClick={toggleMonitoring}
-              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
-                monitoringEnabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"
-              }`}
-            >
-              <span
-                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
-                  monitoringEnabled ? "translate-x-5" : "translate-x-0"
-                }`}
-                style={monitoringEnabled ? { backgroundColor: undefined } : undefined}
-              />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Data Retention tab */}
-      {tab === "retention" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <form onSubmit={handleSaveRetention} className="p-6 space-y-5">
-            <div>
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                {t("settings.retentionTitle")}
-              </h2>
-              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                {t("settings.retentionHelp")}
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("settings.icmpIntervalLabel")}</label>
-              <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.icmpIntervalHelp")}</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min="5"
-                  max="3600"
-                  value={icmpPollIntervalSeconds}
-                  onChange={(e) => setIcmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
-                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
-                />
-                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
+        <form id="settings-form-monitoring" onSubmit={handleSaveMonitoring} className="space-y-4">
+          {/* Enable switch */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="flex items-center justify-between px-6 py-5">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {t("settings.monitoringLabel")}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.monitoringHelp")}
+                </p>
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("settings.pollIntervalLabel")}</label>
-              <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.pollIntervalHelp")}</p>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min="5"
-                  max="3600"
-                  value={snmpPollIntervalSeconds}
-                  onChange={(e) => setSnmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
-                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
-                />
-                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label className={labelClass}>{t("settings.snmpRetentionLabel")}</label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  min="1"
-                  max="43200"
-                  value={snmpRetentionMinutes}
-                  onChange={(e) => setSnmpRetentionMinutes(Math.max(1, Number(e.target.value)))}
-                  className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
-                />
-                <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.minutes")}</span>
-                <span className="text-xs text-slate-400 dark:text-slate-500">
-                  ({Math.floor(snmpRetentionMinutes / 60)}{t("settings.hours")}{snmpRetentionMinutes % 60 > 0 ? ` ${snmpRetentionMinutes % 60}min` : ""})
-                </span>
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-              {retentionSaved && <span className="text-sm text-green-600 dark:text-green-400">{t("settings.saved")}</span>}
               <button
-                type="submit"
-                disabled={retentionSaving}
-                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
+                type="button"
+                role="switch"
+                aria-checked={monitoringEnabled}
+                onClick={toggleMonitoring}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                  monitoringEnabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"
+                }`}
               >
-                {retentionSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t("common.save")}
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                    monitoringEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
               </button>
             </div>
-          </form>
-        </div>
+          </div>
+
+          {/* Poll / retention intervals — kept editable even when monitoring
+              is off so the user can pre-configure values before enabling. */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <div className="p-6 space-y-5">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {t("settings.retentionTitle")}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.retentionHelp")}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("settings.icmpIntervalLabel")}</label>
+                <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.icmpIntervalHelp")}</p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min="5"
+                    max="3600"
+                    value={icmpPollIntervalSeconds}
+                    onChange={(e) => setIcmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
+                    className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                  />
+                  <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("settings.pollIntervalLabel")}</label>
+                <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.pollIntervalHelp")}</p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min="5"
+                    max="3600"
+                    value={snmpPollIntervalSeconds}
+                    onChange={(e) => setSnmpPollIntervalSeconds(Math.max(5, Number(e.target.value)))}
+                    className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                  />
+                  <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.seconds")}</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className={labelClass}>{t("settings.snmpRetentionLabel")}</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min="1"
+                    max="43200"
+                    value={snmpRetentionMinutes}
+                    onChange={(e) => setSnmpRetentionMinutes(Math.max(1, Number(e.target.value)))}
+                    className="w-32 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+                  />
+                  <span className="text-sm text-slate-500 dark:text-slate-400">{t("settings.minutes")}</span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">
+                    ({Math.floor(snmpRetentionMinutes / 60)}{t("settings.hours")}{snmpRetentionMinutes % 60 > 0 ? ` ${snmpRetentionMinutes % 60}min` : ""})
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </form>
       )}
 
       {/* Members tab */}
       {tab === "members" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+        <form id="settings-form-members" onSubmit={saveMembers} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-6 py-4">
             <div className="flex items-center gap-3">
               <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
@@ -519,22 +603,6 @@ export default function SettingsPage() {
               <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:text-slate-400">
                 {memberIds.size}
               </span>
-            </div>
-            <div className="flex items-center gap-3">
-              {membersSuccess && (
-                <span className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-                  <Check className="h-4 w-4" />
-                  {t("settings.membersSaved")}
-                </span>
-              )}
-              <button
-                onClick={saveMembers}
-                disabled={membersSaving}
-                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-              >
-                {membersSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {t("common.save")}
-              </button>
             </div>
           </div>
 
@@ -615,11 +683,11 @@ export default function SettingsPage() {
               })
             )}
           </div>
-        </div>
+        </form>
       )}
 
       {tab === "vulnerability" && (
-        <div className="space-y-6">
+        <form id="settings-form-vulnerability" onSubmit={handleSaveVulnerability} className="space-y-6">
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
             <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-800">
               <h2 className="text-base font-semibold text-slate-900 dark:text-white">{t("settings.tabVulnerability")}</h2>
@@ -737,44 +805,13 @@ export default function SettingsPage() {
                 </>
               )}
 
-              {/* Save button */}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  onClick={async () => {
-                    if (!current?.id) return;
-                    setVulnSaving(true);
-                    const res = await fetch(`/api/contexts/${current.id}`, {
-                      method: "PUT",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        name: current.name,
-                        vulnerabilityEnabled: vulnEnabled,
-                        nvdApiKey: nvdApiKey || null,
-                        vulnerabilitySyncIntervalHours: vulnSyncInterval,
-                        vulnerabilityScoreWeight: vulnWeight,
-                      }),
-                    });
-                    if (res.ok) {
-                      setVulnSaved(true);
-                      setTimeout(() => setVulnSaved(false), 2000);
-                      reload();
-                    }
-                    setVulnSaving(false);
-                  }}
-                  disabled={vulnSaving}
-                  className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors disabled:opacity-50"
-                >
-                  {vulnSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : vulnSaved ? <Check className="h-4 w-4" /> : null}
-                  {vulnSaved ? t("settings.saved") : t("common.save")}
-                </button>
-              </div>
             </div>
           </div>
-        </div>
+        </form>
       )}
 
       {tab === "systemUpdates" && (
-        <div className="space-y-6">
+        <form id="settings-form-systemUpdates" onSubmit={handleSaveSystemUpdates} className="space-y-6">
           {/* Enable toggle */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -833,28 +870,6 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button onClick={async () => {
-                setSuSaving(true);
-                const compW = Math.round((1 - vulnWeight - suWeight) * 100) / 100;
-                await fetch(`/api/contexts/${current?.id}`, {
-                  method: "PUT", credentials: "include",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    name: current?.name, systemUpdateEnabled: suEnabled,
-                    complianceScoreWeight: Math.max(0, compW),
-                    vulnerabilityScoreWeight: vulnWeight,
-                    systemUpdateScoreWeight: suWeight,
-                  }),
-                });
-                setSuSaving(false); setSuSaved(true); reload();
-                setTimeout(() => setSuSaved(false), 2000);
-              }}
-                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-200 transition-colors">
-                {suSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : suSaved ? <Check className="h-4 w-4" /> : null}
-                {suSaved ? t("settings.saved") : t("common.save")}
-              </button>
-            </div>
           </div>
 
           {/* Vendor plugins */}
@@ -863,7 +878,7 @@ export default function SettingsPage() {
             <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.pluginsHelp")}</p>
             <PluginManager contextId={current?.id} t={t} plugins={plugins} setPlugins={setPlugins} pluginSyncing={pluginSyncing} setPluginSyncing={setPluginSyncing} />
           </div>
-        </div>
+        </form>
       )}
 
       {tab === "nodeColumns" && current && (
@@ -872,6 +887,22 @@ export default function SettingsPage() {
 
       {tab === "apiTokens" && (
         <div className="space-y-6">
+          {/* Documentation link — moved here from the sidebar so tokens and
+              the public API reference live in one place. */}
+          <Link
+            href="/documentation"
+            className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm px-6 py-4 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <BookOpen className="h-5 w-5 text-slate-500 dark:text-slate-400" />
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("settings.apiDocsTitle")}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{t("settings.apiDocsDesc")}</p>
+              </div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-slate-400" />
+          </Link>
+
           {/* Create token form */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
             <div>
@@ -1005,7 +1036,7 @@ export default function SettingsPage() {
       )}
 
       {tab === "lab" && (
-        <div className="space-y-6">
+        <form id="settings-form-lab" onSubmit={handleSaveLab} className="space-y-6">
           {/* Enable/Disable */}
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -1083,24 +1114,7 @@ export default function SettingsPage() {
             </>
           )}
 
-          {/* Save */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleSaveLab}
-              disabled={labSaving}
-              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
-            >
-              {labSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {t("common.save")}
-            </button>
-            {labSaved && (
-              <span className="flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-                <Check className="h-4 w-4" />
-                {t("settings.saved")}
-              </span>
-            )}
-          </div>
-        </div>
+        </form>
       )}
     </div>
   );

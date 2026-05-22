@@ -712,7 +712,7 @@ export default function NodeDetailPage() {
                     <span className={`inline-block h-2 w-2 rounded-full ${node.isReachable === null ? "bg-slate-300 dark:bg-slate-600" : node.isReachable ? "bg-emerald-500" : "bg-red-500"}`} />
                   )}
                 </span>
-                {node.enforcing && (
+                {node.enforcing && node.policy === "enforce" && (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 dark:bg-orange-500/20 px-2.5 py-1 text-xs font-medium text-orange-700 dark:text-orange-300">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t("nodes.enforcing")}
@@ -852,8 +852,8 @@ export default function NodeDetailPage() {
                     title={node && node.policy !== "enforce" ? t("nodes.enforceDisabledHint") : undefined}
                     className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    {node?.enforcing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4 text-orange-500" />}
-                    {node?.enforcing ? t("nodes.enforcing") : t("nodes.enforce")}
+                    {node?.enforcing && node.policy === "enforce" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Terminal className="h-4 w-4 text-orange-500" />}
+                    {node?.enforcing && node.policy === "enforce" ? t("nodes.enforcing") : t("nodes.enforce")}
                   </button>
                 </div>
               )}

@@ -27,6 +27,14 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Legacy admin URLs were moved under the unified settings page. 308 keeps
+  // the method and lets bookmarks / external links keep working.
+  async redirects() {
+    return [
+      { source: "/admin", destination: "/settings/global", permanent: true },
+      { source: "/admin/:path*", destination: "/settings/global/:path*", permanent: true },
+    ];
+  },
 };
 
 export default nextConfig;

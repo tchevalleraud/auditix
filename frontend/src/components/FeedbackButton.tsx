@@ -3,12 +3,20 @@
 import { useState } from "react";
 import { Lightbulb } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
+import { useAppContext } from "@/components/ContextProvider";
 
 const FEEDBACK_URL = "https://auditix.featurebase.app/";
 
 export default function FeedbackButton() {
   const { t } = useI18n();
+  const { current } = useAppContext();
   const [hovered, setHovered] = useState(false);
+
+  // Per-context kill switch: lets a white-labelled / customer-facing context
+  // hide the external Featurebase link without having to rip the component
+  // out of the layout. Hidden until the context loads to avoid flicker on
+  // a context where the flag is off.
+  if (!current || !current.feedbackButtonEnabled) return null;
 
   return (
     <a

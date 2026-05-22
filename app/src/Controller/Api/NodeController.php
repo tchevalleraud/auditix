@@ -177,6 +177,12 @@ class NodeController extends AbstractController
         }
         if (array_key_exists('policy', $data)) {
             $node->setPolicy($data['policy']);
+            // An enforce run only makes sense for enforce-policy nodes. Flipping
+            // back to audit clears any pending/running flag so the UI doesn't
+            // keep showing "Enforcing..." for a node that can't be enforced.
+            if ($data['policy'] !== 'enforce' && $node->getEnforcing() !== null) {
+                $node->setEnforcing(null);
+            }
         }
         if (array_key_exists('manufacturerId', $data)) {
             $node->setManufacturer($data['manufacturerId'] ? $em->getRepository(Editor::class)->find($data['manufacturerId']) : null);
