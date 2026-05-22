@@ -85,10 +85,33 @@ class TopologyProtocol
         return [
             // Common
             'destNodeColumn' => '',
-            'nodeMatchField' => 'auto', // auto | name | hostname | ipAddress
+            // auto | name | hostname | ipAddress | inventory
+            // When 'inventory', the matcher uses nodeMatchInventoryCategoryId +
+            // nodeMatchInventoryColumn to build a value→Node index, so the
+            // destination value resolves against any inventory column the user
+            // pinpoints (e.g. a chassis ID that's not a stock node field).
+            'nodeMatchField' => 'auto',
+            'nodeMatchInventoryCategoryId' => null,
+            'nodeMatchInventoryColumn' => '',
             'localPortColumn' => '',
             'remotePortColumn' => '',
             'metricColumn' => '',
+            // LLDP-specific aggregation lookup: marks each generated port with the
+            // LAG/Port-channel id it belongs to. The lookup can live in a separate
+            // inventory category (e.g. "Port-channel members") where each row's
+            // entryKey is a port name and one column holds the LAG id.
+            //   - aggregationCategoryId  (optional, ?int): category to query. If null,
+            //     the LLDP category is reused.
+            //   - aggregationKeyColumn   (optional, string): column from the LLDP row
+            //     whose value is used as the lookup key (entryKey) into the
+            //     aggregation category. Falls back to the local port (entryKey or
+            //     localPortColumn) when empty.
+            //   - aggregationValueColumn (optional, string): column in the aggregation
+            //     category holding the LAG id (e.g. "Po1", "ae0"). When empty,
+            //     aggregation lookup is disabled.
+            'aggregationCategoryId' => null,
+            'aggregationKeyColumn' => '',
+            'aggregationValueColumn' => '',
             // ISIS-specific: per-link area qualifier (e.g. "HOME"/"REMOTE") that resolves
             // through a separate area inventory category into the real area address.
             'linkAreaColumn' => '',

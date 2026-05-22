@@ -10,6 +10,7 @@ use App\Entity\Topology;
 use App\Entity\TopologyAnnotation;
 use App\Entity\TopologyCluster;
 use App\Entity\TopologyClusterMember;
+use App\Entity\TopologyClusterRule;
 use App\Entity\TopologyEdge;
 use App\Entity\TopologyNode;
 use App\Entity\TopologyProtocol;
@@ -667,6 +668,235 @@ class TopologyController extends AbstractController
         return $this->json(['results' => $results]);
     }
 
+    private function serializeClusterRule(TopologyClusterRule $r): array
+    {
+        return [
+            'id' => $r->getId(),
+            'name' => $r->getName(),
+            'inventoryCategoryId' => $r->getInventoryCategory()?->getId(),
+            'inventoryCategoryName' => $r->getInventoryCategory()?->getName(),
+            'groupByColumn' => $r->getGroupByColumn(),
+            'clusterStyle' => $r->getClusterStyle(),
+            'enabled' => $r->isEnabled(),
+            'lastGeneratedAt' => $r->getLastGeneratedAt()?->format(\DateTimeInterface::ATOM),
+        ];
+    }
+
+    #[Route('/{id}/cluster-rules', methods: ['GET'], requirements: ['id' => '\d+'])]
+    public function listClusterRules(int $id, EntityManagerInterface $em): JsonResponse
+    {
+        $topology = $em->getRepository(Topology::class)->find($id);
+        if (!$topology) return $this->json(['error' => 'Topology not found'], Response::HTTP_NOT_FOUND);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $topology);
+
+        $rules = $em->getRepository(TopologyClusterRule::class)->findBy(['topology' => $topology], ['id' => 'ASC']);
+        return $this->json(array_map(fn(TopologyClusterRule $r) => $this->serializeClusterRule($r), $rules));
+    }
+
+    #[Route('/{id}/cluster-rules', methods: ['POST'], requirements: ['id' => '\d+'])]
+    public function createClusterRule(int $id, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $topology = $em->getRepository(Topology::class)->find($id);
+        if (!$topology) return $this->json(['error' => 'Topology not found'], Response::HTTP_NOT_FOUND);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $topology);
+
+        $data = json_decode($request->getContent(), true) ?? [];
+        $name = trim((string)($data['name'] ?? ''));
+        if ($name === '') return $this->json(['error' => 'Name is required'], Response::HTTP_BAD_REQUEST);
+
+        $r = new TopologyClusterRule();
+        $r->setTopology($topology);
+        $r->setName($name);
+        $r->setGroupByColumn((string)($data['groupByColumn'] ?? ''));
+        $r->setClusterStyle(array_merge(TopologyCluster::defaultStyle(), is_array($data['clusterStyle'] ?? null) ? $data['clusterStyle'] : []));
+        $r->setEnabled($data['enabled'] ?? true);
+
+        if (!empty($data['inventoryCategoryId'])) {
+            $cat = $em->getRepository(InventoryCategory::class)->find((int)$data['inventoryCategoryId']);
+            if ($cat && $cat->getContext()->getId() === $topology->getContext()->getId()) {
+                $r->setInventoryCategory($cat);
+            }
+        }
+
+        $em->persist($r);
+        $em->flush();
+        return $this->json($this->serializeClusterRule($r), Response::HTTP_CREATED);
+    }
+
+    #[Route('/{topologyId}/cluster-rules/{ruleId}', methods: ['PUT'], requirements: ['topologyId' => '\d+', 'ruleId' => '\d+'])]
+    public function updateClusterRule(int $topologyId, int $ruleId, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $r = $em->getRepository(TopologyClusterRule::class)->find($ruleId);
+        if (!$r || $r->getTopology()->getId() !== $topologyId) {
+            return $this->json(['error' => 'Cluster rule not found'], Response::HTTP_NOT_FOUND);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $r->getTopology());
+
+        $data = json_decode($request->getContent(), true) ?? [];
+        if (array_key_exists('name', $data)) {
+            $name = trim((string)$data['name']);
+            if ($name === '') return $this->json(['error' => 'Name cannot be empty'], Response::HTTP_BAD_REQUEST);
+            $r->setName($name);
+        }
+        if (array_key_exists('enabled', $data)) $r->setEnabled((bool)$data['enabled']);
+        if (array_key_exists('groupByColumn', $data)) $r->setGroupByColumn((string)$data['groupByColumn']);
+        if (array_key_exists('clusterStyle', $data) && is_array($data['clusterStyle'])) {
+            $r->setClusterStyle(array_merge($r->getClusterStyle(), $data['clusterStyle']));
+        }
+        if (array_key_exists('inventoryCategoryId', $data)) {
+            if ($data['inventoryCategoryId']) {
+                $cat = $em->getRepository(InventoryCategory::class)->find((int)$data['inventoryCategoryId']);
+                if ($cat && $cat->getContext()->getId() === $r->getTopology()->getContext()->getId()) {
+                    $r->setInventoryCategory($cat);
+                }
+            } else {
+                $r->setInventoryCategory(null);
+            }
+        }
+        $em->flush();
+        return $this->json($this->serializeClusterRule($r));
+    }
+
+    #[Route('/{topologyId}/cluster-rules/{ruleId}', methods: ['DELETE'], requirements: ['topologyId' => '\d+', 'ruleId' => '\d+'])]
+    public function deleteClusterRule(int $topologyId, int $ruleId, EntityManagerInterface $em): JsonResponse
+    {
+        $r = $em->getRepository(TopologyClusterRule::class)->find($ruleId);
+        if (!$r || $r->getTopology()->getId() !== $topologyId) {
+            return $this->json(['error' => 'Cluster rule not found'], Response::HTTP_NOT_FOUND);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $r->getTopology());
+
+        // Drop the clusters this rule produced — they're stale and no longer have an owner.
+        $em->createQuery('DELETE FROM App\Entity\TopologyCluster c WHERE c.clusterRule = :r')
+            ->setParameter('r', $r)->execute();
+
+        $em->remove($r);
+        $em->flush();
+        return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/{topologyId}/cluster-rules/{ruleId}/generate', methods: ['POST'], requirements: ['topologyId' => '\d+', 'ruleId' => '\d+'])]
+    public function generateClusterRule(int $topologyId, int $ruleId, EntityManagerInterface $em): JsonResponse
+    {
+        $rule = $em->getRepository(TopologyClusterRule::class)->find($ruleId);
+        if (!$rule || $rule->getTopology()->getId() !== $topologyId) {
+            return $this->json(['error' => 'Cluster rule not found'], Response::HTTP_NOT_FOUND);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule->getTopology());
+
+        $result = $this->runClusterRuleGeneration($rule, $em);
+        if ($result['error'] ?? null) {
+            return $this->json(['error' => $result['error']], Response::HTTP_BAD_REQUEST);
+        }
+        return $this->json([
+            'rule' => $this->serializeClusterRule($rule),
+            'stats' => $result['stats'],
+        ]);
+    }
+
+    #[Route('/{id}/cluster-rules/generate-all', methods: ['POST'], requirements: ['id' => '\d+'])]
+    public function generateAllClusterRules(int $id, EntityManagerInterface $em): JsonResponse
+    {
+        $topology = $em->getRepository(Topology::class)->find($id);
+        if (!$topology) return $this->json(['error' => 'Topology not found'], Response::HTTP_NOT_FOUND);
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $topology);
+
+        $rules = $em->getRepository(TopologyClusterRule::class)->findBy(['topology' => $topology, 'enabled' => true]);
+        $results = [];
+        foreach ($rules as $r) {
+            $res = $this->runClusterRuleGeneration($r, $em);
+            $results[] = [
+                'ruleId' => $r->getId(),
+                'name' => $r->getName(),
+                'error' => $res['error'] ?? null,
+                'stats' => $res['stats'] ?? null,
+            ];
+        }
+        return $this->json(['results' => $results]);
+    }
+
+    /**
+     * Regenerate the clusters owned by one rule. Wipes the rule's previous
+     * clusters, then groups every member node of the topology by its value in
+     * the configured inventory column. A node missing that value (or with an
+     * empty one) is simply not grouped. User-edited styles are preserved
+     * across regenerations, keyed by cluster name.
+     *
+     * @return array{stats?: array{created:int, members:int}, error?: string}
+     */
+    private function runClusterRuleGeneration(TopologyClusterRule $rule, EntityManagerInterface $em): array
+    {
+        $category = $rule->getInventoryCategory();
+        if (!$category) return ['error' => 'Cluster rule has no inventory category configured'];
+        $column = $rule->getGroupByColumn();
+        if ($column === '') return ['error' => 'Cluster rule has no groupByColumn configured'];
+
+        $topology = $rule->getTopology();
+
+        // Preserve user-customised styles (keyed by cluster name) across regen.
+        $previous = $em->getRepository(TopologyCluster::class)->findBy(['clusterRule' => $rule]);
+        $preservedStyles = [];
+        foreach ($previous as $pc) $preservedStyles[$pc->getName()] = $pc->getStyle();
+        $em->createQuery('DELETE FROM App\Entity\TopologyCluster c WHERE c.clusterRule = :r')
+            ->setParameter('r', $rule)->execute();
+        $em->flush();
+
+        // Index member nodes
+        $members = $em->getRepository(TopologyNode::class)->findBy(['topology' => $topology]);
+        $nodeById = [];
+        foreach ($members as $m) {
+            $nodeById[$m->getNode()->getId()] = $m->getNode();
+        }
+        if (empty($nodeById)) return ['stats' => ['created' => 0, 'members' => 0]];
+
+        // For every inventory entry on a member node in the chosen category +
+        // column, accumulate the (value → set of node IDs) map. A node showing
+        // multiple values across rows ends up in every matching cluster — that
+        // matches how protocols already handle per-link area lists.
+        $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(['category' => $category]);
+        $nodesByValue = []; // value => [nodeId => true]
+        foreach ($entries as $e) {
+            if ($e->getColLabel() !== $column) continue;
+            $val = $e->getValue();
+            if ($val === null || $val === '') continue;
+            $nid = $e->getNode()->getId();
+            if (!isset($nodeById[$nid])) continue;
+            $nodesByValue[(string)$val][$nid] = true;
+        }
+
+        $created = 0;
+        $totalMembers = 0;
+        $defaultStyle = array_merge(TopologyCluster::defaultStyle(), $rule->getClusterStyle());
+        ksort($nodesByValue);
+        foreach ($nodesByValue as $value => $nodeIdMap) {
+            $cluster = new TopologyCluster();
+            $cluster->setTopology($topology);
+            $cluster->setClusterRule($rule);
+            $cluster->setName((string)$value);
+            $cluster->setStyle(isset($preservedStyles[$value])
+                ? array_merge($defaultStyle, $preservedStyles[$value])
+                : $defaultStyle
+            );
+            $em->persist($cluster);
+            $em->flush();
+
+            foreach (array_keys($nodeIdMap) as $nid) {
+                if (!isset($nodeById[$nid])) continue;
+                $m = new TopologyClusterMember();
+                $m->setCluster($cluster);
+                $m->setNode($nodeById[$nid]);
+                $em->persist($m);
+                $totalMembers++;
+            }
+            $em->flush();
+            $created++;
+        }
+
+        $rule->setLastGeneratedAt(new \DateTimeImmutable());
+        $em->flush();
+        return ['stats' => ['created' => $created, 'members' => $totalMembers]];
+    }
+
     /**
      * Core protocol-generation routine. Dispatches by protocol type. Returns
      * ['stats' => [...]] on success or ['error' => 'message'] on bad config.
@@ -702,6 +932,29 @@ class TopologyController extends AbstractController
             if ($n->getIpAddress()) $nodeByKey[strtolower($n->getIpAddress())] = $n;
         }
 
+        // When the user pinpoints an inventory column for matching (e.g. a
+        // chassis ID stored in inventory rather than on the Node itself), index
+        // every value in that column to the owning Node. Falls back transparently
+        // to the stock keys above when no inventory match is found.
+        $matchInvCatId = $mapping['nodeMatchInventoryCategoryId'] ?? null;
+        $matchInvCol = $mapping['nodeMatchInventoryColumn'] ?? '';
+        if (($mapping['nodeMatchField'] ?? 'auto') === 'inventory' && $matchInvCatId && $matchInvCol !== '') {
+            $matchCat = $em->getRepository(InventoryCategory::class)->find((int)$matchInvCatId);
+            if ($matchCat && !empty($nodeById)) {
+                $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                    'category' => $matchCat,
+                ]);
+                foreach ($entries as $e) {
+                    if ($e->getColLabel() !== $matchInvCol) continue;
+                    $val = $e->getValue();
+                    if ($val === null || $val === '') continue;
+                    $nid = $e->getNode()->getId();
+                    if (!isset($nodeById[$nid])) continue;
+                    $nodeByKey[strtolower((string)$val)] = $nodeById[$nid];
+                }
+            }
+        }
+
         $style = array_merge(TopologyProtocol::defaultEdgeStyle(), $protocol->getEdgeStyle());
 
         $stats = ['created' => 0, 'skipped' => 0];
@@ -727,8 +980,37 @@ class TopologyController extends AbstractController
         $localPortCol = $mapping['localPortColumn'] ?? '';
         $remotePortCol = $mapping['remotePortColumn'] ?? '';
         $metricCol = $mapping['metricColumn'] ?? '';
+        $aggregationCategoryId = $mapping['aggregationCategoryId'] ?? null;
+        $aggregationKeyCol = $mapping['aggregationKeyColumn'] ?? '';
+        $aggregationValueCol = $mapping['aggregationValueColumn'] ?? '';
         $topology = $protocol->getTopology();
         $createdKeys = [];
+
+        // Per-node, per-port aggregation id (e.g. "Po1", "ae0"). The aggregation
+        // lookup can target either the LLDP category itself or a dedicated category
+        // (e.g. "Port-channel members") where each row keys a port and one column
+        // holds the LAG id. We build a per-node map keyed by the port name so we
+        // can look up BOTH ends of a link regardless of iteration direction.
+        $aggregationByNodePort = [];
+        if ($aggregationValueCol !== '') {
+            $aggCategory = $aggregationCategoryId
+                ? $em->getRepository(InventoryCategory::class)->find((int)$aggregationCategoryId)
+                : $category;
+            if ($aggCategory) {
+                foreach ($nodeById as $nid => $node) {
+                    $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                        'node' => $node,
+                        'category' => $aggCategory,
+                    ]);
+                    foreach ($entries as $e) {
+                        if ($e->getColLabel() !== $aggregationValueCol) { continue; }
+                        $val = $e->getValue();
+                        if ($val === null || $val === '') { continue; }
+                        $aggregationByNodePort[$nid][(string)$e->getEntryKey()] = (string)$val;
+                    }
+                }
+            }
+        }
 
         foreach ($nodeById as $sourceNodeId => $sourceNode) {
             $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
@@ -750,6 +1032,17 @@ class TopologyController extends AbstractController
                 $localPort = ($localPortCol && isset($cols[$localPortCol])) ? (string)$cols[$localPortCol] : (string)$entryKey;
                 $remotePort = ($remotePortCol && isset($cols[$remotePortCol])) ? (string)$cols[$remotePortCol] : '';
                 $metric = ($metricCol && isset($cols[$metricCol]) && is_numeric($cols[$metricCol])) ? (int)$cols[$metricCol] : null;
+
+                // Aggregation key on the LLDP row: optional override, defaults to the local port.
+                $localAggKey = ($aggregationKeyCol && isset($cols[$aggregationKeyCol]) && $cols[$aggregationKeyCol] !== '')
+                    ? (string)$cols[$aggregationKeyCol]
+                    : $localPort;
+                $localAgg = isset($aggregationByNodePort[$sourceNodeId][$localAggKey])
+                    ? $aggregationByNodePort[$sourceNodeId][$localAggKey]
+                    : null;
+                $remoteAgg = ($remotePort !== '' && isset($aggregationByNodePort[$target->getId()][$remotePort]))
+                    ? $aggregationByNodePort[$target->getId()][$remotePort]
+                    : null;
 
                 $sId = $sourceNodeId;
                 $tId = $target->getId();
@@ -777,6 +1070,22 @@ class TopologyController extends AbstractController
                 }
                 if (!empty($labels)) $edgeStyle['labels'] = $labels;
                 if ($metric !== null) $edgeStyle['metric'] = $metric;
+
+                // Aggregation group: assigned only when both sides advertise the
+                // SAME port in an aggregation. We deliberately want a stable,
+                // direction-independent group key so that visualization grouping
+                // (by undirected pair + aggregation id) lines up correctly even
+                // when each side names its LAG differently (Po1 vs ae0).
+                if ($localAgg !== null && $remoteAgg !== null) {
+                    $aggA = ($sId <= $tId) ? $localAgg : $remoteAgg;
+                    $aggB = ($sId <= $tId) ? $remoteAgg : $localAgg;
+                    $edgeStyle['aggregationGroup'] = ($aggA === $aggB) ? $aggA : "$aggA/$aggB";
+                } elseif ($localAgg !== null) {
+                    $edgeStyle['aggregationGroup'] = $localAgg;
+                } elseif ($remoteAgg !== null) {
+                    $edgeStyle['aggregationGroup'] = $remoteAgg;
+                }
+
                 $edge->setStyle($edgeStyle);
 
                 $em->persist($edge);
@@ -1080,7 +1389,10 @@ class TopologyController extends AbstractController
     ): ?Node {
         $lower = strtolower($destValue);
 
-        if ($nodeMatchField === 'auto') {
+        // auto + inventory both rely on the pre-built $nodeByKey index — for
+        // inventory, runProtocolGeneration already injected the values from the
+        // chosen category/column into the key map.
+        if ($nodeMatchField === 'auto' || $nodeMatchField === 'inventory') {
             return $nodeByKey[$lower] ?? null;
         }
 
@@ -1459,6 +1771,10 @@ class TopologyController extends AbstractController
                 'name' => $p->getName(),
                 'type' => $p->getType(),
             ], $protocols),
+            'clusterRules' => array_map(fn(TopologyClusterRule $r) => [
+                'id' => $r->getId(),
+                'name' => $r->getName(),
+            ], $em->getRepository(TopologyClusterRule::class)->findBy(['topology' => $topology], ['id' => 'ASC'])),
         ]);
     }
 

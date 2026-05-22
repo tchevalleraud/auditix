@@ -14,6 +14,7 @@ import {
   Save,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
@@ -102,7 +103,7 @@ interface Edge {
 }
 
 interface ClusterStyle {
-  shape?: "rectangle" | "hull";
+  shape?: "rectangle" | "polygon" | "hull";
   borderColor: string;
   borderWidth: number;
   dash: "solid" | "dashed" | "dotted";
@@ -139,6 +140,12 @@ function defaultClusterStyle(): ClusterStyle {
   };
 }
 
+const CLUSTER_SHAPES = [
+  { value: "rectangle", labelKey: "topology.clusterShapeRectangle" },
+  { value: "polygon", labelKey: "topology.clusterShapePolygon" },
+  { value: "hull", labelKey: "topology.clusterShapeHull" },
+] as const;
+
 const CLUSTER_LABEL_POSITIONS = [
   { value: "top", labelKey: "topology.clusterLabelTop" },
   { value: "bottom", labelKey: "topology.clusterLabelBottom" },
@@ -147,10 +154,20 @@ const CLUSTER_LABEL_POSITIONS = [
 
 interface ProtocolMapping {
   destNodeColumn: string;
-  nodeMatchField: "auto" | "name" | "hostname" | "ipAddress";
+  nodeMatchField: "auto" | "name" | "hostname" | "ipAddress" | "inventory";
+  // Used when nodeMatchField = "inventory": pinpoints a category + column whose
+  // values are indexed value→Node. Lets the matcher resolve a chassis ID or any
+  // other identifier that doesn't live on the Node entity itself.
+  nodeMatchInventoryCategoryId?: number | null;
+  nodeMatchInventoryColumn?: string;
   localPortColumn: string;
   remotePortColumn: string;
   metricColumn: string;
+  // LLDP-specific aggregation: optional pointer to a separate inventory category
+  // (e.g. "Port-channel members") that maps a port name to its LAG id.
+  aggregationCategoryId?: number | null;
+  aggregationKeyColumn?: string;
+  aggregationValueColumn?: string;
   // ISIS-specific
   linkAreaColumn?: string;
   areaCategoryId?: number | null;
@@ -169,6 +186,17 @@ interface Protocol {
   lastGeneratedAt: string | null;
 }
 
+interface ClusterRule {
+  id: number;
+  name: string;
+  inventoryCategoryId: number | null;
+  inventoryCategoryName: string | null;
+  groupByColumn: string;
+  clusterStyle: Partial<ClusterStyle>;
+  enabled: boolean;
+  lastGeneratedAt: string | null;
+}
+
 const PROTOCOL_TYPES = [
   { value: "lldp", label: "LLDP" },
   { value: "isis", label: "ISIS" },
@@ -179,6 +207,7 @@ const NODE_MATCH_FIELDS = [
   { value: "name", labelKey: "topology.fieldName" },
   { value: "hostname", labelKey: "topology.fieldHostname" },
   { value: "ipAddress", labelKey: "topology.fieldIp" },
+  { value: "inventory", labelKey: "topology.protocolMatchInventory" },
 ] as const;
 
 function defaultProtocolMapping(): ProtocolMapping {
@@ -188,6 +217,9 @@ function defaultProtocolMapping(): ProtocolMapping {
     localPortColumn: "",
     remotePortColumn: "",
     metricColumn: "",
+    aggregationCategoryId: null,
+    aggregationKeyColumn: "",
+    aggregationValueColumn: "",
   };
 }
 
@@ -234,6 +266,7 @@ const TABS = [
   { key: "clusters", labelKey: "topology.tabClusters" },
   { key: "areas", labelKey: "topology.tabAreas" },
   { key: "protocols", labelKey: "topology.tabProtocols" },
+  { key: "clusterRules", labelKey: "topology.tabClusterRules" },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -265,6 +298,10 @@ export default function TopologyConfigurePage() {
   const [editingProtocolId, setEditingProtocolId] = useState<number | null>(null);
   const [generatingProtocolId, setGeneratingProtocolId] = useState<number | null>(null);
   const [generateResult, setGenerateResult] = useState<{ protocolId: number; created: number; skipped: number } | null>(null);
+  const [clusterRules, setClusterRules] = useState<ClusterRule[]>([]);
+  const [editingClusterRuleId, setEditingClusterRuleId] = useState<number | null>(null);
+  const [generatingClusterRuleId, setGeneratingClusterRuleId] = useState<number | null>(null);
+  const [clusterRuleResult, setClusterRuleResult] = useState<{ ruleId: number; created: number; members: number } | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -276,7 +313,7 @@ export default function TopologyConfigurePage() {
     if (!current || !id) return;
     setLoading(true);
     try {
-      const [topoRes, membersRes, nodesRes, invRes, edgesRes, clustersRes, protocolsRes] = await Promise.all([
+      const [topoRes, membersRes, nodesRes, invRes, edgesRes, clustersRes, protocolsRes, clusterRulesRes] = await Promise.all([
         fetch(`/api/topologies/${id}`),
         fetch(`/api/topologies/${id}/members`),
         fetch(`/api/nodes?context=${current.id}`),
@@ -284,6 +321,7 @@ export default function TopologyConfigurePage() {
         fetch(`/api/topologies/${id}/edges`),
         fetch(`/api/topologies/${id}/clusters`),
         fetch(`/api/topologies/${id}/protocols`),
+        fetch(`/api/topologies/${id}/cluster-rules`),
       ]);
       if (!topoRes.ok) {
         setError(`HTTP ${topoRes.status}`);
@@ -315,6 +353,9 @@ export default function TopologyConfigurePage() {
       }
       if (protocolsRes.ok) {
         setProtocols(await protocolsRes.json());
+      }
+      if (clusterRulesRes.ok) {
+        setClusterRules(await clusterRulesRes.json());
       }
     } finally {
       setLoading(false);
@@ -649,6 +690,76 @@ export default function TopologyConfigurePage() {
     if (!protocol.inventoryCategoryName) return [];
     const cat = inventoryCategories.find((c) => c.name === protocol.inventoryCategoryName);
     return cat?.columns ?? [];
+  };
+
+  const inventoryColsForRule = (rule: ClusterRule): string[] => {
+    if (!rule.inventoryCategoryName) return [];
+    const cat = inventoryCategories.find((c) => c.name === rule.inventoryCategoryName);
+    return cat?.columns ?? [];
+  };
+
+  const createClusterRule = async (): Promise<ClusterRule | null> => {
+    const res = await fetch(`/api/topologies/${id}/cluster-rules`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: t("topology.clusterRuleDefaultName"),
+        clusterStyle: defaultClusterStyle(),
+      }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      setClusterRules((prev) => [...prev, created]);
+      return created;
+    }
+    return null;
+  };
+
+  const updateClusterRule = async (ruleId: number, patch: Partial<ClusterRule>) => {
+    const current = clusterRules.find((r) => r.id === ruleId);
+    if (!current) return;
+    const mergedStyle = patch.clusterStyle ? { ...current.clusterStyle, ...patch.clusterStyle } : undefined;
+    const next: ClusterRule = {
+      ...current,
+      ...patch,
+      clusterStyle: mergedStyle ?? current.clusterStyle,
+    };
+    setClusterRules((prev) => prev.map((r) => (r.id === ruleId ? next : r)));
+    const payload: Record<string, unknown> = { ...patch };
+    if (mergedStyle) payload.clusterStyle = mergedStyle;
+    await fetch(`/api/topologies/${id}/cluster-rules/${ruleId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  };
+
+  const deleteClusterRule = async (ruleId: number) => {
+    const res = await fetch(`/api/topologies/${id}/cluster-rules/${ruleId}`, { method: "DELETE" });
+    if (res.ok || res.status === 204) {
+      setClusterRules((prev) => prev.filter((r) => r.id !== ruleId));
+      if (editingClusterRuleId === ruleId) setEditingClusterRuleId(null);
+      // Reload clusters since some were just dropped server-side.
+      const clustersRes = await fetch(`/api/topologies/${id}/clusters`);
+      if (clustersRes.ok) setClusters(await clustersRes.json());
+    }
+  };
+
+  const generateClusterRule = async (ruleId: number) => {
+    setGeneratingClusterRuleId(ruleId);
+    setClusterRuleResult(null);
+    try {
+      const res = await fetch(`/api/topologies/${id}/cluster-rules/${ruleId}/generate`, { method: "POST" });
+      if (res.ok) {
+        const result = await res.json();
+        setClusterRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, lastGeneratedAt: result.rule.lastGeneratedAt } : r)));
+        setClusterRuleResult({ ruleId, created: result.stats.created, members: result.stats.members });
+        const clustersRes = await fetch(`/api/topologies/${id}/clusters`);
+        if (clustersRes.ok) setClusters(await clustersRes.json());
+      }
+    } finally {
+      setGeneratingClusterRuleId(null);
+    }
   };
 
   if (loading || !topology || !design) {
@@ -1831,6 +1942,18 @@ export default function TopologyConfigurePage() {
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   <div className="space-y-1">
+                    <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterShape")}</label>
+                    <select
+                      value={cluster.style.shape ?? "rectangle"}
+                      onChange={(e) => updateClusterStyle(cluster.id, { shape: e.target.value as ClusterStyle["shape"] })}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
+                    >
+                      {CLUSTER_SHAPES.map((o) => (
+                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
                     <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterPadding")}</label>
                     <input
                       type="number"
@@ -2029,6 +2152,226 @@ export default function TopologyConfigurePage() {
         </div>
       )}
 
+      {tab === "clusterRules" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-sm text-slate-600 dark:text-slate-300">
+              {clusterRules.length} {t("topology.clusterRulesLabel")}
+            </div>
+            <button
+              onClick={async () => {
+                const created = await createClusterRule();
+                if (created) setEditingClusterRuleId(created.id);
+              }}
+              disabled={memberIds.size < 1}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              {t("topology.clusterRuleAdd")}
+            </button>
+          </div>
+
+          {clusterRules.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 p-12 text-center">
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("topology.clusterRulesEmpty")}</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
+              <table className="w-full">
+                <thead className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                  <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <th className="px-4 py-2">{t("topology.protocolName")}</th>
+                    <th className="px-4 py-2">{t("topology.protocolCategory")}</th>
+                    <th className="px-4 py-2">{t("topology.clusterRuleGroupByColumn")}</th>
+                    <th className="px-4 py-2">{t("topology.protocolLastGen")}</th>
+                    <th className="px-4 py-2 text-right">{t("topology.colActions")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {clusterRules.map((r) => (
+                    <tr
+                      key={r.id}
+                      className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
+                      onClick={() => setEditingClusterRuleId(r.id)}
+                    >
+                      <td className="px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white">{r.name}</td>
+                      <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+                        {r.inventoryCategoryName ?? <span className="italic text-amber-600">{t("topology.protocolNoCategory")}</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                        {r.groupByColumn || "—"}
+                      </td>
+                      <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400">
+                        {r.lastGeneratedAt ? new Date(r.lastGeneratedAt).toLocaleString() : "—"}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); generateClusterRule(r.id); }}
+                            disabled={!r.inventoryCategoryId || !r.groupByColumn || generatingClusterRuleId === r.id}
+                            className="flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2 py-1 text-xs hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {generatingClusterRuleId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                            {t("topology.protocolGenerate")}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); deleteClusterRule(r.id); }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
+                            title={t("common.delete")}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {clusterRuleResult && (
+            <div className="rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+              {t("topology.clusterRuleGenerateResult")
+                .replace("{created}", String(clusterRuleResult.created))
+                .replace("{members}", String(clusterRuleResult.members))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {editingClusterRuleId !== null && (() => {
+        const r = clusterRules.find((x) => x.id === editingClusterRuleId);
+        if (!r) return null;
+        const cols = inventoryColsForRule(r);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+            onClick={() => setEditingClusterRuleId(null)}
+          >
+            <div
+              className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-4">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  {t("topology.clusterRuleEdit")}
+                </h2>
+                <button
+                  onClick={() => setEditingClusterRuleId(null)}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-4 px-6 py-4">
+                <div className="space-y-1">
+                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolName")}</label>
+                  <input
+                    type="text"
+                    value={r.name}
+                    onChange={(e) => updateClusterRule(r.id, { name: e.target.value })}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolCategory")}</label>
+                    <select
+                      value={r.inventoryCategoryId ?? ""}
+                      onChange={(e) => updateClusterRule(r.id, {
+                        inventoryCategoryId: e.target.value ? Number(e.target.value) : null,
+                        inventoryCategoryName: e.target.value
+                          ? (inventoryCategories.find((c) => c.id === Number(e.target.value))?.name ?? null)
+                          : null,
+                        groupByColumn: "",
+                      })}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                    >
+                      <option value="">—</option>
+                      {inventoryCategories.filter((c) => c.id !== null).map((c) => (
+                        <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterRuleGroupByColumn")}</label>
+                    <select
+                      value={r.groupByColumn}
+                      onChange={(e) => updateClusterRule(r.id, { groupByColumn: e.target.value })}
+                      disabled={cols.length === 0}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
+                    >
+                      <option value="">—</option>
+                      {cols.map((col) => <option key={col} value={col}>{col}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {t("topology.clusterRuleHint")}
+                </p>
+
+                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                  <h3 className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    {t("topology.clusterStyleTitle")}
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="space-y-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterShape")}</label>
+                      <select
+                        value={r.clusterStyle.shape ?? "rectangle"}
+                        onChange={(e) => updateClusterRule(r.id, { clusterStyle: { shape: e.target.value as ClusterStyle["shape"] } })}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
+                      >
+                        {CLUSTER_SHAPES.map((o) => (
+                          <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterBorderColor")}</label>
+                      <input
+                        type="color"
+                        value={r.clusterStyle.borderColor ?? "#ef4444"}
+                        onChange={(e) => updateClusterRule(r.id, { clusterStyle: { borderColor: e.target.value, fillColor: e.target.value, labelColor: e.target.value } })}
+                        className="h-7 w-full rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0.5"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterPadding")}</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={r.clusterStyle.padding ?? 5}
+                        onChange={(e) => updateClusterRule(r.id, { clusterStyle: { padding: Number(e.target.value) } })}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.clusterLabelPosition")}</label>
+                      <select
+                        value={r.clusterStyle.labelPosition ?? "none"}
+                        onChange={(e) => updateClusterRule(r.id, { clusterStyle: { labelPosition: e.target.value as ClusterStyle["labelPosition"] } })}
+                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1.5 text-xs"
+                      >
+                        {CLUSTER_LABEL_POSITIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {editingProtocolId !== null && (() => {
         const p = protocols.find((x) => x.id === editingProtocolId);
         if (!p) return null;
@@ -2119,6 +2462,48 @@ export default function TopologyConfigurePage() {
                       ))}
                     </select>
                   </div>
+                  {p.mapping.nodeMatchField === "inventory" && (() => {
+                    const matchCatId = p.mapping.nodeMatchInventoryCategoryId ?? null;
+                    const matchCatName = matchCatId
+                      ? (inventoryCategories.find((c) => c.id === matchCatId)?.name ?? null)
+                      : null;
+                    const matchCols = matchCatName
+                      ? (inventoryCategories.find((c) => c.name === matchCatName)?.columns ?? [])
+                      : [];
+                    return (
+                      <>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolMatchInventoryCategory")}</label>
+                          <select
+                            value={p.mapping.nodeMatchInventoryCategoryId ?? ""}
+                            onChange={(e) => updateProtocol(p.id, {
+                              mapping: {
+                                nodeMatchInventoryCategoryId: e.target.value ? Number(e.target.value) : null,
+                              } as ProtocolMapping,
+                            })}
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                          >
+                            <option value="">—</option>
+                            {inventoryCategories.filter((c) => c.id !== null).map((c) => (
+                              <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolMatchInventoryColumn")}</label>
+                          <select
+                            value={p.mapping.nodeMatchInventoryColumn ?? ""}
+                            onChange={(e) => updateProtocol(p.id, { mapping: { nodeMatchInventoryColumn: e.target.value } as ProtocolMapping })}
+                            disabled={matchCols.length === 0}
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
+                          >
+                            <option value="">—</option>
+                            {matchCols.map((col) => <option key={col} value={col}>{col}</option>)}
+                          </select>
+                        </div>
+                      </>
+                    );
+                  })()}
                   <div className="space-y-1">
                     <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolLocalPortColumn")}</label>
                     <select
@@ -2162,6 +2547,69 @@ export default function TopologyConfigurePage() {
                     </div>
                   )}
                 </div>
+
+                {p.type !== "isis" && (() => {
+                  const aggCatId = p.mapping.aggregationCategoryId ?? null;
+                  const aggCatName = aggCatId
+                    ? (inventoryCategories.find((c) => c.id === aggCatId)?.name ?? null)
+                    : p.inventoryCategoryName;
+                  const aggCols = aggCatName
+                    ? (inventoryCategories.find((c) => c.name === aggCatName)?.columns ?? [])
+                    : [];
+                  return (
+                    <div className="rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-500/5 p-3 space-y-3">
+                      <h4 className="text-xs font-semibold text-indigo-800 dark:text-indigo-300">
+                        {t("topology.protocolAggregationTitle")}
+                      </h4>
+                      <p className="text-[11px] text-indigo-700 dark:text-indigo-400">
+                        {t("topology.protocolAggregationHintNew")}
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="space-y-1">
+                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationCategory")}</label>
+                          <select
+                            value={p.mapping.aggregationCategoryId ?? ""}
+                            onChange={(e) => updateProtocol(p.id, {
+                              mapping: {
+                                aggregationCategoryId: e.target.value ? Number(e.target.value) : null,
+                              } as ProtocolMapping,
+                            })}
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                          >
+                            <option value="">{t("topology.protocolAggregationCategoryReuse")}</option>
+                            {inventoryCategories.filter((c) => c.id !== null).map((c) => (
+                              <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationKeyColumn")}</label>
+                          <select
+                            value={p.mapping.aggregationKeyColumn ?? ""}
+                            onChange={(e) => updateProtocol(p.id, { mapping: { aggregationKeyColumn: e.target.value } as ProtocolMapping })}
+                            disabled={cols.length === 0}
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
+                          >
+                            <option value="">{t("topology.protocolAggregationKeyDefault")}</option>
+                            {cols.map((col) => <option key={col} value={col}>{col}</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationValueColumn")}</label>
+                          <select
+                            value={p.mapping.aggregationValueColumn ?? ""}
+                            onChange={(e) => updateProtocol(p.id, { mapping: { aggregationValueColumn: e.target.value } as ProtocolMapping })}
+                            disabled={aggCols.length === 0}
+                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
+                          >
+                            <option value="">—</option>
+                            {aggCols.map((col) => <option key={col} value={col}>{col}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {p.type === "isis" && (
                   <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 p-3 space-y-3">

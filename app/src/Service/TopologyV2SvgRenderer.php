@@ -9,6 +9,7 @@ use App\Entity\TopologyCluster;
 use App\Entity\TopologyClusterMember;
 use App\Entity\TopologyEdge;
 use App\Entity\TopologyNode;
+use App\Entity\TopologyProtocol;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -107,6 +108,31 @@ class TopologyV2SvgRenderer
             }
         }
 
+        // Index ISIS area colours from clusters: areaName => borderColor. A cluster
+        // is treated as an ISIS area when it belongs to a protocol of type ISIS.
+        // Mirrors the React `isisAreaColors` memo so the PDF render colours edges
+        // the same way the map does.
+        $isisAreaColors = [];
+        $allClusters = $this->em->getRepository(TopologyCluster::class)->findBy(['topology' => $topology]);
+        foreach ($allClusters as $c) {
+            $proto = $c->getProtocol();
+            if ($proto === null || $proto->getType() !== TopologyProtocol::TYPE_ISIS) continue;
+            $col = $c->getStyle()['borderColor'] ?? null;
+            if ($col) $isisAreaColors[$c->getName()] = $col;
+        }
+        $isisProtocolIds = [];
+        foreach ($this->em->getRepository(TopologyProtocol::class)->findBy(['topology' => $topology]) as $p) {
+            if ($p->getType() === TopologyProtocol::TYPE_ISIS) $isisProtocolIds[$p->getId()] = true;
+        }
+
+        // Aggregation groups: edges sharing the same (pair, aggregationGroup) are
+        // wrapped in an oblong capsule, exactly like the live map when
+        // mapOptions.aggregateParallelLinks is on.
+        $mapOptions = $topology->getMapOptions() ?? [];
+        $aggregationGroups = ($mapOptions['aggregateParallelLinks'] ?? false)
+            ? $this->computeAggregationGroups($visibleEdges)
+            : [];
+
         // ViewBox: either provided (user-picked zone) or auto-fit
         if ($viewportFrame !== null) {
             $minX = (float)$viewportFrame['x'];
@@ -155,10 +181,23 @@ class TopologyV2SvgRenderer
             $out .= $this->renderCluster($c, $nodeInfo, $clusters, $ox, $oy);
         }
 
-        // Edges
+        // Aggregation capsules (under the edges, like in the React renderer)
         $edgeOffsets = $this->computeEdgeOffsets($visibleEdges);
+        foreach ($aggregationGroups as $g) {
+            $out .= $this->renderAggregationCapsule($g, $nodeInfo, $edgeOffsets, $mapOptions, $ox, $oy);
+        }
+
+        // Edges
         foreach ($visibleEdges as $e) {
-            $out .= $this->renderEdge($e, $nodeInfo, $edgeOffsets[$e->getId()] ?? 0, $ox, $oy);
+            $eStyle = $e->getStyle() ?? [];
+            $areaColors = [];
+            $pid = $e->getProtocol()?->getId();
+            if ($pid !== null && isset($isisProtocolIds[$pid]) && !empty($eStyle['isisAreas'])) {
+                foreach ($eStyle['isisAreas'] as $area) {
+                    if (isset($isisAreaColors[$area])) $areaColors[] = $isisAreaColors[$area];
+                }
+            }
+            $out .= $this->renderEdge($e, $nodeInfo, $edgeOffsets[$e->getId()] ?? 0, $ox, $oy, $areaColors);
         }
 
         // Nodes
@@ -207,14 +246,32 @@ class TopologyV2SvgRenderer
             case 'ellipse':
                 $svg .= '<ellipse cx="0" cy="0" rx="' . $this->fmt($w / 2) . '" ry="' . $this->fmt($h / 2) . '" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
                 break;
+            case 'hexagon': {
+                $r = $w / 2;
+                $pts = [];
+                for ($i = 0; $i < 6; $i++) {
+                    $a = (M_PI / 3) * $i - M_PI / 6;
+                    $pts[] = $this->fmt($r * cos($a)) . ',' . $this->fmt($r * sin($a));
+                }
+                $svg .= '<polygon points="' . implode(' ', $pts) . '" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
+                break;
+            }
+            case 'triangle':
+                $svg .= '<polygon points="0,' . $this->fmt(-$h / 2) . ' ' . $this->fmt($w / 2) . ',' . $this->fmt($h / 2) . ' ' . $this->fmt(-$w / 2) . ',' . $this->fmt($h / 2) . '" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
+                break;
             case 'round-rectangle':
             default:
                 $svg .= '<rect x="' . $this->fmt(-$w / 2) . '" y="' . $this->fmt(-$h / 2) . '" width="' . $this->fmt($w) . '" height="' . $this->fmt($h) . '" rx="8" ry="8" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
         }
 
-        // Labels
+        // Labels (plain fields + compliance/monitoring badges)
         foreach ($d['labelElements'] ?? [] as $el) {
-            $text = $this->resolveFieldValue($el['field'] ?? '', $ni);
+            $field = (string)($el['field'] ?? '');
+            if ($field === 'badge:compliance' || $field === 'badge:monitoring') {
+                $svg .= $this->renderBadge($el, $ni, $field === 'badge:compliance');
+                continue;
+            }
+            $text = $this->resolveFieldValue($field, $ni);
             if ($text === '' || $text === null) continue;
             $tx = (float)($el['x'] ?? 0);
             $ty = (float)($el['y'] ?? 0);
@@ -227,6 +284,41 @@ class TopologyV2SvgRenderer
         }
 
         $svg .= '</g>';
+        return $svg;
+    }
+
+    /**
+     * Render a compliance or monitoring badge: a coloured circle with an
+     * optional letter (compliance grade) inside. Auto-colours follow the same
+     * rules as the React `renderLabel` function.
+     */
+    private function renderBadge(array $el, array $ni, bool $isCompliance): string
+    {
+        $diameter = (float)($el['badgeSize'] ?? $el['fontSize'] ?? 12);
+        $r = $diameter / 2;
+        $node = $ni['node'];
+        $autoColor = '#94a3b8';
+        $letter = '';
+        if ($isCompliance) {
+            $score = $node->getComplianceScore();
+            $palette = ['A' => '#22c55e', 'B' => '#84cc16', 'C' => '#eab308', 'D' => '#f97316', 'E' => '#ef4444', 'F' => '#7f1d1d'];
+            if ($score && isset($palette[$score])) $autoColor = $palette[$score];
+            if (($el['badgeShowLabel'] ?? true) !== false && $score) $letter = $score;
+        } else {
+            $reach = $node->getIsReachable();
+            if ($reach === true) $autoColor = '#22c55e';
+            elseif ($reach === false) $autoColor = '#ef4444';
+        }
+        $fill = $el['badgeBgColor'] ?? $autoColor;
+        $borderCol = $el['badgeBorderColor'] ?? '#ffffff';
+        $borderW = (float)($el['badgeBorderWidth'] ?? 2);
+        $cx = (float)($el['x'] ?? 0);
+        $cy = (float)($el['y'] ?? 0);
+        $svg = '<circle cx="' . $this->fmt($cx) . '" cy="' . $this->fmt($cy) . '" r="' . $this->fmt($r) . '" fill="' . $fill . '" stroke="' . $borderCol . '" stroke-width="' . $this->fmt($borderW) . '"/>';
+        if ($letter !== '') {
+            $textCol = $el['color'] ?? '#ffffff';
+            $svg .= '<text x="' . $this->fmt($cx) . '" y="' . $this->fmt($cy) . '" text-anchor="middle" dominant-baseline="central" fill="' . $textCol . '" font-size="' . $this->fmt($r * 1.2) . '" font-weight="700">' . htmlspecialchars($letter) . '</text>';
+        }
         return $svg;
     }
 
@@ -275,7 +367,133 @@ class TopologyV2SvgRenderer
         return $offsets;
     }
 
-    private function renderEdge(TopologyEdge $e, array $nodeInfo, float $offsetIndex, float $ox, float $oy): string
+    /**
+     * Build the aggregation groups list (mirror of TopologyMap.tsx). Edges
+     * sharing the same node pair AND the same `style.aggregationGroup` are
+     * collected; the resulting capsule label uses the explicit
+     * `style.aggregationLabel` of any member, or falls back to the group key.
+     *
+     * @param TopologyEdge[] $edges
+     * @return list<array{key:string, sourceNodeId:int, targetNodeId:int, members: TopologyEdge[], label:string}>
+     */
+    private function computeAggregationGroups(array $edges): array
+    {
+        $byAgg = [];
+        foreach ($edges as $e) {
+            $g = trim((string)(($e->getStyle()['aggregationGroup'] ?? '')));
+            if ($g === '') continue;
+            $sId = $e->getSourceNode()->getId();
+            $tId = $e->getTargetNode()->getId();
+            $pair = ($sId < $tId) ? "$sId|$tId" : "$tId|$sId";
+            $k = "$pair|$g";
+            $byAgg[$k][] = $e;
+        }
+        $groups = [];
+        foreach ($byAgg as $k => $members) {
+            if (count($members) < 2) continue;
+            usort($members, fn(TopologyEdge $a, TopologyEdge $b) => $a->getId() <=> $b->getId());
+            $first = $members[0];
+            $explicit = null;
+            foreach ($members as $m) {
+                $lbl = trim((string)(($m->getStyle()['aggregationLabel'] ?? '')));
+                if ($lbl !== '') { $explicit = $lbl; break; }
+            }
+            $groups[] = [
+                'key' => $k,
+                'sourceNodeId' => $first->getSourceNode()->getId(),
+                'targetNodeId' => $first->getTargetNode()->getId(),
+                'members' => $members,
+                'label' => $explicit ?? trim((string)($first->getStyle()['aggregationGroup'] ?? '')),
+            ];
+        }
+        return $groups;
+    }
+
+    /**
+     * Render the oblong capsule that wraps a parallel-link aggregation group.
+     * Geometry and label placement mirror the React implementation.
+     *
+     * @param array{key:string, sourceNodeId:int, targetNodeId:int, members: TopologyEdge[], label:string} $g
+     * @param array<int,float> $edgeOffsets
+     * @param array<string,mixed> $mapOptions
+     */
+    private function renderAggregationCapsule(array $g, array $nodeInfo, array $edgeOffsets, array $mapOptions, float $ox, float $oy): string
+    {
+        $sni = $nodeInfo[$g['sourceNodeId']] ?? null;
+        $tni = $nodeInfo[$g['targetNodeId']] ?? null;
+        if (!$sni || !$tni) return '';
+        $sx = $sni['pos']['x'] + $ox;
+        $sy = $sni['pos']['y'] + $oy;
+        $tx = $tni['pos']['x'] + $ox;
+        $ty = $tni['pos']['y'] + $oy;
+        $dx = $tx - $sx;
+        $dy = $ty - $sy;
+        $len = sqrt($dx * $dx + $dy * $dy) ?: 1;
+        $px = -$dy / $len;
+        $py = $dx / $len;
+
+        // Midpoint of each member edge accounting for its parallel offset.
+        $midpoints = [];
+        foreach ($g['members'] as $edge) {
+            $offset = $edgeOffsets[$edge->getId()] ?? 0;
+            $style = array_merge(
+                ['type' => 'straight', 'color' => '#94a3b8', 'width' => 1.5, 'dash' => 'solid', 'curveTension' => 0.3],
+                $edge->getStyle() ?? []
+            );
+            $midpoints[] = $this->pointAt($style, $sx, $sy, $tx, $ty, 0.5, (float)$offset);
+        }
+        $cx = 0; $cy = 0;
+        foreach ($midpoints as $p) { $cx += $p['x']; $cy += $p['y']; }
+        $cx /= count($midpoints); $cy /= count($midpoints);
+
+        $maxPerp = 0;
+        foreach ($midpoints as $p) {
+            $perp = abs(($p['x'] - $cx) * $px + ($p['y'] - $cy) * $py);
+            if ($perp > $maxPerp) $maxPerp = $perp;
+        }
+        $halfMinor = max(10.0, $maxPerp + 6.0);
+
+        $labelText = $g['label'];
+        $labelPos = $mapOptions['aggregateLabelPosition'] ?? 'center';
+        $labelInside = $labelPos === 'center';
+        $labelFontSize = (float)($mapOptions['aggregateLabelFontSize'] ?? 6);
+        $labelHalfWidth = $labelText !== '' ? strlen($labelText) * $labelFontSize * 0.32 + 3 : 0;
+        $halfMajor = $labelInside ? max(5.0, $labelHalfWidth) : 5.0;
+        $angle = rad2deg(atan2($dy, $dx));
+        $transparent = (bool)($mapOptions['aggregateTransparent'] ?? false);
+        $fill = $mapOptions['aggregateFillColor'] ?? '#ffffff';
+        $stroke = $mapOptions['aggregateBorderColor'] ?? '#94a3b8';
+        $strokeWidthVal = (float)($mapOptions['aggregateBorderWidth'] ?? 0.5);
+        $labelFill = $mapOptions['aggregateLabelColor'] ?: $stroke;
+
+        $textX = $cx; $textY = $cy;
+        if (!$labelInside && $labelText !== '') {
+            $padding = $halfMinor + 8.0 + $labelFontSize * 0.7;
+            $sign = $labelPos === 'above' ? -1 : 1;
+            $textX = $cx + $sign * $px * $padding;
+            $textY = $cy + $sign * $py * $padding;
+        }
+
+        $svg = '<g>';
+        $fillAttr = $transparent
+            ? 'fill="none" fill-opacity="0"'
+            : 'fill="' . $fill . '" fill-opacity="0.95"';
+        $svg .= '<ellipse cx="' . $this->fmt($cx) . '" cy="' . $this->fmt($cy) . '" rx="' . $this->fmt($halfMajor) . '" ry="' . $this->fmt($halfMinor) . '" ' . $fillAttr . ' stroke="' . $stroke . '" stroke-width="' . $this->fmt($strokeWidthVal) . '" transform="rotate(' . $this->fmt($angle) . ' ' . $this->fmt($cx) . ' ' . $this->fmt($cy) . ')"/>';
+        if ($labelText !== '') {
+            if (!$labelInside) {
+                $svg .= '<rect x="' . $this->fmt($textX - $labelHalfWidth - 1) . '" y="' . $this->fmt($textY - $labelFontSize * 0.7) . '" width="' . $this->fmt($labelHalfWidth * 2 + 2) . '" height="' . $this->fmt($labelFontSize * 1.3) . '" fill="white" fill-opacity="0.95" rx="2"/>';
+            }
+            $svg .= '<text x="' . $this->fmt($textX) . '" y="' . $this->fmt($textY) . '" text-anchor="middle" dominant-baseline="central" fill="' . $labelFill . '" font-size="' . $this->fmt($labelFontSize) . '" font-weight="600">' . htmlspecialchars($labelText) . '</text>';
+        }
+        $svg .= '</g>';
+        return $svg;
+    }
+
+    /**
+     * @param string[] $areaColors  ISIS area colours; 1 = paint stroke with that
+     *                              colour, 2+ = render a zebra-dashed pattern.
+     */
+    private function renderEdge(TopologyEdge $e, array $nodeInfo, float $offsetIndex, float $ox, float $oy, array $areaColors = []): string
     {
         $s = $nodeInfo[$e->getSourceNode()->getId()] ?? null;
         $t = $nodeInfo[$e->getTargetNode()->getId()] ?? null;
@@ -285,6 +503,12 @@ class TopologyV2SvgRenderer
             ['type' => 'straight', 'color' => '#94a3b8', 'width' => 1.5, 'dash' => 'solid', 'curveTension' => 0.3, 'labels' => []],
             $e->getStyle() ?? []
         );
+        // Single area: override the stroke with the area's colour. Multi-area:
+        // keep the base colour for fallbacks (e.g. when zebra fails) — the
+        // overlapping dashed strokes below carry the per-area colours.
+        if (count($areaColors) === 1) {
+            $style['color'] = $areaColors[0];
+        }
         $sx = $s['pos']['x'] + $ox;
         $sy = $s['pos']['y'] + $oy;
         $tx = $t['pos']['x'] + $ox;
@@ -293,9 +517,25 @@ class TopologyV2SvgRenderer
         $path = $this->buildPath($style, $sx, $sy, $tx, $ty, $offsetIndex);
         $dash = $this->dashFor($style['dash'], (float)$style['width']);
 
-        $svg = '<path d="' . $path . '" fill="none" stroke="' . $style['color'] . '" stroke-width="' . $style['width'] . '"';
-        if ($dash) $svg .= ' stroke-dasharray="' . $dash . '"';
-        $svg .= ' stroke-linecap="round" stroke-linejoin="round"/>';
+        if (count($areaColors) >= 2) {
+            // Zebra: N overlapping dashed strokes share the same period
+            // (n × dashLen) but each uses a different dashoffset, so every Nth
+            // dash slot is occupied by exactly one colour — yielding an
+            // interleaved hatched look. Mirror of the React renderEdge.
+            $n = count($areaColors);
+            $w = (float)$style['width'];
+            $dashLen = max($w * 4, 6.0);
+            $da = $this->fmt($dashLen) . ' ' . $this->fmt($dashLen * ($n - 1));
+            $svg = '';
+            foreach ($areaColors as $i => $col) {
+                $offset = -$i * $dashLen;
+                $svg .= '<path d="' . $path . '" fill="none" stroke="' . $col . '" stroke-width="' . $this->fmt($w) . '" stroke-dasharray="' . $da . '" stroke-dashoffset="' . $this->fmt($offset) . '" stroke-linecap="butt" stroke-linejoin="round"/>';
+            }
+        } else {
+            $svg = '<path d="' . $path . '" fill="none" stroke="' . $style['color'] . '" stroke-width="' . $style['width'] . '"';
+            if ($dash) $svg .= ' stroke-dasharray="' . $dash . '"';
+            $svg .= ' stroke-linecap="round" stroke-linejoin="round"/>';
+        }
 
         // Labels (port, cost)
         foreach ($style['labels'] ?? [] as $label) {
@@ -461,6 +701,44 @@ class TopologyV2SvgRenderer
                 $labelCy = $sumY / count($expanded) + $oy;
             }
             $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx + $labelOffset['dx'], $labelCy + $labelOffset['dy'], $fontSize, $style) : '';
+            return $body . $label;
+        }
+
+        if ($shape === 'polygon') {
+            // Tight enclosing polygon: inflate every node's bbox by `pad` first,
+            // then convex-hull the inflated corners. Inflating per-node keeps
+            // padding uniform on all four sides even when nodes are spread far
+            // apart on one axis — expanding from a centroid would collapse the
+            // top/bottom padding for horizontally aligned clusters.
+            $corners = [];
+            foreach ($members as $m) {
+                $w = (float)($m['design']['width'] ?? 100);
+                $h = (float)($m['design']['height'] ?? 40);
+                $hx = $w / 2 + $pad;
+                $hy = $h / 2 + $pad;
+                $cx0 = $m['pos']['x'];
+                $cy0 = $m['pos']['y'];
+                $corners[] = ['x' => $cx0 - $hx, 'y' => $cy0 - $hy];
+                $corners[] = ['x' => $cx0 + $hx, 'y' => $cy0 - $hy];
+                $corners[] = ['x' => $cx0 + $hx, 'y' => $cy0 + $hy];
+                $corners[] = ['x' => $cx0 - $hx, 'y' => $cy0 + $hy];
+            }
+            $expanded = $this->convexHull($corners);
+            $pts = [];
+            $minX = PHP_INT_MAX; $minY = PHP_INT_MAX; $maxX = PHP_INT_MIN; $maxY = PHP_INT_MIN;
+            foreach ($expanded as $p) {
+                $px = $p['x'] + $ox;
+                $py = $p['y'] + $oy;
+                $pts[] = $this->fmt($px) . ',' . $this->fmt($py);
+                if ($px < $minX) $minX = $px;
+                if ($px > $maxX) $maxX = $px;
+                if ($py < $minY) $minY = $py;
+                if ($py > $maxY) $maxY = $py;
+            }
+            $body = '<polygon points="' . implode(' ', $pts) . '" ' . $fillProps . ' stroke="' . $style['borderColor'] . '" stroke-width="' . $style['borderWidth'] . '"' . ($dash ? ' stroke-dasharray="' . $dash . '"' : '') . ' stroke-linejoin="round"/>';
+            $labelCx = $minX + 12;
+            $labelCy = $style['labelPosition'] === 'top' ? $minY - $fontSize * 0.4 - 2 : $maxY + $fontSize + 2;
+            $label = $labelText !== '' ? $this->renderClusterLabel($labelText, $labelCx + $labelOffset['dx'], $labelCy + $labelOffset['dy'], $fontSize, $style, false) : '';
             return $body . $label;
         }
 

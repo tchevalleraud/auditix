@@ -4,6 +4,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalDistributeCenter,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalDistributeCenter,
   BringToFront,
   ChevronDown,
   ChevronUp,
@@ -56,6 +64,10 @@ interface GraphEdgeStyle {
   labels?: GraphEdgeLabel[];
   aggregationGroup?: string;
   aggregationLabel?: string;
+  // ISIS protocol only: areas the link belongs to (one entry per area).
+  // When 1 area, the edge is drawn in that area's color; when 2+ areas, the
+  // edge is rendered as a zebra-dashed pattern alternating between colors.
+  isisAreas?: string[];
 }
 
 interface GraphEdge {
@@ -73,7 +85,13 @@ interface GraphProtocol {
 }
 
 interface GraphClusterStyle {
-  shape?: "rectangle" | "hull";
+  // - rectangle: axis-aligned bounding box with rounded corners
+  // - polygon:   convex hull of every node's bbox corners — looks like a
+  //              rectangle when nodes line up, gains diagonal edges when they
+  //              don't, so the outline always hugs the actual nodes
+  // - hull:      smooth rounded hull passing through the node centres (used
+  //              for ISIS area zones)
+  shape?: "rectangle" | "polygon" | "hull";
   borderColor: string;
   borderWidth: number;
   dash: "solid" | "dashed" | "dotted";
@@ -223,6 +241,11 @@ export default function TopologyMap({ topologyId }: Props) {
   const [allTopologies, setAllTopologies] = useState<TopologySummary[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+  // selectedNodeIds carries the full multi-selection. selectedNodeId remains the
+  // "primary" (last-clicked) — that's what the design panel binds to and what
+  // single-node operations target. Keeping both lets us add multi-select on top
+  // of the existing single-selection flows without rewriting them.
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<number>>(new Set());
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
   // "manual" = manual only, otherwise specific protocol id. "All" was removed because
@@ -242,7 +265,10 @@ export default function TopologyMap({ topologyId }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const draggingNodeId = useRef<number | null>(null);
-  const dragStart = useRef<{ x: number; y: number; nx: number; ny: number } | null>(null);
+  // groupStarts: snapshot of every selected node's start position so group drag
+  // moves them by an absolute delta from t=0 rather than accumulating per-frame
+  // (which would cause the passive nodes to drift exponentially).
+  const dragStart = useRef<{ x: number; y: number; nx: number; ny: number; groupStarts: Record<number, { x: number; y: number }> } | null>(null);
   const dragMoved = useRef(false);
   const panStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -365,8 +391,36 @@ export default function TopologyMap({ topologyId }: Props) {
     const p = toSVGPoint(e.clientX, e.clientY);
     const pos = positions[nodeId];
     if (!pos) return;
+    // Shift+click toggles membership in the multi-selection without starting a
+    // drag. Plain click on an unselected node resets the selection to that one
+    // node; click on an already-selected node keeps the existing set so the
+    // drag can move the whole group.
+    if (e.shiftKey) {
+      setSelectedNodeIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(nodeId)) next.delete(nodeId);
+        else next.add(nodeId);
+        return next;
+      });
+      setSelectedNodeId(nodeId);
+      setSelectedEdgeId(null);
+      setSelectedAnnotationId(null);
+      return;
+    }
+    let groupIds: Set<number>;
+    if (!selectedNodeIds.has(nodeId)) {
+      groupIds = new Set([nodeId]);
+      setSelectedNodeIds(groupIds);
+    } else {
+      groupIds = selectedNodeIds;
+    }
+    const groupStarts: Record<number, { x: number; y: number }> = {};
+    for (const id of groupIds) {
+      const gp = positions[id];
+      if (gp) groupStarts[id] = { x: gp.x, y: gp.y };
+    }
     draggingNodeId.current = nodeId;
-    dragStart.current = { x: p.x, y: p.y, nx: pos.x, ny: pos.y };
+    dragStart.current = { x: p.x, y: p.y, nx: pos.x, ny: pos.y, groupStarts };
     dragMoved.current = false;
   };
 
@@ -390,6 +444,7 @@ export default function TopologyMap({ topologyId }: Props) {
     panStart.current = { x: p.x, y: p.y, px: pan.x, py: pan.y };
     // clicking the empty background clears any selection
     setSelectedNodeId(null);
+    setSelectedNodeIds(new Set());
     setSelectedEdgeId(null);
     setSelectedAnnotationId(null);
   };
@@ -430,9 +485,32 @@ export default function TopologyMap({ topologyId }: Props) {
       const dx = (p.x - dragStart.current.x) / zoom;
       const dy = (p.y - dragStart.current.y) / zoom;
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragMoved.current = true;
+      const draggedId = draggingNodeId.current as number;
       const nx = Math.round(dragStart.current.nx + dx);
       const ny = Math.round(dragStart.current.ny + dy);
-      setPositions((prev) => ({ ...prev, [draggingNodeId.current as number]: { x: nx, y: ny } }));
+      // Group drag: when the dragged node belongs to a multi-selection, every
+      // other selected node moves by the same absolute delta from its starting
+      // position (snapshot in dragStart.groupStarts). Computing the delta from
+      // the frozen snapshot — not from the live state — avoids any per-frame
+      // drift on the passive nodes.
+      setPositions((prev) => {
+        const starts = dragStart.current!.groupStarts;
+        const ids = Object.keys(starts);
+        if (ids.length <= 1) {
+          return { ...prev, [draggedId]: { x: nx, y: ny } };
+        }
+        const rdx = nx - dragStart.current!.nx;
+        const rdy = ny - dragStart.current!.ny;
+        const next: Record<number, { x: number; y: number }> = { ...prev };
+        for (const idStr of ids) {
+          const id = Number(idStr);
+          const startPos = starts[id];
+          next[id] = id === draggedId
+            ? { x: nx, y: ny }
+            : { x: Math.round(startPos.x + rdx), y: Math.round(startPos.y + rdy) };
+        }
+        return next;
+      });
       return;
     }
     if (draggingClusterLabelId.current !== null && clusterLabelDragStart.current) {
@@ -502,6 +580,7 @@ export default function TopologyMap({ topologyId }: Props) {
       dragStart.current = null;
       if (wasClick) {
         setSelectedNodeId(clickedNodeId);
+        setSelectedNodeIds(new Set([clickedNodeId]));
         setSelectedEdgeId(null);
       } else {
         scheduleSave(positions);
@@ -597,6 +676,87 @@ export default function TopologyMap({ topologyId }: Props) {
     if (n === 0) return null;
     return { x: sx / n, y: sy / n };
   }, [data, positions]);
+
+  /**
+   * Apply a layout operation to the currently selected nodes and persist the
+   * result. The op receives every selected node's current rect (incl. width /
+   * height from its effective design) and must return the patched position.
+   * Alignments work on 2+ nodes; distributions need 3+ to be meaningful.
+   */
+  const applyLayoutOp = useCallback((
+    op: (rects: { id: number; x: number; y: number; w: number; h: number }[]) => Record<number, { x: number; y: number }>,
+  ) => {
+    if (!data) return;
+    const rects = Array.from(selectedNodeIds)
+      .map((id) => {
+        const pos = positions[id];
+        const node = data.nodes.find((n) => n.nodeId === id);
+        if (!pos || !node) return null;
+        const d = getDesign(node);
+        return { id, x: pos.x, y: pos.y, w: d.width, h: d.height };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
+    if (rects.length < 2) return;
+    const patch = op(rects);
+    setPositions((prev) => {
+      const next = { ...prev };
+      for (const [idStr, p] of Object.entries(patch)) next[Number(idStr)] = p;
+      scheduleSave(next);
+      return next;
+    });
+  }, [data, selectedNodeIds, positions, getDesign, scheduleSave]);
+
+  const alignLeft = useCallback(() => applyLayoutOp((rects) => {
+    const minLeft = Math.min(...rects.map((r) => r.x - r.w / 2));
+    return Object.fromEntries(rects.map((r) => [r.id, { x: Math.round(minLeft + r.w / 2), y: r.y }]));
+  }), [applyLayoutOp]);
+
+  const alignRight = useCallback(() => applyLayoutOp((rects) => {
+    const maxRight = Math.max(...rects.map((r) => r.x + r.w / 2));
+    return Object.fromEntries(rects.map((r) => [r.id, { x: Math.round(maxRight - r.w / 2), y: r.y }]));
+  }), [applyLayoutOp]);
+
+  const alignTop = useCallback(() => applyLayoutOp((rects) => {
+    const minTop = Math.min(...rects.map((r) => r.y - r.h / 2));
+    return Object.fromEntries(rects.map((r) => [r.id, { x: r.x, y: Math.round(minTop + r.h / 2) }]));
+  }), [applyLayoutOp]);
+
+  const alignBottom = useCallback(() => applyLayoutOp((rects) => {
+    const maxBottom = Math.max(...rects.map((r) => r.y + r.h / 2));
+    return Object.fromEntries(rects.map((r) => [r.id, { x: r.x, y: Math.round(maxBottom - r.h / 2) }]));
+  }), [applyLayoutOp]);
+
+  // Centre on a vertical axis = same X for everyone (= align centres horizontally)
+  const alignCenterX = useCallback(() => applyLayoutOp((rects) => {
+    const cx = rects.reduce((s, r) => s + r.x, 0) / rects.length;
+    return Object.fromEntries(rects.map((r) => [r.id, { x: Math.round(cx), y: r.y }]));
+  }), [applyLayoutOp]);
+
+  // Centre on a horizontal axis = same Y for everyone (= align centres vertically)
+  const alignCenterY = useCallback(() => applyLayoutOp((rects) => {
+    const cy = rects.reduce((s, r) => s + r.y, 0) / rects.length;
+    return Object.fromEntries(rects.map((r) => [r.id, { x: r.x, y: Math.round(cy) }]));
+  }), [applyLayoutOp]);
+
+  // Distribute centres: extremes stay put, intermediates land on a uniform grid.
+  // Needs 3+ nodes — 2 nodes are by definition already evenly distributed.
+  const distributeH = useCallback(() => applyLayoutOp((rects) => {
+    if (rects.length < 3) return {};
+    const sorted = [...rects].sort((a, b) => a.x - b.x);
+    const minX = sorted[0].x;
+    const maxX = sorted[sorted.length - 1].x;
+    const step = (maxX - minX) / (sorted.length - 1);
+    return Object.fromEntries(sorted.map((r, i) => [r.id, { x: Math.round(minX + step * i), y: r.y }]));
+  }), [applyLayoutOp]);
+
+  const distributeV = useCallback(() => applyLayoutOp((rects) => {
+    if (rects.length < 3) return {};
+    const sorted = [...rects].sort((a, b) => a.y - b.y);
+    const minY = sorted[0].y;
+    const maxY = sorted[sorted.length - 1].y;
+    const step = (maxY - minY) / (sorted.length - 1);
+    return Object.fromEntries(sorted.map((r, i) => [r.id, { x: r.x, y: Math.round(minY + step * i) }]));
+  }), [applyLayoutOp]);
 
   const selectedNode = data && selectedNodeId !== null ? data.nodes.find((n) => n.nodeId === selectedNodeId) ?? null : null;
   const selectedEdge = data && selectedEdgeId !== null ? data.edges.find((e) => e.id === selectedEdgeId) ?? null : null;
@@ -723,6 +883,8 @@ export default function TopologyMap({ topologyId }: Props) {
       byAgg.set(k, arr);
     }
     for (const [k, members] of byAgg.entries()) {
+      // A single link is not an aggregation; no capsule needed.
+      if (members.length < 2) continue;
       members.sort((a, b) => a.id - b.id);
       const first = members[0];
       const labelEdge = members.find((m) => m.style.aggregationLabel?.trim());
@@ -737,6 +899,29 @@ export default function TopologyMap({ topologyId }: Props) {
 
     return { edgeOffsets: offsets, aggregationGroups: aggGroups };
   }, [visibleEdges]);
+
+  // For ISIS protocols: map of areaName -> border color, derived from the
+  // matching protocol's clusters (one cluster per area). Used by renderEdge
+  // to color edges with their area's colour, and to render multi-area edges
+  // as a zebra-dashed pattern of N stacked lines.
+  const isisAreaColors = useMemo<Map<string, string>>(() => {
+    const m = new Map<string, string>();
+    if (!data) return m;
+    const isisProtocolIds = new Set(
+      data.protocols.filter((p) => p.type === "isis").map((p) => p.id),
+    );
+    for (const c of data.clusters) {
+      if (c.protocolId == null || !isisProtocolIds.has(c.protocolId)) continue;
+      const color = c.style?.borderColor;
+      if (color) m.set(c.name, color);
+    }
+    return m;
+  }, [data]);
+
+  const isisProtocolIdSet = useMemo<Set<number>>(() => {
+    if (!data) return new Set();
+    return new Set(data.protocols.filter((p) => p.type === "isis").map((p) => p.id));
+  }, [data]);
 
   const renderShape = (d: NodeDesign) => {
     const w = d.width, h = d.height;
@@ -935,6 +1120,50 @@ export default function TopologyMap({ topologyId }: Props) {
       </div>
 
       <div ref={containerRef} className="flex-1 relative overflow-hidden bg-slate-50 dark:bg-slate-950">
+        {selectedNodeIds.size >= 2 && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg px-1.5 py-1">
+            <span className="px-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              {selectedNodeIds.size} {t("topology.nodesLabel")}
+            </span>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            <button onClick={alignLeft} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignLeft")}>
+              <AlignStartVertical className="h-4 w-4" />
+            </button>
+            <button onClick={alignCenterX} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignCenterX")}>
+              <AlignCenterVertical className="h-4 w-4" />
+            </button>
+            <button onClick={alignRight} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignRight")}>
+              <AlignEndVertical className="h-4 w-4" />
+            </button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            <button onClick={alignTop} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignTop")}>
+              <AlignStartHorizontal className="h-4 w-4" />
+            </button>
+            <button onClick={alignCenterY} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignCenterY")}>
+              <AlignCenterHorizontal className="h-4 w-4" />
+            </button>
+            <button onClick={alignBottom} className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800" title={t("topology.alignBottom")}>
+              <AlignEndHorizontal className="h-4 w-4" />
+            </button>
+            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+            <button
+              onClick={distributeH}
+              disabled={selectedNodeIds.size < 3}
+              className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+              title={t("topology.distributeH")}
+            >
+              <AlignHorizontalDistributeCenter className="h-4 w-4" />
+            </button>
+            <button
+              onClick={distributeV}
+              disabled={selectedNodeIds.size < 3}
+              className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30 disabled:cursor-not-allowed"
+              title={t("topology.distributeV")}
+            >
+              <AlignVerticalDistributeCenter className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <svg
           ref={svgRef}
           className="absolute inset-0 w-full h-full"
@@ -1077,21 +1306,30 @@ export default function TopologyMap({ topologyId }: Props) {
                 </g>
               );
             })}
-            {visibleEdges.map((edge) => renderEdge(
-              edge,
-              positions,
-              getDesign,
-              data.nodes,
-              edgeOffsets.get(edge.id) ?? 0,
-              selectedEdgeId === edge.id,
-              (id) => { setSelectedEdgeId(id); setSelectedNodeId(null); },
-            ))}
+            {visibleEdges.map((edge) => {
+              const areas = edge.protocolId != null && isisProtocolIdSet.has(edge.protocolId)
+                ? edge.style.isisAreas ?? []
+                : [];
+              const areaColors = areas
+                .map((a) => isisAreaColors.get(a))
+                .filter((c): c is string => !!c);
+              return renderEdge(
+                edge,
+                positions,
+                getDesign,
+                data.nodes,
+                edgeOffsets.get(edge.id) ?? 0,
+                selectedEdgeId === edge.id,
+                (id) => { setSelectedEdgeId(id); setSelectedNodeId(null); },
+                areaColors,
+              );
+            })}
             {data.nodes.map((n) => {
               const pos = positions[n.nodeId];
               if (!pos) return null;
               const d = getDesign(n);
               const labels = d.labelElements ?? [];
-              const isSelected = selectedNodeId === n.nodeId;
+              const isSelected = selectedNodeIds.has(n.nodeId) || selectedNodeId === n.nodeId;
               return (
                 <g
                   key={n.nodeId}
@@ -2139,14 +2377,20 @@ function renderEdge(
   offsetIndex: number,
   isSelected: boolean,
   onSelect: (edgeId: number) => void,
+  areaColors: string[] = [],
 ): React.ReactNode {
   const sp = positions[edge.sourceNodeId];
   const tp = positions[edge.targetNodeId];
   if (!sp || !tp) return null;
   // Defensive defaults: an old edge in DB may be missing fields if it was created before backend merge fix
+  const baseColor = edge.style.color ?? "#94a3b8";
+  // Single area: paint the edge with the area colour. Multi-area: keep the
+  // base colour for fallbacks (selection halo, etc.) — the zebra strokes
+  // below carry the real per-area colours.
+  const strokeColor = areaColors.length === 1 ? areaColors[0] : baseColor;
   const style: GraphEdgeStyle = {
     type: edge.style.type ?? "straight",
-    color: edge.style.color ?? "#94a3b8",
+    color: strokeColor,
     width: edge.style.width ?? 1.5,
     dash: edge.style.dash ?? "solid",
     curveTension: edge.style.curveTension ?? 0.3,
@@ -2154,6 +2398,16 @@ function renderEdge(
   };
   const path = buildPath(style, sp.x, sp.y, tp.x, tp.y, offsetIndex);
   const dashArray = dashArrayFor(style);
+  // Zebra dash for multi-area ISIS links: N overlapping dashed strokes share
+  // the same period (n × dashLen) but each uses a different dashoffset, so
+  // every Nth dash slot is filled by exactly one colour — yielding an
+  // interleaved hatched look. dashLen is in SVG units (the parent <g> handles
+  // zoom), tuned to match the visual density of the legacy renderer.
+  const isZebra = areaColors.length >= 2;
+  const zebraDashLen = Math.max(style.width * 4, 6);
+  const zebraDashArray = isZebra
+    ? `${zebraDashLen} ${zebraDashLen * (areaColors.length - 1)}`
+    : undefined;
 
   const sourceBox = nodeBoxFor(edge.sourceNodeId, positions, nodes, getDesign);
   const targetBox = nodeBoxFor(edge.targetNodeId, positions, nodes, getDesign);
@@ -2235,16 +2489,33 @@ function renderEdge(
           style={{ pointerEvents: "none" }}
         />
       )}
-      <path
-        d={path}
-        fill="none"
-        stroke={style.color}
-        strokeWidth={style.width}
-        strokeDasharray={dashArray}
-        strokeLinejoin="round"
-        strokeLinecap="round"
-        style={{ pointerEvents: "none" }}
-      />
+      {isZebra ? (
+        areaColors.map((color, i) => (
+          <path
+            key={`zebra-${i}`}
+            d={path}
+            fill="none"
+            stroke={color}
+            strokeWidth={style.width}
+            strokeDasharray={zebraDashArray}
+            strokeDashoffset={-i * zebraDashLen}
+            strokeLinejoin="round"
+            strokeLinecap="butt"
+            style={{ pointerEvents: "none" }}
+          />
+        ))
+      ) : (
+        <path
+          d={path}
+          fill="none"
+          stroke={style.color}
+          strokeWidth={style.width}
+          strokeDasharray={dashArray}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          style={{ pointerEvents: "none" }}
+        />
+      )}
       {labels}
     </g>
   );
@@ -2418,7 +2689,47 @@ function renderCluster(
   let pathOrShape: React.ReactNode;
   let labelCx = centerX, labelCy = centerY;
 
-  if (shape === "hull") {
+  if (shape === "polygon") {
+    // Tight enclosing polygon: enlarge each node's bbox by `pad` in every
+    // direction first, then convex-hull every corner. Inflating per-node
+    // (instead of expanding the hull from its centroid) keeps the padding
+    // uniform on all four sides even when nodes are spread far apart on one
+    // axis — otherwise top/bottom padding collapses for horizontally aligned
+    // clusters. Result: straight edges, rectangle when nodes line up,
+    // diagonal sides when they don't.
+    const corners: { x: number; y: number }[] = [];
+    for (const m of memberPositions) {
+      const hx = m.w / 2 + pad;
+      const hy = m.h / 2 + pad;
+      corners.push({ x: m.pos.x - hx, y: m.pos.y - hy });
+      corners.push({ x: m.pos.x + hx, y: m.pos.y - hy });
+      corners.push({ x: m.pos.x + hx, y: m.pos.y + hy });
+      corners.push({ x: m.pos.x - hx, y: m.pos.y + hy });
+    }
+    const expanded = convexHull(corners);
+    const pts = expanded.map((p) => `${p.x},${p.y}`).join(" ");
+    pathOrShape = (
+      <polygon
+        points={pts}
+        {...fillProps}
+        stroke={style.borderColor}
+        strokeWidth={style.borderWidth}
+        strokeDasharray={dashArray}
+        strokeLinejoin="round"
+      />
+    );
+    // Label placement matches the rectangle case: top/bottom of the bbox of
+    // the polygon so the pill never overlaps the diagonal edges.
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const p of expanded) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    labelCx = minX + 12;
+    labelCy = style.labelPosition === "top" ? minY - fontSize * 0.4 - 2 : maxY + fontSize * 1.0 + 2;
+  } else if (shape === "hull") {
     // pushDistance: how far a shared node pulls the cluster outline away from its sibling clusters
     const pushDistance = pad;
     const anchors = computeClusterAnchors(cluster, positions, allClusters, pushDistance);
@@ -2551,7 +2862,9 @@ function renderCluster(
     const padY = fontSize * 0.35;
     const pillW = textW + padX * 2;
     const pillH = fontSize + padY * 2;
-    // Hull clusters: labelCx/Cy is the center of the pill. Rectangle clusters: top-left anchor.
+    // Hull clusters centre the label on the pill anchor; rectangle and polygon
+    // anchor the pill at its top-left corner so the label hangs off the side
+    // instead of being centred over the shape.
     const centerOnLabelAnchor = shape === "hull";
     const pillX = centerOnLabelAnchor ? labelCx - pillW / 2 : labelCx;
     const pillY = labelCy - pillH / 2;
