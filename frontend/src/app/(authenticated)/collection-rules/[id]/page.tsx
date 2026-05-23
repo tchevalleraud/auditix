@@ -36,7 +36,9 @@ import {
   Copy,
   Languages,
   Workflow,
+  Wand2,
 } from "lucide-react";
+import AssistedExtractModal, { AssistedExtractResult } from "@/components/AssistedExtractModal";
 
 interface ExtractItem {
   id: number;
@@ -249,6 +251,7 @@ export default function CollectionRuleEditPage() {
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [showExtractModal, setShowExtractModal] = useState(false);
   const [savingExtract, setSavingExtract] = useState(false);
+  const [showAssistedModal, setShowAssistedModal] = useState(false);
 
   // Accordion & drag-and-drop for extracts tab
   const [openCategory, setOpenCategory] = useState<string | null>(null);
@@ -626,6 +629,42 @@ export default function CollectionRuleEditPage() {
     setEditingExtract(null);
     resetExtractForm();
     loadCategories();
+    setShowExtractModal(true);
+  };
+
+  const openAssistedExtract = () => {
+    loadCategories();
+    setShowAssistedModal(true);
+  };
+
+  const applyAssistedResult = (result: AssistedExtractResult) => {
+    setShowAssistedModal(false);
+    setEditingExtract(null);
+    resetExtractForm();
+    setExtractName(result.name);
+    setExtractRegex(result.regex);
+    setExtractMode(result.extractMode);
+    setBlockSeparator(result.blockSeparator ?? "");
+    setBlockKeyGroup(result.blockKeyGroup ?? 1);
+
+    // Determine total group count from columns + optional keyGroup
+    const maxColGroup = result.columns.reduce((m, c) => Math.max(m, c.group), 0);
+    const maxGroup = Math.max(maxColGroup, result.keyGroup ?? 0);
+    const groups = Array.from({ length: maxGroup }, () => ({ isKey: false, label: "" }));
+    result.columns.forEach((c) => {
+      const i = c.group - 1;
+      if (i >= 0 && i < groups.length) groups[i] = { isKey: false, label: c.label };
+    });
+    if (result.keyGroup && result.keyGroup > 0 && result.keyGroup <= groups.length) {
+      groups[result.keyGroup - 1] = { isKey: true, label: groups[result.keyGroup - 1].label || "key" };
+    }
+    setExtractGroups(groups);
+
+    // Key handling: if keyMode is "manual" + keyManual provided, fill the key template
+    if (result.keyMode === "manual" && result.keyManual) {
+      setExtractKeyTemplate(result.keyManual);
+    }
+
     setShowExtractModal(true);
   };
 
@@ -1183,10 +1222,19 @@ export default function CollectionRuleEditPage() {
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
               <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.tabExtracts")}</span>
-              <button onClick={openNewExtract} className={btnPrimaryCls}>
-                <Plus className="h-4 w-4" />
-                {t("collection_rules.addExtract")}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={openAssistedExtract}
+                  className="flex items-center gap-2 rounded-lg border border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-colors"
+                >
+                  <Wand2 className="h-4 w-4" />
+                  {t("collection_rules.assistedAddExtract")}
+                </button>
+                <button onClick={openNewExtract} className={btnPrimaryCls}>
+                  <Plus className="h-4 w-4" />
+                  {t("collection_rules.addExtract")}
+                </button>
+              </div>
             </div>
 
             {extracts.length === 0 ? (
@@ -1289,6 +1337,20 @@ export default function CollectionRuleEditPage() {
               </div>
             )}
           </div>
+
+          {/* Assisted extract modal */}
+          {showAssistedModal && rule && current && (
+            <AssistedExtractModal
+              ruleId={ruleId}
+              contextId={current.id}
+              ruleSource={rule.source}
+              ruleCommand={rule.command}
+              initialOutput={testResult?.success ? testResult.output ?? null : null}
+              initialNodeId={selectedNodeId}
+              onAccept={applyAssistedResult}
+              onClose={() => setShowAssistedModal(false)}
+            />
+          )}
 
           {/* Extract modal */}
           {showExtractModal && (

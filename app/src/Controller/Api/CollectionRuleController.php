@@ -11,8 +11,10 @@ use App\Entity\CollectionRuleFolder;
 use App\Entity\InventoryCategory;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
+use App\Entity\LlmProvider;
 use App\Entity\Node;
 use App\Security\Voter\ContextAccessVoter;
+use App\Service\ExtractAssistService;
 use Doctrine\ORM\EntityManagerInterface;
 use phpseclib3\Net\SSH2;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -33,6 +35,7 @@ class CollectionRuleController extends AbstractController
     public function __construct(
         #[Autowire('%kernel.project_dir%')]
         private readonly string $projectDir,
+        private readonly ExtractAssistService $extractAssist,
     ) {}
 
     private function serializeRule(CollectionRule $r): array
@@ -722,6 +725,115 @@ class CollectionRuleController extends AbstractController
         $em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/{id}/extract-assist', methods: ['POST'])]
+    public function extractAssist(CollectionRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['error' => 'Invalid JSON body'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $mode = $data['mode'] ?? 'deterministic';
+        $structure = $data['structure'] ?? 'table';
+        $output = (string) ($data['output'] ?? '');
+
+        // Provider lookup is shared between both structures when mode = ai.
+        $provider = null;
+        $model = '';
+        if ($mode === 'ai') {
+            $providerId = (int) ($data['providerId'] ?? 0);
+            $model = trim((string) ($data['model'] ?? ''));
+            if ($providerId <= 0 || $model === '') {
+                return $this->json(['error' => 'providerId and model are required in AI mode'], Response::HTTP_BAD_REQUEST);
+            }
+            $provider = $em->getRepository(LlmProvider::class)->find($providerId);
+            if ($provider === null || !$provider->isEnabled()) {
+                return $this->json(['error' => 'LLM provider not found or disabled'], Response::HTTP_NOT_FOUND);
+            }
+        }
+
+        try {
+            if ($structure === 'keyvalue') {
+                $line = (string) ($data['line'] ?? '');
+                $tokens = is_array($data['tokens'] ?? null) ? $data['tokens'] : [];
+                if ($line === '' || empty($tokens)) {
+                    return $this->json(['error' => 'A line and at least one annotated token are required'], Response::HTTP_BAD_REQUEST);
+                }
+                if ($mode === 'ai') {
+                    $result = $this->extractAssist->buildWithAiKeyValue($provider, $model, $output, $line, $tokens);
+                } else {
+                    $result = $this->extractAssist->buildDeterministicKeyValue($line, $tokens);
+                }
+                $result['blockSeparator'] = null;
+                $result['blockKeyGroup'] = null;
+            } else {
+                $headers = $this->normalizeLines($data['headers'] ?? []);
+                $examples = $this->normalizeLines($data['examples'] ?? []);
+                if (empty($headers)) {
+                    return $this->json(['error' => 'At least one header line is required'], Response::HTTP_BAD_REQUEST);
+                }
+                if (empty($examples)) {
+                    return $this->json(['error' => 'At least one example line is required'], Response::HTTP_BAD_REQUEST);
+                }
+                if ($mode === 'ai') {
+                    $result = $this->extractAssist->buildWithAi($provider, $model, $output, $headers, $examples);
+                } else {
+                    $result = $this->extractAssist->buildDeterministic($headers, $examples);
+                    $result['blockSeparator'] = null;
+                    $result['blockKeyGroup'] = null;
+                    $result['keyMode'] = null;
+                    $result['keyManual'] = null;
+                    $result['keyGroup'] = null;
+                }
+            }
+        } catch (\InvalidArgumentException $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+        } catch (\Throwable $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
+        }
+
+        $eval = $this->extractAssist->evaluate(
+            $output,
+            $result['regex'],
+            $result['extractMode'],
+            $result['blockSeparator'] ?? null,
+        );
+
+        return $this->json([
+            'mode' => $mode,
+            'structure' => $structure,
+            'regex' => $result['regex'],
+            'extractMode' => $result['extractMode'],
+            'blockSeparator' => $result['blockSeparator'] ?? null,
+            'blockKeyGroup' => $result['blockKeyGroup'] ?? null,
+            'columns' => $result['columns'],
+            'keyMode' => $result['keyMode'] ?? null,
+            'keyManual' => $result['keyManual'] ?? null,
+            'keyGroup' => $result['keyGroup'] ?? null,
+            'matchedLines' => $eval['matchedLines'],
+            'totalLines' => $eval['totalLines'],
+            'regexError' => $eval['error'],
+        ]);
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>
+     */
+    private function normalizeLines($raw): array
+    {
+        if (!is_array($raw)) return [];
+        $out = [];
+        foreach ($raw as $line) {
+            if (!is_string($line)) continue;
+            $trimmed = rtrim($line, "\r\n");
+            if ($trimmed === '') continue;
+            $out[] = $trimmed;
+        }
+        return $out;
     }
 
     #[Route('/{id}/duplicate', methods: ['POST'])]
