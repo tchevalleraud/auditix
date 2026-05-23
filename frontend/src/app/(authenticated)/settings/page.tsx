@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
@@ -29,6 +29,32 @@ interface ContextUser {
   avatar: string | null;
 }
 
+interface AiModel {
+  id: string;
+  name: string;
+  contextLength: number | null;
+  pricing: { prompt: number; completion: number } | null;
+  isFree: boolean;
+  /** null when the provider doesn't expose this info (e.g. Ollama). */
+  supportsTools: boolean | null;
+  description: string | null;
+  meta: Record<string, string> | null;
+}
+
+interface AiAssistantSummary {
+  id: number;
+  name: string;
+  providerId: number;
+  providerName: string;
+  providerType: string;
+  model: string | null;
+  effectiveModel: string | null;
+  systemPrompt: string | null;
+  enabled: boolean;
+  toolsEnabled: boolean;
+  toolsSupported: boolean;
+}
+
 interface ApiTokenItem {
   id: number;
   name: string;
@@ -39,12 +65,12 @@ interface ApiTokenItem {
   expired: boolean;
 }
 
-type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "apiTokens";
+type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "aiAssistant" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "nodeColumns", "members", "lab", "apiTokens"] as const;
+const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "nodeColumns", "members", "lab", "aiAssistant", "apiTokens"] as const;
 const isValidTab = (v: string | null): v is TabKey => !!v && (VALID_TABS as readonly string[]).includes(v);
 
 export default function SettingsPage() {
@@ -108,6 +134,13 @@ export default function SettingsPage() {
   const [membersSuccess, setMembersSuccess] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
 
+  // AI Assistants — multi-config per context. The tab lists the configured
+  // assistants and lets the admin add / edit / remove them via a modal.
+  const [assistants, setAssistants] = useState<AiAssistantSummary[]>([]);
+  const [assistantEditing, setAssistantEditing] = useState<AiAssistantSummary | "new" | null>(null);
+  const [assistantsLoading, setAssistantsLoading] = useState(false);
+  const [aiProviders, setAiProviders] = useState<{ id: number; name: string; type: string; defaultModel: string | null; enabled: boolean }[]>([]);
+
   // API Tokens
   const [apiTokens, setApiTokens] = useState<ApiTokenItem[]>([]);
   const [newTokenName, setNewTokenName] = useState("");
@@ -163,6 +196,47 @@ export default function SettingsPage() {
   useEffect(() => {
     if (tab === "apiTokens") loadApiTokens();
   }, [tab, loadApiTokens]);
+
+  // Providers are admin-managed; the assistant editor needs to pick one.
+  // Load once when the tab opens.
+  useEffect(() => {
+    if (tab !== "aiAssistant") return;
+    (async () => {
+      const res = await fetch("/api/admin/llm/providers");
+      if (res.ok) setAiProviders(await res.json());
+    })();
+  }, [tab]);
+
+  const loadAssistants = useCallback(async () => {
+    if (!current) return;
+    setAssistantsLoading(true);
+    try {
+      const res = await fetch(`/api/contexts/${current.id}/ai-assistants`);
+      if (res.ok) setAssistants(await res.json());
+      else setAssistants([]);
+    } finally {
+      setAssistantsLoading(false);
+    }
+  }, [current]);
+
+  useEffect(() => {
+    if (tab === "aiAssistant") loadAssistants();
+  }, [tab, loadAssistants]);
+
+  const deleteAssistant = async (a: AiAssistantSummary) => {
+    if (!confirm(t("settings.aiConfirmDelete", { name: a.name }))) return;
+    await fetch(`/api/ai-assistants/${a.id}`, { method: "DELETE" });
+    await loadAssistants();
+  };
+
+  const toggleAssistantEnabled = async (a: AiAssistantSummary) => {
+    await fetch(`/api/ai-assistants/${a.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: !a.enabled }),
+    });
+    await loadAssistants();
+  };
 
   const handleCreateToken = async () => {
     if (!current || !newTokenName.trim()) return;
@@ -391,6 +465,7 @@ export default function SettingsPage() {
     { key: "nodeColumns" as TabKey, label: t("settings.tabNodeColumns") },
     ...(!isDefault ? [{ key: "members" as TabKey, label: t("settings.tabMembers") }] : []),
     { key: "lab" as TabKey, label: t("settings.tabLab") },
+    { key: "aiAssistant" as TabKey, label: t("settings.tabAiAssistant") },
     { key: "apiTokens" as TabKey, label: t("settings.tabApiTokens") },
   ];
 
@@ -1115,6 +1190,615 @@ export default function SettingsPage() {
           )}
 
         </form>
+      )}
+
+      {tab === "aiAssistant" && current && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.aiAssistantsDesc")}</p>
+            <button
+              type="button"
+              onClick={() => setAssistantEditing("new")}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100"
+            >
+              + {t("settings.aiAddAssistant")}
+            </button>
+          </div>
+
+          {assistantsLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
+            </div>
+          ) : assistants.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center">
+              <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.aiNoAssistants")}</p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm divide-y divide-slate-100 dark:divide-slate-800">
+              {assistants.map((a) => (
+                <div key={a.id} className="flex items-center justify-between gap-4 px-5 py-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-medium text-slate-900 dark:text-slate-100">{a.name}</h3>
+                      {!a.enabled && (
+                        <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+                          {t("llm.statusDisabled")}
+                        </span>
+                      )}
+                      {a.toolsEnabled && (
+                        <span className="rounded-full bg-indigo-50 dark:bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300 ring-1 ring-inset ring-indigo-500/20">
+                          {t("settings.aiBadgeTools")}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                      {a.providerName} ({a.providerType}) · {a.effectiveModel ?? t("settings.aiNoModel")}
+                    </p>
+                    {a.systemPrompt && (
+                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500 line-clamp-1">{a.systemPrompt}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => toggleAssistantEnabled(a)}
+                      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${a.enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}
+                      aria-label={t("settings.aiToggle")}
+                    >
+                      <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${a.enabled ? "translate-x-5" : "translate-x-1"}`} />
+                    </button>
+                    <button
+                      onClick={() => setAssistantEditing(a)}
+                      className="rounded-lg px-3 py-1.5 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      {t("llm.edit")}
+                    </button>
+                    <button
+                      onClick={() => deleteAssistant(a)}
+                      className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
+                      aria-label={t("common.delete")}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {assistantEditing && (
+            <AssistantEditorModal
+              contextId={current.id}
+              providers={aiProviders}
+              assistant={assistantEditing === "new" ? null : assistantEditing}
+              onClose={() => setAssistantEditing(null)}
+              onSaved={async () => {
+                setAssistantEditing(null);
+                await loadAssistants();
+              }}
+              t={t}
+              inputClass={inputClass}
+              labelClass={labelClass}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Assistant editor modal ─── */
+
+interface AssistantEditorProvider {
+  id: number;
+  name: string;
+  type: string;
+  defaultModel: string | null;
+  enabled: boolean;
+}
+
+function AssistantEditorModal({
+  contextId,
+  providers,
+  assistant,
+  onClose,
+  onSaved,
+  t,
+  inputClass,
+  labelClass,
+}: {
+  contextId: number;
+  providers: AssistantEditorProvider[];
+  assistant: AiAssistantSummary | null;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+  t: (k: string, v?: Record<string, string>) => string;
+  inputClass: string;
+  labelClass: string;
+}) {
+  const isNew = assistant === null;
+  const [name, setName] = useState(assistant?.name ?? "");
+  const [providerId, setProviderId] = useState<number | null>(assistant?.providerId ?? providers.find((p) => p.enabled)?.id ?? null);
+  const [model, setModel] = useState(assistant?.model ?? "");
+  const [systemPrompt, setSystemPrompt] = useState(assistant?.systemPrompt ?? "");
+  const [enabled, setEnabled] = useState(assistant?.enabled ?? true);
+  const [toolsEnabled, setToolsEnabled] = useState(assistant?.toolsEnabled ?? false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Tool-calling only works on OpenAI-compatible providers (OpenRouter,
+  // OpenAI). Anthropic and Ollama-native use other dialects we haven't wired
+  // yet — we surface that as a hint instead of just silently disabling.
+  const selectedProviderType = providers.find((p) => p.id === providerId)?.type ?? null;
+  const toolsSupportedHere = selectedProviderType === "openrouter" || selectedProviderType === "openai";
+
+  const [models, setModels] = useState<AiModel[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [onlyFree, setOnlyFree] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // Refresh the model list when the chosen provider changes. Same caveat as
+  // before — some providers expose a /v1/models endpoint with rich metadata,
+  // others don't, so we fall back to a free-text input.
+  useEffect(() => {
+    if (!providerId) {
+      setModels([]);
+      return;
+    }
+    setModelsLoading(true);
+    setModelsError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/llm/providers/${providerId}/models`);
+        if (res.ok) {
+          setModels(await res.json());
+        } else {
+          const data = await res.json().catch(() => ({}));
+          setModels([]);
+          setModelsError(data.error ?? `HTTP ${res.status}`);
+        }
+      } catch (e: any) {
+        setModels([]);
+        setModelsError(e?.message ?? String(e));
+      } finally {
+        setModelsLoading(false);
+      }
+    })();
+  }, [providerId]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !providerId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const body = {
+        name: name.trim(),
+        providerId,
+        model: model || null,
+        systemPrompt: systemPrompt || null,
+        enabled,
+        toolsEnabled,
+      };
+      const url = isNew
+        ? `/api/contexts/${contextId}/ai-assistants`
+        : `/api/ai-assistants/${assistant!.id}`;
+      const res = await fetch(url, {
+        method: isNew ? "POST" : "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      await onSaved();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4" onClick={onClose}>
+      <div
+        className="w-full max-w-xl rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-6 py-4">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            {isNew ? t("settings.aiAddAssistant") : t("settings.aiEditAssistant")}
+          </h2>
+          <button onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800">
+            ×
+          </button>
+        </div>
+        <form onSubmit={save} className="space-y-4 p-6">
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("settings.aiAssistantName")}</label>
+            <input className={inputClass} value={name} onChange={(e) => setName(e.target.value)} required placeholder={t("settings.aiAssistantNamePlaceholder")} />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("settings.aiProvider")}</label>
+            <select
+              className={inputClass}
+              value={providerId ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                setProviderId(v === "" ? null : Number(v));
+                setModel("");
+              }}
+            >
+              <option value="">— {t("settings.aiNoProvider")} —</option>
+              {providers.map((p) => (
+                <option key={p.id} value={p.id} disabled={!p.enabled}>
+                  {p.name} ({p.type}){!p.enabled ? ` · ${t("llm.statusDisabled")}` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {providerId && (
+            <div className="space-y-1.5">
+              <label className={labelClass}>{t("settings.aiModel")}</label>
+              <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.aiModelHelp")}</p>
+              {modelsLoading ? (
+                <div className="flex items-center gap-2 text-sm text-slate-500">
+                  <Loader2 className="h-4 w-4 animate-spin" /> {t("settings.aiLoadingModels")}
+                </div>
+              ) : models.length > 0 ? (
+                <AiModelPicker
+                  models={models}
+                  value={model}
+                  onChange={setModel}
+                  onlyFree={onlyFree}
+                  setOnlyFree={setOnlyFree}
+                  search={search}
+                  setSearch={setSearch}
+                  toolsRequired={toolsEnabled}
+                  t={t}
+                />
+              ) : (
+                <>
+                  <input className={inputClass} value={model} onChange={(e) => setModel(e.target.value)} placeholder={t("settings.aiModelPlaceholder")} />
+                  {modelsError && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">{t("settings.aiModelsListError", { error: modelsError })}</p>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("settings.aiSystemPrompt")}</label>
+            <p className="text-xs text-slate-400 dark:text-slate-500">{t("settings.aiSystemPromptHelp")}</p>
+            <textarea
+              rows={5}
+              className={`${inputClass} resize-y`}
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              placeholder={t("settings.aiSystemPromptPlaceholder")}
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("settings.aiToolsEnabled")}</h3>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("settings.aiToolsEnabledHelp")}</p>
+              {!toolsSupportedHere && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">{t("settings.aiToolsUnsupported")}</p>
+              )}
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={toolsEnabled}
+              onClick={() => setToolsEnabled((v) => !v)}
+              disabled={!toolsSupportedHere}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${toolsEnabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"} disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${toolsEnabled ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <div>
+              <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("llm.fieldEnabled")}</h3>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("settings.aiAssistantEnabledHelp")}</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enabled}
+              onClick={() => setEnabled((v) => !v)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${enabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"}`}
+            >
+              <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${enabled ? "translate-x-5" : "translate-x-0"}`} />
+            </button>
+          </div>
+
+          {error && <p className="rounded-lg bg-red-50 dark:bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">{error}</p>}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+              {t("common.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={saving || !name.trim() || !providerId}
+              className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {t("common.save")}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AI model picker ─── */
+
+function formatPricePerMillion(perToken: number | null): string {
+  if (perToken === null) return "";
+  const perMillion = perToken * 1_000_000;
+  if (perMillion === 0) return "$0";
+  if (perMillion < 0.01) return `$${perMillion.toFixed(4)}`;
+  if (perMillion < 1) return `$${perMillion.toFixed(3)}`;
+  return `$${perMillion.toFixed(2)}`;
+}
+
+function formatContextLength(tokens: number | null): string {
+  if (!tokens) return "";
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+  return String(tokens);
+}
+
+/**
+ * A dropdown for picking an AI model. Closed by default — clicking the trigger
+ * opens a panel anchored beneath it that shows the same enriched list (search,
+ * "free only" filter, per-row badges). The trigger summarises the current
+ * selection so the dropdown collapses back to a single line when not interacting.
+ */
+function AiModelPicker({
+  models,
+  value,
+  onChange,
+  onlyFree,
+  setOnlyFree,
+  search,
+  setSearch,
+  toolsRequired,
+  t,
+}: {
+  models: AiModel[];
+  value: string;
+  onChange: (id: string) => void;
+  onlyFree: boolean;
+  setOnlyFree: (v: boolean) => void;
+  search: string;
+  setSearch: (v: string) => void;
+  /**
+   * When the assistant has tools enabled, default the "tools only" filter
+   * to true. This prevents the user from picking a model that will then
+   * error out at chat time with "no endpoints support tool use".
+   */
+  toolsRequired: boolean;
+  t: (k: string, v?: Record<string, string>) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [toolsOnly, setToolsOnly] = useState(toolsRequired);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Keep `toolsOnly` in sync if the parent toggles tools after the picker
+  // has been mounted — flipping tools on retroactively narrows the list.
+  useEffect(() => {
+    if (toolsRequired) setToolsOnly(true);
+  }, [toolsRequired]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const filtered = models.filter((m) => {
+    if (onlyFree && !m.isFree) return false;
+    // `supportsTools === null` means the provider didn't tell us — keep it
+    // in the list rather than hiding a potentially-working model.
+    if (toolsOnly && m.supportsTools === false) return false;
+    if (!search.trim()) return true;
+    const s = search.toLowerCase();
+    return m.id.toLowerCase().includes(s) || m.name.toLowerCase().includes(s);
+  });
+  const freeCount = models.filter((m) => m.isFree).length;
+  const toolsCount = models.filter((m) => m.supportsTools === true).length;
+  const selected = models.find((m) => m.id === value) ?? null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-left text-sm text-slate-900 dark:text-slate-100 hover:border-slate-300 dark:hover:border-slate-600 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="flex items-center gap-2 flex-wrap min-w-0">
+          {selected ? (
+            <>
+              <span className="font-medium truncate">{selected.name}</span>
+              {selected.isFree && (
+                <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                  {t("settings.aiBadgeFree")}
+                </span>
+              )}
+              {selected.supportsTools === true && (
+                <span className="rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+                  {t("settings.aiBadgeTools")}
+                </span>
+              )}
+              {toolsRequired && selected.supportsTools === false && (
+                <span className="rounded-full bg-red-100 dark:bg-red-500/20 px-1.5 py-0.5 text-[10px] font-medium text-red-700 dark:text-red-300">
+                  {t("settings.aiBadgeNoTools")}
+                </span>
+              )}
+              {selected.contextLength && (
+                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-300">
+                  {formatContextLength(selected.contextLength)} {t("settings.aiTokens")}
+                </span>
+              )}
+              {selected.pricing && !selected.isFree && (
+                <span className="rounded-full bg-slate-100 dark:bg-slate-700 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-300">
+                  {t("settings.aiPricePerMillion", {
+                    in: formatPricePerMillion(selected.pricing.prompt),
+                    out: formatPricePerMillion(selected.pricing.completion),
+                  })}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="italic text-slate-500 dark:text-slate-400">— {t("settings.aiUseProviderDefault")} —</span>
+          )}
+        </span>
+        <ChevronRight className={`h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full mt-1 z-20 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
+          <div className="border-b border-slate-100 dark:border-slate-800 p-2 flex items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              autoFocus
+              placeholder={t("settings.aiSearchModelsPlaceholder")}
+              className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors"
+            />
+            <label className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={onlyFree}
+                onChange={(e) => setOnlyFree(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              {t("settings.aiOnlyFree")}
+              <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/20 px-1.5 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-300">
+                {freeCount}
+              </span>
+            </label>
+            <label className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={toolsOnly}
+                onChange={(e) => setToolsOnly(e.target.checked)}
+                className="h-3.5 w-3.5"
+              />
+              {t("settings.aiOnlyTools")}
+              <span className="rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-1.5 py-0.5 text-[10px] text-indigo-700 dark:text-indigo-300">
+                {toolsCount}
+              </span>
+            </label>
+          </div>
+          <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+            <button
+              type="button"
+              onClick={() => {
+                onChange("");
+                setOpen(false);
+              }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                value === ""
+                  ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                  : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+              }`}
+            >
+              <span className="italic">— {t("settings.aiUseProviderDefault")} —</span>
+            </button>
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-center text-sm text-slate-400">{t("settings.aiNoModelMatch")}</div>
+            ) : (
+              filtered.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(m.id);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full flex-col gap-1 px-3 py-2 text-left text-sm transition-colors ${
+                    value === m.id
+                      ? "bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                      : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-slate-900 dark:text-slate-100">{m.name}</span>
+                    {m.isFree && (
+                      <span className="rounded-full bg-emerald-100 dark:bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
+                        {t("settings.aiBadgeFree")}
+                      </span>
+                    )}
+                    {m.supportsTools === true && (
+                      <span className="rounded-full bg-indigo-100 dark:bg-indigo-500/20 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">
+                        {t("settings.aiBadgeTools")}
+                      </span>
+                    )}
+                    {m.contextLength && (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-400">
+                        {formatContextLength(m.contextLength)} {t("settings.aiTokens")}
+                      </span>
+                    )}
+                    {m.pricing && !m.isFree && (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-400">
+                        {t("settings.aiPricePerMillion", {
+                          in: formatPricePerMillion(m.pricing.prompt),
+                          out: formatPricePerMillion(m.pricing.completion),
+                        })}
+                      </span>
+                    )}
+                    {m.meta?.parameters && (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-400">
+                        {m.meta.parameters}
+                      </span>
+                    )}
+                    {m.meta?.quantization && (
+                      <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-600 dark:text-slate-400">
+                        {m.meta.quantization}
+                      </span>
+                    )}
+                  </div>
+                  {m.id !== m.name && (
+                    <code className="text-[11px] text-slate-400 dark:text-slate-500">{m.id}</code>
+                  )}
+                  {m.description && (
+                    <span className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">{m.description}</span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+          <div className="border-t border-slate-100 dark:border-slate-800 px-3 py-1.5 text-[11px] text-slate-400 dark:text-slate-500">
+            {t("settings.aiModelCount", { shown: String(filtered.length), total: String(models.length) })}
+          </div>
+        </div>
       )}
     </div>
   );

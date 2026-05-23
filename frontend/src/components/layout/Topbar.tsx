@@ -2,22 +2,54 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { CircleUser, LogOut, Moon, Sun, ChevronDown, UserCog } from "lucide-react";
+import { CircleUser, LogOut, Moon, Sparkles, Sun, ChevronDown, UserCog } from "lucide-react";
 import { useTheme } from "@/components/ThemeProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n, locales, type Locale } from "@/components/I18nProvider";
 import flagComponents from "@/components/Flags";
 import ContextSwitcher from "@/components/layout/ContextSwitcher";
+import { AiAssistantPanel } from "@/components/AiAssistantPanel";
 
 export default function Topbar() {
   const { theme, setTheme, resolved } = useTheme();
-  const { userRoles, userInfo } = useAppContext();
+  const { userRoles, userInfo, current } = useAppContext();
   const isUserAdmin = userRoles.includes("ROLE_ADMIN");
   const { locale, setLocale, t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
   const [langOpen, setLangOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [hasAnyAi, setHasAnyAi] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const langRef = useRef<HTMLDivElement>(null);
+
+  // The bot icon only appears when the *currently open* context has at least
+  // one reachable assistant — the chat panel is scoped to that context, so
+  // showing the icon for a context with no assistants would just dead-end.
+  // We refetch on context change and on window focus (admins adding an
+  // assistant from another tab).
+  useEffect(() => {
+    if (!current) {
+      setHasAnyAi(false);
+      return;
+    }
+    let cancelled = false;
+    const probe = async () => {
+      try {
+        const res = await fetch(`/api/ai/assistants?context=${current.id}`);
+        if (!cancelled && res.ok) {
+          const list = await res.json();
+          setHasAnyAi(Array.isArray(list) && list.length > 0);
+        }
+      } catch {}
+    };
+    probe();
+    const onFocus = () => probe();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [current]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -41,6 +73,36 @@ export default function Topbar() {
       </div>
 
       <div className="flex items-center gap-2">
+        {hasAnyAi && (
+          <>
+            <button
+              onClick={() => setAiPanelOpen(true)}
+              aria-label={t("ai.title")}
+              title={t("ai.title")}
+              className="group relative flex items-center"
+            >
+              {/* Soft animated halo. `animate-pulse` is gentle (1s easeInOut)
+                  and the blur-md spread makes it read as a glow, not a ring. */}
+              <span
+                aria-hidden
+                className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-pink-500 opacity-50 blur-md animate-pulse transition-opacity group-hover:opacity-80"
+              />
+              {/* Foreground pill with the same gradient (sharp), Sparkles icon
+                  and a tiny shimmering "online" dot. */}
+              <span className="relative flex items-center gap-1.5 rounded-full bg-gradient-to-br from-indigo-500 via-fuchsia-500 to-pink-500 px-2.5 py-1.5 text-white shadow-md shadow-fuchsia-500/40 ring-1 ring-white/20 transition-transform group-hover:scale-[1.04] group-active:scale-95">
+                <Sparkles className="h-4 w-4 drop-shadow-[0_0_4px_rgba(255,255,255,0.7)]" />
+                <span className="text-[11px] font-semibold tracking-wider">{t("ai.shortLabel")}</span>
+                <span
+                  aria-hidden
+                  className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-white dark:ring-slate-900"
+                >
+                  <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-75" />
+                </span>
+              </span>
+            </button>
+            <div className="mx-2 h-8 w-px bg-slate-200 dark:bg-slate-700" />
+          </>
+        )}
         <div className="relative" ref={langRef}>
           <button
             onClick={() => setLangOpen(!langOpen)}
@@ -130,6 +192,7 @@ export default function Topbar() {
           )}
         </div>
       </div>
+      <AiAssistantPanel open={aiPanelOpen} onClose={() => setAiPanelOpen(false)} />
     </header>
   );
 }

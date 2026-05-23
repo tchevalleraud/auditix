@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useMemo } from "react";
 import {
   Activity,
+  Bot,
   Building2,
   Clock,
   Columns3,
@@ -21,6 +22,7 @@ import {
   Settings,
   ShieldCheck,
   ShieldAlert,
+  Sparkles,
   UserCircle,
   Users,
   Wrench,
@@ -66,6 +68,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       contextItems.push({ label: t("settings.tabMembers"), tab: "members", icon: Users });
     }
     contextItems.push({ label: t("settings.tabLab"), tab: "lab", icon: FlaskConical });
+    contextItems.push({ label: t("settings.tabAiAssistant"), tab: "aiAssistant", icon: Sparkles });
     contextItems.push({ label: t("settings.tabApiTokens"), tab: "apiTokens", icon: KeyRound });
 
     const out: NavSection[] = [
@@ -89,6 +92,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           { label: t("sidebar.tasks"), href: "/settings/global/tasks", icon: ListTodo },
           { label: t("sidebar.mailServers"), href: "/settings/global/mail", icon: Mail },
           { label: t("sidebar.syslogServers"), href: "/settings/global/syslog", icon: Radio },
+          { label: t("sidebar.llmProviders"), href: "/settings/global/llm-providers", icon: Bot },
         ],
       });
     }
