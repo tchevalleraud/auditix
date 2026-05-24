@@ -823,7 +823,9 @@
     "expandAll": "Tout déplier",
     "collapseAll": "Tout replier",
     "enableAll": "Tout activer",
-    "disableAll": "Tout désactiver"
+    "disableAll": "Tout désactiver",
+    "clearFolder": "Vider le dossier",
+    "clearFolderConfirm": "Vider"
   },
   "collection_rules": {
     "title": "Regles de collecte",
@@ -858,6 +860,8 @@
     "collapseAll": "Tout replier",
     "enableAll": "Tout activer",
     "disableAll": "Tout désactiver",
+    "clearFolder": "Vider le dossier",
+    "clearFolderConfirm": "Vider",
     "duplicate": "Dupliquer",
     "tabEdit": "Edition",
     "tabCollect": "Collecte",

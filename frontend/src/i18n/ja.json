@@ -633,7 +633,9 @@
     "expandAll": "すべて展開",
     "collapseAll": "すべて折りたたむ",
     "enableAll": "すべて有効化",
-    "disableAll": "すべて無効化"
+    "disableAll": "すべて無効化",
+    "clearFolder": "フォルダを空にする",
+    "clearFolderConfirm": "空にする"
   },
   "collection_rules": {
     "title": "収集ルール",
@@ -668,6 +670,8 @@
     "collapseAll": "すべて折りたたむ",
     "enableAll": "すべて有効化",
     "disableAll": "すべて無効化",
+    "clearFolder": "フォルダを空にする",
+    "clearFolderConfirm": "空にする",
     "duplicate": "複製",
     "tabEdit": "編集",
     "tabCollect": "収集",

@@ -633,7 +633,9 @@
     "expandAll": "Alle ausklappen",
     "collapseAll": "Alle einklappen",
     "enableAll": "Alle aktivieren",
-    "disableAll": "Alle deaktivieren"
+    "disableAll": "Alle deaktivieren",
+    "clearFolder": "Ordner leeren",
+    "clearFolderConfirm": "Leeren"
   },
   "collection_rules": {
     "title": "Sammelregeln",
@@ -668,6 +670,8 @@
     "collapseAll": "Alle einklappen",
     "enableAll": "Alle aktivieren",
     "disableAll": "Alle deaktivieren",
+    "clearFolder": "Ordner leeren",
+    "clearFolderConfirm": "Leeren",
     "duplicate": "Duplizieren",
     "tabEdit": "Bearbeiten",
     "tabCollect": "Sammlung",

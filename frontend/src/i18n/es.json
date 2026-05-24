@@ -633,7 +633,9 @@
     "expandAll": "Expandir todo",
     "collapseAll": "Contraer todo",
     "enableAll": "Activar todo",
-    "disableAll": "Desactivar todo"
+    "disableAll": "Desactivar todo",
+    "clearFolder": "Vaciar carpeta",
+    "clearFolderConfirm": "Vaciar"
   },
   "collection_rules": {
     "title": "Reglas de recoleccion",
@@ -668,6 +670,8 @@
     "collapseAll": "Contraer todo",
     "enableAll": "Activar todo",
     "disableAll": "Desactivar todo",
+    "clearFolder": "Vaciar carpeta",
+    "clearFolderConfirm": "Vaciar",
     "duplicate": "Duplicar",
     "tabEdit": "Editar",
     "tabCollect": "Recoleccion",

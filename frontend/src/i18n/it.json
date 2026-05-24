@@ -633,7 +633,9 @@
     "expandAll": "Espandi tutto",
     "collapseAll": "Comprimi tutto",
     "enableAll": "Abilita tutto",
-    "disableAll": "Disabilita tutto"
+    "disableAll": "Disabilita tutto",
+    "clearFolder": "Svuota cartella",
+    "clearFolderConfirm": "Svuota"
   },
   "collection_rules": {
     "title": "Regole di raccolta",
@@ -668,6 +670,8 @@
     "collapseAll": "Comprimi tutto",
     "enableAll": "Abilita tutto",
     "disableAll": "Disabilita tutto",
+    "clearFolder": "Svuota cartella",
+    "clearFolderConfirm": "Svuota",
     "duplicate": "Duplica",
     "tabEdit": "Modifica",
     "tabCollect": "Raccolta",

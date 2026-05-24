@@ -851,7 +851,9 @@
     "expandAll": "Expand all",
     "collapseAll": "Collapse all",
     "enableAll": "Enable all",
-    "disableAll": "Disable all"
+    "disableAll": "Disable all",
+    "clearFolder": "Empty folder",
+    "clearFolderConfirm": "Empty"
   },
   "collection_rules": {
     "title": "Collection rules",
@@ -886,6 +888,8 @@
     "collapseAll": "Collapse all",
     "enableAll": "Enable all",
     "disableAll": "Disable all",
+    "clearFolder": "Empty folder",
+    "clearFolderConfirm": "Empty",
     "duplicate": "Duplicate",
     "tabEdit": "Edit",
     "tabCollect": "Collect",
