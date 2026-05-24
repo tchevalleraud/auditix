@@ -937,6 +937,7 @@ class TopologyController extends AbstractController
         // every value in that column to the owning Node. Falls back transparently
         // to the stock keys above when no inventory match is found.
         $matchInvCatId = $mapping['nodeMatchInventoryCategoryId'] ?? null;
+        $matchInvKey = (string)($mapping['nodeMatchInventoryKey'] ?? '');
         $matchInvCol = $mapping['nodeMatchInventoryColumn'] ?? '';
         if (($mapping['nodeMatchField'] ?? 'auto') === 'inventory' && $matchInvCatId && $matchInvCol !== '') {
             $matchCat = $em->getRepository(InventoryCategory::class)->find((int)$matchInvCatId);
@@ -946,6 +947,7 @@ class TopologyController extends AbstractController
                 ]);
                 foreach ($entries as $e) {
                     if ($e->getColLabel() !== $matchInvCol) continue;
+                    if ($matchInvKey !== '' && (string)$e->getEntryKey() !== $matchInvKey) continue;
                     $val = $e->getValue();
                     if ($val === null || $val === '') continue;
                     $nid = $e->getNode()->getId();
@@ -984,7 +986,6 @@ class TopologyController extends AbstractController
         $aggregationKeyCol = $mapping['aggregationKeyColumn'] ?? '';
         $aggregationValueCol = $mapping['aggregationValueColumn'] ?? '';
         $topology = $protocol->getTopology();
-        $createdKeys = [];
 
         // Per-node, per-port aggregation id (e.g. "Po1", "ae0"). The aggregation
         // lookup can target either the LLDP category itself or a dedicated category
@@ -1012,6 +1013,14 @@ class TopologyController extends AbstractController
             }
         }
 
+        // PASS 1 — collect every candidate half-edge.
+        //
+        // Each LLDP row describes one end of a physical link from the local
+        // node's perspective. A single physical link typically yields TWO
+        // candidates (one per side). Pass 2 then pairs the matching candidates
+        // back into a single edge so that the rendered map reflects the
+        // real-world cabling, not the directed LLDP table.
+        $candidates = [];
         foreach ($nodeById as $sourceNodeId => $sourceNode) {
             $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
                 'node' => $sourceNode,
@@ -1044,54 +1053,172 @@ class TopologyController extends AbstractController
                     ? $aggregationByNodePort[$target->getId()][$remotePort]
                     : null;
 
-                $sId = $sourceNodeId;
-                $tId = $target->getId();
-                $minId = min($sId, $tId);
-                $maxId = max($sId, $tId);
-                $portA = ($sId <= $tId) ? $localPort : $remotePort;
-                $portB = ($sId <= $tId) ? $remotePort : $localPort;
-                $key = "$minId:$maxId:$portA:$portB";
-                if (isset($createdKeys[$key])) { continue; }
-                $createdKeys[$key] = true;
+                $candidates[] = [
+                    'sourceNodeId' => $sourceNodeId,
+                    'sourceNode' => $sourceNode,
+                    'targetNodeId' => $target->getId(),
+                    'targetNode' => $target,
+                    'localPort' => $localPort,
+                    'remotePort' => $remotePort,
+                    'metric' => $metric,
+                    'localAgg' => $localAgg,
+                    'remoteAgg' => $remoteAgg,
+                ];
+            }
+        }
 
-                $edge = new TopologyEdge();
-                $edge->setTopology($topology);
-                $edge->setSourceNode($sourceNode);
-                $edge->setTargetNode($target);
-                $edge->setProtocol($protocol);
+        // PASS 2 — group candidates by undirected node pair and reconcile.
+        $byPair = [];
+        foreach ($candidates as $c) {
+            $a = $c['sourceNodeId'];
+            $b = $c['targetNodeId'];
+            $pairKey = $a < $b ? "$a:$b" : "$b:$a";
+            $byPair[$pairKey][] = $c;
+        }
 
-                $edgeStyle = $style;
-                $labels = [];
-                if ($localPort !== '') {
-                    $labels[] = ['text' => $localPort, 'position' => 'source', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+        foreach ($byPair as $pairKey => $pairCandidates) {
+            [$minId, $maxId] = array_map('intval', explode(':', $pairKey));
+
+            // Split into the two directed buckets so that we can pair entries
+            // from min→max with their counterpart from max→min.
+            $minToMax = [];
+            $maxToMin = [];
+            foreach ($pairCandidates as $c) {
+                if ($c['sourceNodeId'] === $minId) {
+                    $minToMax[] = $c;
+                } else {
+                    $maxToMin[] = $c;
                 }
-                if ($remotePort !== '') {
-                    $labels[] = ['text' => $remotePort, 'position' => 'target', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+            }
+
+            // Match each min→max candidate with the best-fit max→min candidate.
+            // Best-fit uses available port info when present (strict match), else
+            // falls back to positional pairing so a single physical link reported
+            // from both sides without remote-port info still collapses to ONE edge.
+            $matchedMaxIdx = [];
+            foreach ($minToMax as $a) {
+                $bestIdx = null;
+                $bestScore = -1;
+                foreach ($maxToMin as $idx => $b) {
+                    if (isset($matchedMaxIdx[$idx])) continue;
+                    // Strict mismatch: if both ports are known and disagree, skip.
+                    if ($a['remotePort'] !== '' && $b['localPort'] !== '' && $a['remotePort'] !== $b['localPort']) {
+                        continue;
+                    }
+                    if ($b['remotePort'] !== '' && $a['localPort'] !== '' && $b['remotePort'] !== $a['localPort']) {
+                        continue;
+                    }
+                    // Higher score = more confidence in the pairing.
+                    $score = 0;
+                    if ($a['remotePort'] !== '' && $b['localPort'] !== '' && $a['remotePort'] === $b['localPort']) $score += 2;
+                    if ($b['remotePort'] !== '' && $a['localPort'] !== '' && $b['remotePort'] === $a['localPort']) $score += 2;
+                    if ($score > $bestScore) {
+                        $bestScore = $score;
+                        $bestIdx = $idx;
+                    }
                 }
-                if (!empty($labels)) $edgeStyle['labels'] = $labels;
-                if ($metric !== null) $edgeStyle['metric'] = $metric;
-
-                // Aggregation group: assigned only when both sides advertise the
-                // SAME port in an aggregation. We deliberately want a stable,
-                // direction-independent group key so that visualization grouping
-                // (by undirected pair + aggregation id) lines up correctly even
-                // when each side names its LAG differently (Po1 vs ae0).
-                if ($localAgg !== null && $remoteAgg !== null) {
-                    $aggA = ($sId <= $tId) ? $localAgg : $remoteAgg;
-                    $aggB = ($sId <= $tId) ? $remoteAgg : $localAgg;
-                    $edgeStyle['aggregationGroup'] = ($aggA === $aggB) ? $aggA : "$aggA/$aggB";
-                } elseif ($localAgg !== null) {
-                    $edgeStyle['aggregationGroup'] = $localAgg;
-                } elseif ($remoteAgg !== null) {
-                    $edgeStyle['aggregationGroup'] = $remoteAgg;
+                if ($bestIdx !== null) {
+                    $matchedMaxIdx[$bestIdx] = true;
+                    $this->persistLldpEdge($protocol, $topology, $a, $maxToMin[$bestIdx], $style, $em);
+                    $stats['created']++;
+                } else {
+                    $this->persistLldpEdge($protocol, $topology, $a, null, $style, $em);
+                    $stats['created']++;
                 }
-
-                $edge->setStyle($edgeStyle);
-
-                $em->persist($edge);
+            }
+            foreach ($maxToMin as $idx => $b) {
+                if (isset($matchedMaxIdx[$idx])) continue;
+                $this->persistLldpEdge($protocol, $topology, null, $b, $style, $em);
                 $stats['created']++;
             }
         }
+    }
+
+    /**
+     * Build one edge from a (min→max, max→min) candidate pair. Either side may
+     * be null when LLDP visibility was asymmetric — the existing side then owns
+     * the edge's source/target orientation and port labels.
+     */
+    private function persistLldpEdge(
+        TopologyProtocol $protocol,
+        Topology $topology,
+        ?array $minSide,
+        ?array $maxSide,
+        array $style,
+        EntityManagerInterface $em,
+    ): void {
+        // Default orientation: source = min node, target = max node when both
+        // sides agree. If only one side exists, use that side's original
+        // orientation so its localPort lands on the source.
+        if ($minSide !== null) {
+            $sourceNode = $minSide['sourceNode'];
+            $targetNode = $minSide['targetNode'];
+            $sourceLocalPort = $minSide['localPort'];
+            $sourceRemotePort = $minSide['remotePort']; // (port on max from min's POV)
+            $sourceMetric = $minSide['metric'];
+            $sourceAggLocal = $minSide['localAgg'];
+            $sourceAggRemote = $minSide['remoteAgg'];
+        } else {
+            $sourceNode = $maxSide['sourceNode'];
+            $targetNode = $maxSide['targetNode'];
+            $sourceLocalPort = $maxSide['localPort'];
+            $sourceRemotePort = $maxSide['remotePort'];
+            $sourceMetric = $maxSide['metric'];
+            $sourceAggLocal = $maxSide['localAgg'];
+            $sourceAggRemote = $maxSide['remoteAgg'];
+        }
+
+        // Reconcile labels: pick the strongest known port for each end.
+        $portOnSource = $sourceLocalPort;
+        $portOnTarget = $sourceRemotePort;
+        if ($minSide !== null && $maxSide !== null) {
+            // Min side localPort is authoritative for min end.
+            $portOnSource = $minSide['localPort'] !== '' ? $minSide['localPort'] : ($maxSide['remotePort'] ?? '');
+            // Max side localPort is authoritative for max end.
+            $portOnTarget = $maxSide['localPort'] !== '' ? $maxSide['localPort'] : ($minSide['remotePort'] ?? '');
+        }
+
+        // Metric: prefer whichever side reports it.
+        $metric = $sourceMetric;
+        if ($metric === null && $maxSide !== null) {
+            $metric = $maxSide['metric'];
+        }
+
+        // Aggregation: use whichever side has both ends, else fall back to a single side.
+        $localAgg = $sourceAggLocal;
+        $remoteAgg = $sourceAggRemote;
+        if ($minSide !== null && $maxSide !== null) {
+            $localAgg = $minSide['localAgg'];
+            $remoteAgg = $maxSide['localAgg'];
+        }
+
+        $edge = new TopologyEdge();
+        $edge->setTopology($topology);
+        $edge->setSourceNode($sourceNode);
+        $edge->setTargetNode($targetNode);
+        $edge->setProtocol($protocol);
+
+        $edgeStyle = $style;
+        $labels = [];
+        if ($portOnSource !== '') {
+            $labels[] = ['text' => $portOnSource, 'position' => 'source', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+        }
+        if ($portOnTarget !== '') {
+            $labels[] = ['text' => $portOnTarget, 'position' => 'target', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+        }
+        if (!empty($labels)) $edgeStyle['labels'] = $labels;
+        if ($metric !== null) $edgeStyle['metric'] = $metric;
+
+        if ($localAgg !== null && $remoteAgg !== null) {
+            $edgeStyle['aggregationGroup'] = ($localAgg === $remoteAgg) ? $localAgg : "$localAgg/$remoteAgg";
+        } elseif ($localAgg !== null) {
+            $edgeStyle['aggregationGroup'] = $localAgg;
+        } elseif ($remoteAgg !== null) {
+            $edgeStyle['aggregationGroup'] = $remoteAgg;
+        }
+
+        $edge->setStyle($edgeStyle);
+        $em->persist($edge);
     }
 
     /**

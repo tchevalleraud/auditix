@@ -87,11 +87,16 @@ class TopologyProtocol
             'destNodeColumn' => '',
             // auto | name | hostname | ipAddress | inventory
             // When 'inventory', the matcher uses nodeMatchInventoryCategoryId +
-            // nodeMatchInventoryColumn to build a value→Node index, so the
-            // destination value resolves against any inventory column the user
-            // pinpoints (e.g. a chassis ID that's not a stock node field).
+            // nodeMatchInventoryKey (optional entryKey filter) +
+            // nodeMatchInventoryColumn (column to read) to build a value→Node
+            // index. The destination value from the LLDP/ISIS row resolves
+            // against any inventory cell the user pinpoints (e.g. a chassis ID
+            // that's not a stock node field). When nodeMatchInventoryKey is
+            // empty, every row in the column is indexed; when set, only the
+            // entries with the matching entryKey are.
             'nodeMatchField' => 'auto',
             'nodeMatchInventoryCategoryId' => null,
+            'nodeMatchInventoryKey' => '',
             'nodeMatchInventoryColumn' => '',
             'localPortColumn' => '',
             'remotePortColumn' => '',

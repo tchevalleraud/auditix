@@ -23,6 +23,9 @@ import NodeLabelEditor, {
   type NodeDesign,
   type InventoryCategoryOption,
 } from "@/components/topology2/NodeLabelEditor";
+import ProtocolWorkflowModal, {
+  type ProtocolDraft,
+} from "@/components/topology2/ProtocolWorkflowModal";
 
 interface NodeTagRef {
   id: number;
@@ -155,10 +158,12 @@ const CLUSTER_LABEL_POSITIONS = [
 interface ProtocolMapping {
   destNodeColumn: string;
   nodeMatchField: "auto" | "name" | "hostname" | "ipAddress" | "inventory";
-  // Used when nodeMatchField = "inventory": pinpoints a category + column whose
-  // values are indexed value→Node. Lets the matcher resolve a chassis ID or any
-  // other identifier that doesn't live on the Node entity itself.
+  // Used when nodeMatchField = "inventory": pinpoints a category + optional
+  // entryKey filter + column whose values are indexed value→Node. Lets the
+  // matcher resolve a chassis ID or any other identifier that doesn't live on
+  // the Node entity itself.
   nodeMatchInventoryCategoryId?: number | null;
+  nodeMatchInventoryKey?: string;
   nodeMatchInventoryColumn?: string;
   localPortColumn: string;
   remotePortColumn: string;
@@ -195,32 +200,6 @@ interface ClusterRule {
   clusterStyle: Partial<ClusterStyle>;
   enabled: boolean;
   lastGeneratedAt: string | null;
-}
-
-const PROTOCOL_TYPES = [
-  { value: "lldp", label: "LLDP" },
-  { value: "isis", label: "ISIS" },
-] as const;
-
-const NODE_MATCH_FIELDS = [
-  { value: "auto", labelKey: "topology.protocolMatchAuto" },
-  { value: "name", labelKey: "topology.fieldName" },
-  { value: "hostname", labelKey: "topology.fieldHostname" },
-  { value: "ipAddress", labelKey: "topology.fieldIp" },
-  { value: "inventory", labelKey: "topology.protocolMatchInventory" },
-] as const;
-
-function defaultProtocolMapping(): ProtocolMapping {
-  return {
-    destNodeColumn: "",
-    nodeMatchField: "auto",
-    localPortColumn: "",
-    remotePortColumn: "",
-    metricColumn: "",
-    aggregationCategoryId: null,
-    aggregationKeyColumn: "",
-    aggregationValueColumn: "",
-  };
 }
 
 const EDGE_TYPE_OPTIONS = [
@@ -296,6 +275,7 @@ export default function TopologyConfigurePage() {
   const [editingClusterId, setEditingClusterId] = useState<number | null>(null);
   const [protocols, setProtocols] = useState<Protocol[]>([]);
   const [editingProtocolId, setEditingProtocolId] = useState<number | null>(null);
+  const [protocolWorkflowMode, setProtocolWorkflowMode] = useState<"create" | "edit" | null>(null);
   const [generatingProtocolId, setGeneratingProtocolId] = useState<number | null>(null);
   const [generateResult, setGenerateResult] = useState<{ protocolId: number; created: number; skipped: number } | null>(null);
   const [clusterRules, setClusterRules] = useState<ClusterRule[]>([]);
@@ -618,14 +598,16 @@ export default function TopologyConfigurePage() {
     updateCluster(clusterId, { nodeIds });
   };
 
-  const createProtocol = async (type: "lldp" | "isis" = "lldp"): Promise<Protocol | null> => {
+  const createProtocolFromDraft = async (draft: ProtocolDraft): Promise<Protocol | null> => {
     const res = await fetch(`/api/topologies/${id}/protocols`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: type.toUpperCase(),
-        type,
-        mapping: defaultProtocolMapping(),
+        name: draft.name.trim() || draft.type.toUpperCase(),
+        type: draft.type,
+        inventoryCategoryId: draft.inventoryCategoryId,
+        mapping: draft.mapping,
+        edgeStyle: draft.edgeStyle,
       }),
     });
     if (res.ok) {
@@ -684,12 +666,6 @@ export default function TopologyConfigurePage() {
     } finally {
       setGeneratingProtocolId(null);
     }
-  };
-
-  const inventoryColsForProtocol = (protocol: Protocol): string[] => {
-    if (!protocol.inventoryCategoryName) return [];
-    const cat = inventoryCategories.find((c) => c.name === protocol.inventoryCategoryName);
-    return cat?.columns ?? [];
   };
 
   const inventoryColsForRule = (rule: ClusterRule): string[] => {
@@ -2067,21 +2043,18 @@ export default function TopologyConfigurePage() {
               {protocols.length} {t("topology.protocolsLabel")}
             </div>
             <div className="flex items-center gap-1.5">
-              {PROTOCOL_TYPES.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={async () => {
-                    const created = await createProtocol(opt.value);
-                    if (created) setEditingProtocolId(created.id);
-                  }}
-                  disabled={memberIds.size < 2}
-                  className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  title={memberIds.size < 2 ? t("topology.linkNeedTwoMembers") : ""}
-                >
-                  <Plus className="h-4 w-4" />
-                  {opt.label}
-                </button>
-              ))}
+              <button
+                onClick={() => {
+                  setEditingProtocolId(null);
+                  setProtocolWorkflowMode("create");
+                }}
+                disabled={memberIds.size < 2}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title={memberIds.size < 2 ? t("topology.linkNeedTwoMembers") : ""}
+              >
+                <Plus className="h-4 w-4" />
+                {t("topology.protocolAdd")}
+              </button>
             </div>
           </div>
 
@@ -2106,7 +2079,10 @@ export default function TopologyConfigurePage() {
                     <tr
                       key={p.id}
                       className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer transition-colors"
-                      onClick={() => setEditingProtocolId(p.id)}
+                      onClick={() => {
+                        setEditingProtocolId(p.id);
+                        setProtocolWorkflowMode("edit");
+                      }}
                     >
                       <td className="px-4 py-2.5 text-sm font-medium text-slate-900 dark:text-white">{p.name}</td>
                       <td className="px-4 py-2.5 text-xs text-slate-500 dark:text-slate-400 uppercase">{p.type}</td>
@@ -2372,405 +2348,50 @@ export default function TopologyConfigurePage() {
         );
       })()}
 
-      {editingProtocolId !== null && (() => {
-        const p = protocols.find((x) => x.id === editingProtocolId);
-        if (!p) return null;
-        const cols = inventoryColsForProtocol(p);
+      {protocolWorkflowMode !== null && (() => {
+        const editing =
+          protocolWorkflowMode === "edit" && editingProtocolId !== null
+            ? protocols.find((p) => p.id === editingProtocolId) ?? null
+            : null;
+        const initial: ProtocolDraft | undefined = editing
+          ? {
+              name: editing.name,
+              type: editing.type,
+              inventoryCategoryId: editing.inventoryCategoryId,
+              inventoryCategoryName: editing.inventoryCategoryName,
+              mapping: { ...editing.mapping },
+              edgeStyle: { ...editing.edgeStyle },
+            }
+          : undefined;
         return (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-            onClick={() => setEditingProtocolId(null)}
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {t("topology.protocolEditTitle")}
-                </h2>
-                <button
-                  onClick={() => setEditingProtocolId(null)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800"
-                >✕</button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolName")}</label>
-                  <input
-                    type="text"
-                    value={p.name}
-                    onChange={(e) => updateProtocol(p.id, { name: e.target.value })}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolType")}</label>
-                  <input
-                    type="text"
-                    value={p.type.toUpperCase()}
-                    disabled
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-sm uppercase font-mono opacity-70"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{t("topology.protocolMappingTitle")}</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{t("topology.protocolMappingHint")}</p>
-                <div className="space-y-1">
-                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolCategory")}</label>
-                  <select
-                    value={p.inventoryCategoryId ?? ""}
-                    onChange={(e) => updateProtocol(p.id, {
-                      inventoryCategoryId: e.target.value ? Number(e.target.value) : null,
-                      inventoryCategoryName: e.target.value
-                        ? (inventoryCategories.find((c) => c.id === Number(e.target.value))?.name ?? null)
-                        : null,
-                    })}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                  >
-                    <option value="">—</option>
-                    {inventoryCategories.filter((c) => c.id !== null).map((c) => (
-                      <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolDestNodeColumn")}</label>
-                    <select
-                      value={p.mapping.destNodeColumn}
-                      onChange={(e) => updateProtocol(p.id, { mapping: { destNodeColumn: e.target.value } as ProtocolMapping })}
-                      disabled={cols.length === 0}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                    >
-                      <option value="">—</option>
-                      {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolNodeMatchField")}</label>
-                    <select
-                      value={p.mapping.nodeMatchField}
-                      onChange={(e) => updateProtocol(p.id, { mapping: { nodeMatchField: e.target.value as ProtocolMapping["nodeMatchField"] } as ProtocolMapping })}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                    >
-                      {NODE_MATCH_FIELDS.map((o) => (
-                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {p.mapping.nodeMatchField === "inventory" && (() => {
-                    const matchCatId = p.mapping.nodeMatchInventoryCategoryId ?? null;
-                    const matchCatName = matchCatId
-                      ? (inventoryCategories.find((c) => c.id === matchCatId)?.name ?? null)
-                      : null;
-                    const matchCols = matchCatName
-                      ? (inventoryCategories.find((c) => c.name === matchCatName)?.columns ?? [])
-                      : [];
-                    return (
-                      <>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolMatchInventoryCategory")}</label>
-                          <select
-                            value={p.mapping.nodeMatchInventoryCategoryId ?? ""}
-                            onChange={(e) => updateProtocol(p.id, {
-                              mapping: {
-                                nodeMatchInventoryCategoryId: e.target.value ? Number(e.target.value) : null,
-                              } as ProtocolMapping,
-                            })}
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                          >
-                            <option value="">—</option>
-                            {inventoryCategories.filter((c) => c.id !== null).map((c) => (
-                              <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolMatchInventoryColumn")}</label>
-                          <select
-                            value={p.mapping.nodeMatchInventoryColumn ?? ""}
-                            onChange={(e) => updateProtocol(p.id, { mapping: { nodeMatchInventoryColumn: e.target.value } as ProtocolMapping })}
-                            disabled={matchCols.length === 0}
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                          >
-                            <option value="">—</option>
-                            {matchCols.map((col) => <option key={col} value={col}>{col}</option>)}
-                          </select>
-                        </div>
-                      </>
-                    );
-                  })()}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolLocalPortColumn")}</label>
-                    <select
-                      value={p.mapping.localPortColumn}
-                      onChange={(e) => updateProtocol(p.id, { mapping: { localPortColumn: e.target.value } as ProtocolMapping })}
-                      disabled={cols.length === 0}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                    >
-                      <option value="">—</option>
-                      {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                    </select>
-                  </div>
-                  {p.type !== "isis" && (
-                    <div className="space-y-1">
-                      <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolRemotePortColumn")}</label>
-                      <select
-                        value={p.mapping.remotePortColumn}
-                        onChange={(e) => updateProtocol(p.id, { mapping: { remotePortColumn: e.target.value } as ProtocolMapping })}
-                        disabled={cols.length === 0}
-                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                      >
-                        <option value="">—</option>
-                        {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                      </select>
-                    </div>
-                  )}
-                  {p.type === "isis" && (
-                    <div className="space-y-1">
-                      <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                        {t("topology.protocolCostColumn")}
-                      </label>
-                      <select
-                        value={p.mapping.metricColumn}
-                        onChange={(e) => updateProtocol(p.id, { mapping: { metricColumn: e.target.value } as ProtocolMapping })}
-                        disabled={cols.length === 0}
-                        className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                      >
-                        <option value="">—</option>
-                        {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                {p.type !== "isis" && (() => {
-                  const aggCatId = p.mapping.aggregationCategoryId ?? null;
-                  const aggCatName = aggCatId
-                    ? (inventoryCategories.find((c) => c.id === aggCatId)?.name ?? null)
-                    : p.inventoryCategoryName;
-                  const aggCols = aggCatName
-                    ? (inventoryCategories.find((c) => c.name === aggCatName)?.columns ?? [])
-                    : [];
-                  return (
-                    <div className="rounded-lg border border-indigo-200 dark:border-indigo-500/30 bg-indigo-50/40 dark:bg-indigo-500/5 p-3 space-y-3">
-                      <h4 className="text-xs font-semibold text-indigo-800 dark:text-indigo-300">
-                        {t("topology.protocolAggregationTitle")}
-                      </h4>
-                      <p className="text-[11px] text-indigo-700 dark:text-indigo-400">
-                        {t("topology.protocolAggregationHintNew")}
-                      </p>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div className="space-y-1">
-                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationCategory")}</label>
-                          <select
-                            value={p.mapping.aggregationCategoryId ?? ""}
-                            onChange={(e) => updateProtocol(p.id, {
-                              mapping: {
-                                aggregationCategoryId: e.target.value ? Number(e.target.value) : null,
-                              } as ProtocolMapping,
-                            })}
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                          >
-                            <option value="">{t("topology.protocolAggregationCategoryReuse")}</option>
-                            {inventoryCategories.filter((c) => c.id !== null).map((c) => (
-                              <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationKeyColumn")}</label>
-                          <select
-                            value={p.mapping.aggregationKeyColumn ?? ""}
-                            onChange={(e) => updateProtocol(p.id, { mapping: { aggregationKeyColumn: e.target.value } as ProtocolMapping })}
-                            disabled={cols.length === 0}
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                          >
-                            <option value="">{t("topology.protocolAggregationKeyDefault")}</option>
-                            {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAggregationValueColumn")}</label>
-                          <select
-                            value={p.mapping.aggregationValueColumn ?? ""}
-                            onChange={(e) => updateProtocol(p.id, { mapping: { aggregationValueColumn: e.target.value } as ProtocolMapping })}
-                            disabled={aggCols.length === 0}
-                            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                          >
-                            <option value="">—</option>
-                            {aggCols.map((col) => <option key={col} value={col}>{col}</option>)}
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {p.type === "isis" && (
-                  <div className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50/50 dark:bg-amber-500/5 p-3 space-y-3">
-                    <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                      {t("topology.protocolIsisAreas")}
-                    </h4>
-                    <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                      {t("topology.protocolIsisAreasHint")}
-                    </p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <div className="space-y-1">
-                        <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolLinkAreaColumn")}</label>
-                        <select
-                          value={p.mapping.linkAreaColumn ?? ""}
-                          onChange={(e) => updateProtocol(p.id, { mapping: { linkAreaColumn: e.target.value } as ProtocolMapping })}
-                          disabled={cols.length === 0}
-                          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                        >
-                          <option value="">—</option>
-                          {cols.map((col) => <option key={col} value={col}>{col}</option>)}
-                        </select>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAreaCategory")}</label>
-                        <select
-                          value={p.mapping.areaCategoryId ?? ""}
-                          onChange={(e) => updateProtocol(p.id, {
-                            mapping: { areaCategoryId: e.target.value ? Number(e.target.value) : null } as ProtocolMapping,
-                          })}
-                          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                        >
-                          <option value="">—</option>
-                          {inventoryCategories.filter((c) => c.id !== null).map((c) => (
-                            <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      {(() => {
-                        const areaCatName = inventoryCategories.find((c) => c.id === p.mapping.areaCategoryId)?.name;
-                        const areaCols = areaCatName ? (inventoryCategories.find((c) => c.name === areaCatName)?.columns ?? []) : [];
-                        return (
-                          <div className="space-y-1">
-                            <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.protocolAreaColumn")}</label>
-                            <select
-                              value={p.mapping.areaColumn ?? ""}
-                              onChange={(e) => updateProtocol(p.id, { mapping: { areaColumn: e.target.value } as ProtocolMapping })}
-                              disabled={areaCols.length === 0}
-                              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm disabled:opacity-40"
-                            >
-                              <option value="">—</option>
-                              {areaCols.map((col) => <option key={col} value={col}>{col}</option>)}
-                            </select>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
-                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{t("topology.protocolEdgeStyleTitle")}</h3>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.edgeType")}</label>
-                    <select
-                      value={p.edgeStyle.type ?? "straight"}
-                      onChange={(e) => updateProtocol(p.id, { edgeStyle: { type: e.target.value as EdgeStyle["type"] } })}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                    >
-                      {EDGE_TYPE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.edgeDash")}</label>
-                    <select
-                      value={p.edgeStyle.dash ?? "solid"}
-                      onChange={(e) => updateProtocol(p.id, { edgeStyle: { dash: e.target.value as EdgeStyle["dash"] } })}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                    >
-                      {EDGE_DASH_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.edgeWidth")}</label>
-                    <input
-                      type="number"
-                      step={0.5}
-                      min={0.5}
-                      max={10}
-                      value={p.edgeStyle.width ?? 0.5}
-                      onChange={(e) => updateProtocol(p.id, { edgeStyle: { width: Number(e.target.value) } })}
-                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.edgeColor")}</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={p.edgeStyle.color ?? "#6366f1"}
-                        onChange={(e) => updateProtocol(p.id, { edgeStyle: { color: e.target.value } })}
-                        className="h-9 w-9 rounded border border-slate-200 dark:border-slate-700 cursor-pointer p-0.5"
-                      />
-                      <input
-                        type="text"
-                        value={p.edgeStyle.color ?? "#6366f1"}
-                        onChange={(e) => updateProtocol(p.id, { edgeStyle: { color: e.target.value } })}
-                        className="flex-1 min-w-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-                {mapOptions.aggregateParallelLinks && (
-                  <div className="space-y-1">
-                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">{t("topology.aggregationGroup")}</label>
-                    <input
-                      type="text"
-                      value={p.edgeStyle.aggregationGroup ?? ""}
-                      onChange={(e) => updateProtocol(p.id, { edgeStyle: { aggregationGroup: e.target.value } as Partial<EdgeStyle> })}
-                      placeholder={t("topology.aggregationGroupPlaceholder")}
-                      className="w-full max-w-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                    />
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{t("topology.protocolAggregationHint")}</p>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  onClick={async () => { await deleteProtocol(p.id); }}
-                  className="flex items-center gap-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 px-3 py-1.5 rounded-lg"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("topology.delete")}
-                </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => generateProtocol(p.id)}
-                    disabled={!p.inventoryCategoryId || !p.mapping.destNodeColumn || generatingProtocolId === p.id}
-                    className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {generatingProtocolId === p.id && <Loader2 className="h-4 w-4 animate-spin" />}
-                    {t("topology.protocolGenerate")}
-                  </button>
-                  <button
-                    onClick={() => setEditingProtocolId(null)}
-                    className="rounded-lg bg-slate-900 dark:bg-white px-4 py-1.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100"
-                  >
-                    {t("common.close")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ProtocolWorkflowModal
+            mode={protocolWorkflowMode}
+            initial={initial}
+            inventoryCategories={inventoryCategories}
+            aggregateParallelLinksEnabled={mapOptions.aggregateParallelLinks ?? false}
+            onCancel={() => {
+              setProtocolWorkflowMode(null);
+              setEditingProtocolId(null);
+            }}
+            onSubmit={async (draft) => {
+              if (protocolWorkflowMode === "edit" && editing) {
+                await updateProtocol(editing.id, {
+                  name: draft.name.trim() || editing.name,
+                  inventoryCategoryId: draft.inventoryCategoryId,
+                  inventoryCategoryName: draft.inventoryCategoryName,
+                  mapping: draft.mapping as ProtocolMapping,
+                  edgeStyle: draft.edgeStyle as Partial<EdgeStyle>,
+                });
+              } else {
+                await createProtocolFromDraft(draft);
+              }
+              setProtocolWorkflowMode(null);
+              setEditingProtocolId(null);
+            }}
+          />
         );
       })()}
+
     </div>
   );
 }

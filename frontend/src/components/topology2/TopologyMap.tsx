@@ -492,15 +492,18 @@ export default function TopologyMap({ topologyId }: Props) {
       // other selected node moves by the same absolute delta from its starting
       // position (snapshot in dragStart.groupStarts). Computing the delta from
       // the frozen snapshot — not from the live state — avoids any per-frame
-      // drift on the passive nodes.
+      // drift on the passive nodes. We snapshot dragStart synchronously: the
+      // updater may run after mouseup has cleared dragStart.current.
+      const starts = dragStart.current.groupStarts;
+      const baseNx = dragStart.current.nx;
+      const baseNy = dragStart.current.ny;
       setPositions((prev) => {
-        const starts = dragStart.current!.groupStarts;
         const ids = Object.keys(starts);
         if (ids.length <= 1) {
           return { ...prev, [draggedId]: { x: nx, y: ny } };
         }
-        const rdx = nx - dragStart.current!.nx;
-        const rdy = ny - dragStart.current!.ny;
+        const rdx = nx - baseNx;
+        const rdy = ny - baseNy;
         const next: Record<number, { x: number; y: number }> = { ...prev };
         for (const idStr of ids) {
           const id = Number(idStr);
