@@ -73,6 +73,7 @@ const BUILTIN_FIELDS = [
 const BADGE_FIELDS = {
   compliance: "badge:compliance",
   monitoring: "badge:monitoring",
+  stp_root: "badge:stp_root",
 } as const;
 
 const COMPLIANCE_COLORS: Record<string, string> = {
@@ -250,21 +251,33 @@ export default function NodeLabelEditor({ elements, onChange, node, inventoryCat
   };
 
   const addBadge = (field: string) => {
-    const offsetX = field === BADGE_FIELDS.monitoring ? node.width / 2 + 6 : -(node.width / 2 + 6);
+    // Default position per badge type — compliance left, monitoring right,
+    // STP root top-right (matches the previous hardcoded behaviour).
+    let offsetX = -(node.width / 2 + 6);
+    let offsetY = -node.height / 2 - 4;
+    if (field === BADGE_FIELDS.monitoring) offsetX = node.width / 2 + 6;
+    if (field === BADGE_FIELDS.stp_root) {
+      offsetX = node.width / 2 - 4;
+      offsetY = -node.height / 2 - 4;
+    }
+    const isStpRoot = field === BADGE_FIELDS.stp_root;
     const newEl: LabelElement = {
       field,
       x: Math.round(offsetX),
-      y: Math.round(-node.height / 2 - 4),
+      y: Math.round(offsetY),
       fontSize: 12,
       color: "#ffffff",
       fontWeight: 700,
       fontFamily: "sans-serif",
       fontStyle: "normal",
       textAlign: "center",
-      badgeSize: 12,
+      badgeSize: isStpRoot ? 14 : 12,
       badgeBorderColor: "#ffffff",
-      badgeBorderWidth: 2,
-      badgeShowLabel: field === BADGE_FIELDS.compliance,
+      badgeBorderWidth: 1.5,
+      // For STP root we want "R" letter, like compliance "A/B/…".
+      badgeShowLabel: field === BADGE_FIELDS.compliance || isStpRoot,
+      // STP root uses a fixed red background by default.
+      badgeBgColor: isStpRoot ? "#dc2626" : undefined,
     };
     onChange([...elements, newEl]);
     setSelected(elements.length);
@@ -310,6 +323,7 @@ export default function NodeLabelEditor({ elements, onChange, node, inventoryCat
   const fieldLabel = (field: string): string => {
     if (field === BADGE_FIELDS.compliance) return t("topology.badgeCompliance");
     if (field === BADGE_FIELDS.monitoring) return t("topology.badgeMonitoring");
+    if (field === BADGE_FIELDS.stp_root) return t("topology.badgeStpRoot");
     const inv = parseInventoryField(field);
     if (inv) return `${inv.category} · ${inv.key} · ${inv.column}`;
     const opt = BUILTIN_FIELDS.find((b) => b.value === field);
@@ -383,6 +397,14 @@ export default function NodeLabelEditor({ elements, onChange, node, inventoryCat
               >
                 <Activity className="h-3.5 w-3.5 text-emerald-500" />
                 {t("topology.badgeMonitoring")}
+              </button>
+              <button
+                type="button"
+                onClick={() => addBadge(BADGE_FIELDS.stp_root)}
+                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors border-t border-slate-100 dark:border-slate-800"
+              >
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-red-500 text-white text-[8px] font-bold">R</span>
+                {t("topology.badgeStpRoot")}
               </button>
             </div>
           )}
@@ -512,11 +534,16 @@ export default function NodeLabelEditor({ elements, onChange, node, inventoryCat
                 const diameter = el.badgeSize ?? el.fontSize;
                 const r = diameter / 2;
                 const isCompliance = el.field === BADGE_FIELDS.compliance;
+                const isStpRoot = el.field === BADGE_FIELDS.stp_root;
                 const autoColor = isCompliance
                   ? COMPLIANCE_COLORS[SAMPLE_COMPLIANCE]
-                  : (SAMPLE_REACHABLE ? "#22c55e" : "#ef4444");
+                  : isStpRoot
+                    ? "#dc2626"
+                    : (SAMPLE_REACHABLE ? "#22c55e" : "#ef4444");
                 const fill = el.badgeBgColor || autoColor;
-                const labelText = isCompliance && el.badgeShowLabel ? SAMPLE_COMPLIANCE : "";
+                const labelText = isCompliance && el.badgeShowLabel
+                  ? SAMPLE_COMPLIANCE
+                  : (isStpRoot && el.badgeShowLabel !== false) ? "R" : "";
                 return (
                   <g key={idx} style={{ cursor }}>
                     {isSelected && (

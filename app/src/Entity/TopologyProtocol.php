@@ -11,8 +11,10 @@ class TopologyProtocol
 {
     public const TYPE_LLDP = 'lldp';
     public const TYPE_ISIS = 'isis';
+    public const TYPE_STP  = 'stp';
+    public const TYPE_MSTP = 'mstp';
 
-    public const TYPES = [self::TYPE_LLDP, self::TYPE_ISIS];
+    public const TYPES = [self::TYPE_LLDP, self::TYPE_ISIS, self::TYPE_STP, self::TYPE_MSTP];
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
@@ -122,6 +124,58 @@ class TopologyProtocol
             'linkAreaColumn' => '',
             'areaCategoryId' => null,
             'areaColumn' => '',
+            // STP / MSTP — LLDP-driven topology with separate inventory sources.
+            //
+            // The protocol's primary category (inventoryCategoryId) holds the LLDP
+            // adjacencies: one row per local port with the remote neighbor identifier
+            // and the remote port. Adjacencies are resolved by matching the LLDP
+            // "remote neighbor" against the local identity of every other device,
+            // which is itself read from a "local identity" inventory category.
+            //
+            //   Page 2 — Bridge (root detection):
+            //     stpBridgeCategoryId  : category holding Bridge ID / Root ID per instance
+            //     stpBridgeIdColumn    : Bridge ID column
+            //     stpRootIdColumn      : Root ID column
+            //
+            //   Page 3 — Ports, three sections:
+            //
+            //   1. Local identity (the hostname/chassis ID neighbors see when
+            //      they look at us via LLDP). Per-device row in any inventory
+            //      category; the entryKey filter is optional.
+            //     stpLocalCategoryId   : category holding the local identity
+            //     stpLocalEntryKey     : optional entryKey filter
+            //     stpLocalColumn       : column whose value is compared against
+            //                            the LLDP remote neighbor field
+            //
+            //   2. LLDP adjacencies (= the protocol's primary inventoryCategoryId).
+            //      Re-uses the standard LLDP keys:
+            //     localPortColumn      : column holding the local port
+            //     destNodeColumn       : column holding the REMOTE NEIGHBOR (matched
+            //                            against stpLocalColumn values to find the
+            //                            target Node)
+            //     remotePortColumn     : column holding the remote port (optional)
+            //
+            //   3. Port state (state/role/cost/instance). Lives in a potentially
+            //      different category — extractor sources often split LLDP from STP.
+            //     stpStateCategoryId   : category holding the per-port state rows
+            //     stpStatePortColumn   : port name column on the state rows
+            //     stpStateColumn       : state column (Forwarding/Blocking/...)
+            //     stpRoleColumn        : role column (Root/Designated/Alternate/...)
+            //     stpInstanceColumn    : instance ID column (MSTP — required to
+            //                            split adjacencies per-instance)
+            //     metricColumn         : cost column (optional)
+            'stpLocalCategoryId' => null,
+            'stpLocalEntryKey' => '',
+            'stpLocalColumn' => '',
+            'stpStateCategoryId' => null,
+            'stpStatePortColumn' => '',
+            'stpStateColumn' => '',
+            'stpRoleColumn' => '',
+            'stpInstanceColumn' => '',
+            'stpPriorityColumn' => '',
+            'stpBridgeCategoryId' => null,
+            'stpBridgeIdColumn' => '',
+            'stpRootIdColumn' => '',
         ];
     }
 

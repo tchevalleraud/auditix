@@ -961,10 +961,18 @@ class TopologyController extends AbstractController
 
         $stats = ['created' => 0, 'skipped' => 0];
 
-        if ($protocol->getType() === TopologyProtocol::TYPE_ISIS) {
-            $this->generateIsisEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
-        } else {
-            $this->generateLldpEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
+        switch ($protocol->getType()) {
+            case TopologyProtocol::TYPE_ISIS:
+                $this->generateIsisEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
+                break;
+            case TopologyProtocol::TYPE_STP:
+                $this->generateStpEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
+                break;
+            case TopologyProtocol::TYPE_MSTP:
+                $this->generateMstpEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
+                break;
+            default:
+                $this->generateLldpEdges($protocol, $mapping, $category, $style, $nodeById, $nodeByKey, $em, $stats);
         }
 
         $protocol->setLastGeneratedAt(new \DateTimeImmutable());
@@ -1506,6 +1514,654 @@ class TopologyController extends AbstractController
             $em->flush();
             $areaIdx++;
         }
+    }
+
+    /**
+     * Generate STP (single-instance) edges. Each port row in the protocol's
+     * primary category becomes a half-edge whose neighbor is resolved via the
+     * "Designated Bridge" column matched against the Bridge ID column of a
+     * separate bridge-identity category. Pairs of half-edges between the same
+     * two devices collapse into one edge, and a TopologyCluster of size one is
+     * emitted for the root bridge so the map renderer can crown it.
+     */
+    private function generateStpEdges(
+        TopologyProtocol $protocol, array $mapping, InventoryCategory $category, array $style,
+        array $nodeById, array $nodeByKey, EntityManagerInterface $em, array &$stats,
+    ): void {
+        $bridgeIndex = $this->buildStpBridgeIndex($mapping, $nodeById, $em, /* mstp */ false);
+        $halfEdges = $this->collectStpHalfEdges(
+            $protocol, $mapping, $category, $nodeById, $nodeByKey, $em, $bridgeIndex, /* mstp */ false, $stats,
+        );
+        $this->emitStpEdges($protocol, $style, $halfEdges, /* mstp */ false, $em, $stats);
+        $this->emitStpRootClusters($protocol, $bridgeIndex, $nodeById, /* mstp */ false, $em);
+    }
+
+    /**
+     * Generate MSTP edges. Same shape as generateStpEdges but each port row is
+     * scoped to an instance ID (read from stpInstanceColumn or derived from the
+     * entryKey suffix "port:instance"), bridge resolution is per-instance, and
+     * one cluster per instance is emitted with its own root.
+     */
+    private function generateMstpEdges(
+        TopologyProtocol $protocol, array $mapping, InventoryCategory $category, array $style,
+        array $nodeById, array $nodeByKey, EntityManagerInterface $em, array &$stats,
+    ): void {
+        $bridgeIndex = $this->buildStpBridgeIndex($mapping, $nodeById, $em, /* mstp */ true);
+        $halfEdges = $this->collectStpHalfEdges(
+            $protocol, $mapping, $category, $nodeById, $nodeByKey, $em, $bridgeIndex, /* mstp */ true, $stats,
+        );
+        $this->emitStpEdges($protocol, $style, $halfEdges, /* mstp */ true, $em, $stats);
+        $this->emitStpRootClusters($protocol, $bridgeIndex, $nodeById, /* mstp */ true, $em);
+    }
+
+    /**
+     * Read the bridge-identity inventory and build:
+     *   - bridgeIdToNode[instance][bridgeIdLower] = Node  (instance = "" for STP)
+     *   - nodeBridgeId[nodeId][instance] = bridgeId
+     *   - nodeRootId[nodeId][instance]   = rootId
+     * For STP, the bridge category is expected to hold one row per device (any
+     * entryKey, typically "default"). For MSTP, one row per (device × instance)
+     * with entryKey = instance ID.
+     */
+    private function buildStpBridgeIndex(array $mapping, array $nodeById, EntityManagerInterface $em, bool $mstp): array
+    {
+        $bridgeCatId = $mapping['stpBridgeCategoryId'] ?? null;
+        $bridgeCol = (string)($mapping['stpBridgeIdColumn'] ?? '');
+        $rootCol = (string)($mapping['stpRootIdColumn'] ?? '');
+        $idx = [
+            'bridgeIdToNode' => [], // instance => [bridgeIdLower => Node]
+            'nodeBridgeId' => [],   // nodeId => [instance => bridgeId]
+            'nodeRootId' => [],     // nodeId => [instance => rootId]
+        ];
+        if (!$bridgeCatId || $bridgeCol === '') return $idx;
+        $bridgeCat = $em->getRepository(InventoryCategory::class)->find((int)$bridgeCatId);
+        if (!$bridgeCat) return $idx;
+
+        foreach ($nodeById as $nid => $node) {
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                'node' => $node,
+                'category' => $bridgeCat,
+            ]);
+            $byKey = [];
+            foreach ($entries as $e) {
+                $byKey[$e->getEntryKey()][$e->getColLabel()] = $e->getValue();
+            }
+            foreach ($byKey as $entryKey => $cols) {
+                $bridgeId = isset($cols[$bridgeCol]) ? trim((string)$cols[$bridgeCol]) : '';
+                if ($bridgeId === '') continue;
+                $rootId = ($rootCol !== '' && isset($cols[$rootCol])) ? trim((string)$cols[$rootCol]) : '';
+                $instance = $mstp ? (string)$entryKey : '';
+                $idx['bridgeIdToNode'][$instance][$this->normalizeBridgeId($bridgeId)] = $node;
+                $idx['nodeBridgeId'][$nid][$instance] = $bridgeId;
+                if ($rootId !== '') {
+                    $idx['nodeRootId'][$nid][$instance] = $rootId;
+                }
+            }
+        }
+        return $idx;
+    }
+
+    /**
+     * Collect STP/MSTP half-edges by crossing three independent inventory sources:
+     *   1. Local identity (stpLocalCategoryId) — gives each device a value (hostname,
+     *      chassis ID, …) that the device's LLDP neighbors will report as their
+     *      "remote neighbor". Used to build a `value → Node` index.
+     *   2. LLDP adjacencies (category — the protocol's primary inventoryCategoryId)
+     *      — one row per local port with the remote neighbor ID and remote port.
+     *      The remote neighbor is matched against (1) to find the target Node.
+     *   3. Port state (stpStateCategoryId) — per-port, per-instance row holding
+     *      State / Role / Cost. Keyed by port name on the device. MSTP multiplies
+     *      adjacencies by instance: an LLDP adjacency on port "1/1" yields one
+     *      half-edge per (port × instance) row found in state.
+     *
+     * Plain STP behaves as MSTP with a single empty-string instance.
+     */
+    private function collectStpHalfEdges(
+        TopologyProtocol $protocol, array $mapping, InventoryCategory $category,
+        array $nodeById, array $nodeByKey, EntityManagerInterface $em, array $bridgeIndex, bool $mstp, array &$stats,
+    ): array {
+        $destCol         = (string)($mapping['destNodeColumn'] ?? '');
+        $localPortCol    = (string)($mapping['localPortColumn'] ?? '');
+        $remotePortCol   = (string)($mapping['remotePortColumn'] ?? '');
+        $metricCol       = (string)($mapping['metricColumn'] ?? '');
+        $stateCol        = (string)($mapping['stpStateColumn'] ?? '');
+        $roleCol         = (string)($mapping['stpRoleColumn'] ?? '');
+        $instanceCol     = (string)($mapping['stpInstanceColumn'] ?? '');
+        $priorityCol     = (string)($mapping['stpPriorityColumn'] ?? '');
+        $localCatId      = $mapping['stpLocalCategoryId'] ?? null;
+        $localEntryKey   = (string)($mapping['stpLocalEntryKey'] ?? '');
+        $localCol        = (string)($mapping['stpLocalColumn'] ?? '');
+        $stateCatId      = $mapping['stpStateCategoryId'] ?? null;
+        $statePortCol    = (string)($mapping['stpStatePortColumn'] ?? '');
+
+        // === 1. Local identity index ===
+        // nodeByLocalId[lowercase(localValue)] = Node
+        // localIdByNode[nodeId] = localValue (for debug / self-reference checks)
+        $nodeByLocalId = [];
+        $localIdByNode = [];
+        if ($localCatId && $localCol !== '') {
+            $localCat = $em->getRepository(InventoryCategory::class)->find((int)$localCatId);
+            if ($localCat) {
+                foreach ($nodeById as $nid => $node) {
+                    $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                        'node' => $node,
+                        'category' => $localCat,
+                        'colLabel' => $localCol,
+                    ]);
+                    foreach ($entries as $e) {
+                        if ($localEntryKey !== '' && (string)$e->getEntryKey() !== $localEntryKey) continue;
+                        $val = trim((string)($e->getValue() ?? ''));
+                        if ($val === '') continue;
+                        $nodeByLocalId[strtolower($val)] = $node;
+                        $localIdByNode[$nid] = $val;
+                    }
+                }
+            }
+        }
+
+        // === 3. Port state index ===
+        // stateByNodePort[nodeId][portLower][instance] = { state, role, cost }
+        // Built FIRST so each LLDP adjacency can be exploded by instance.
+        $stateByNodePort = [];
+        if ($stateCatId) {
+            $stateCat = $em->getRepository(InventoryCategory::class)->find((int)$stateCatId);
+            if ($stateCat) {
+                foreach ($nodeById as $nid => $node) {
+                    $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                        'node' => $node,
+                        'category' => $stateCat,
+                    ]);
+                    $byKey = [];
+                    foreach ($entries as $e) {
+                        $byKey[$e->getEntryKey()][$e->getColLabel()] = $e->getValue();
+                    }
+                    foreach ($byKey as $entryKey => $cols) {
+                        // Port: stpStatePortColumn wins, else parse "port:instance"
+                        // suffix off the entryKey, else use entryKey as-is.
+                        $port = '';
+                        if ($statePortCol !== '' && isset($cols[$statePortCol]) && $cols[$statePortCol] !== '') {
+                            $port = (string)$cols[$statePortCol];
+                        } elseif (str_contains((string)$entryKey, ':')) {
+                            $port = (string)substr((string)$entryKey, 0, (int)strrpos((string)$entryKey, ':'));
+                        } else {
+                            $port = (string)$entryKey;
+                        }
+                        if ($port === '') continue;
+
+                        // Instance: explicit column wins, else suffix "port:instance",
+                        // else "" (plain STP).
+                        $instance = '';
+                        if ($instanceCol !== '' && isset($cols[$instanceCol]) && $cols[$instanceCol] !== '') {
+                            $instance = trim((string)$cols[$instanceCol]);
+                        } elseif (str_contains((string)$entryKey, ':')) {
+                            $instance = trim((string)substr((string)$entryKey, (int)strrpos((string)$entryKey, ':') + 1));
+                        }
+                        if ($mstp && $instance === '') { continue; }
+
+                        $stateByNodePort[$nid][strtolower($port)][$instance] = [
+                            'state'    => $this->normalizeStpState(($stateCol !== '' && isset($cols[$stateCol])) ? trim((string)$cols[$stateCol]) : ''),
+                            'role'     => ($roleCol !== '' && isset($cols[$roleCol])) ? trim((string)$cols[$roleCol]) : '',
+                            'cost'     => ($metricCol !== '' && isset($cols[$metricCol]) && is_numeric($cols[$metricCol])) ? (int)$cols[$metricCol] : null,
+                            'priority' => ($priorityCol !== '' && isset($cols[$priorityCol]) && is_numeric($cols[$priorityCol])) ? (int)$cols[$priorityCol] : null,
+                        ];
+                    }
+                }
+            }
+        }
+
+        // === 2. LLDP adjacencies + 3. cross with port state by instance ===
+        $halfEdges = [];
+        foreach ($nodeById as $sourceNodeId => $sourceNode) {
+            $entries = $em->getRepository(NodeInventoryEntry::class)->findBy([
+                'node' => $sourceNode,
+                'category' => $category,
+            ]);
+            $byKey = [];
+            foreach ($entries as $e) {
+                $byKey[$e->getEntryKey()][$e->getColLabel()] = $e->getValue();
+            }
+            foreach ($byKey as $entryKey => $cols) {
+                $remoteVal = ($destCol !== '' && isset($cols[$destCol])) ? trim((string)$cols[$destCol]) : '';
+                if ($remoteVal === '') { $stats['skipped']++; continue; }
+
+                $target = $nodeByLocalId[strtolower($remoteVal)] ?? null;
+                if (!$target) { $stats['skipped']++; continue; }
+                if ($target->getId() === $sourceNodeId) { $stats['skipped']++; continue; }
+
+                $localPort = ($localPortCol !== '' && isset($cols[$localPortCol]) && $cols[$localPortCol] !== '')
+                    ? (string)$cols[$localPortCol]
+                    : (string)$entryKey;
+                $remotePort = ($remotePortCol !== '' && isset($cols[$remotePortCol]) && $cols[$remotePortCol] !== '')
+                    ? (string)$cols[$remotePortCol]
+                    : '';
+
+                // Port state lookup: emit one half-edge per (port × instance)
+                // for MSTP, one for plain STP. When state info is missing for a
+                // port, the adjacency is still emitted (state=unknown) so the
+                // user gets the topology even if STP collection lagged behind.
+                $statesForPort = $stateByNodePort[$sourceNodeId][strtolower($localPort)] ?? [];
+                if (empty($statesForPort)) {
+                    if ($mstp) {
+                        // No state info: skip — MSTP edges are meaningless without
+                        // an instance to attach them to.
+                        $stats['skipped']++;
+                        continue;
+                    }
+                    $statesForPort = ['' => ['state' => 'unknown', 'role' => '', 'cost' => null, 'priority' => null]];
+                }
+                foreach ($statesForPort as $instance => $st) {
+                    $halfEdges[] = [
+                        'sourceNodeId' => $sourceNodeId,
+                        'sourceNode'   => $sourceNode,
+                        'targetNodeId' => $target->getId(),
+                        'targetNode'   => $target,
+                        'localPort'    => $localPort,
+                        'remotePort'   => $remotePort,
+                        'instance'     => (string)$instance,
+                        'state'        => (string)$st['state'],
+                        'role'         => (string)$st['role'],
+                        'cost'         => $st['cost'],
+                        'priority'     => $st['priority'] ?? null,
+                    ];
+                    $stats['created']++;
+                }
+            }
+        }
+        // emitStpEdges() expects 'created' to count finalized edges, not half-edges.
+        // Reset the running counter — it will be re-incremented per persisted edge.
+        $stats['created'] = 0;
+        return $halfEdges;
+    }
+
+    /**
+     * Pair half-edges by undirected node pair (and instance for MSTP), then
+     * persist one TopologyEdge per pair. The visual state is the "worst" of
+     * both sides — a blocked port on either end means the link doesn't carry
+     * traffic, even if the opposite side is forwarding.
+     */
+    private function emitStpEdges(
+        TopologyProtocol $protocol, array $style, array $halfEdges, bool $mstp,
+        EntityManagerInterface $em, array &$stats,
+    ): void {
+        $topology = $protocol->getTopology();
+
+        // 1) Group half-edges by undirected node pair, kept in directed buckets
+        //    (min-side / max-side). Two physical links A↔B with parallel ports
+        //    (1/1↔1/1, 1/2↔1/2) produce 4 directed half-edges per instance —
+        //    grouping by node pair only would collapse them into ONE edge,
+        //    losing the parallel-link information. We need a second grouping
+        //    pass by port pair before persisting.
+        $byPair = [];
+        foreach ($halfEdges as $h) {
+            $a = $h['sourceNodeId'];
+            $b = $h['targetNodeId'];
+            $pairId = $a < $b ? "$a:$b" : "$b:$a";
+            $dir = ($a < $b) ? 'min' : 'max';
+            $byPair[$pairId][$dir][] = $h;
+        }
+
+        // 2) For each node pair, regroup half-edges by local port (collapsing
+        //    instances), then match min-side ports to max-side ports using
+        //    remotePort/localPort like generateLldpEdges does.
+        foreach ($byPair as $pairId => $dirs) {
+            $minByPort = [];
+            $maxByPort = [];
+            foreach (($dirs['min'] ?? []) as $h) {
+                $minByPort[(string)$h['localPort']][] = $h;
+            }
+            foreach (($dirs['max'] ?? []) as $h) {
+                $maxByPort[(string)$h['localPort']][] = $h;
+            }
+
+            // Match each min-side port to a max-side port. Strict on remotePort
+            // when known; first compatible match wins.
+            $matchedMax = [];
+            foreach ($minByPort as $portMin => $halvesMin) {
+                $remoteOnMaxSide = (string)($halvesMin[0]['remotePort'] ?? '');
+                $bestPortMax = null;
+                foreach ($maxByPort as $portMax => $halvesMax) {
+                    if (isset($matchedMax[$portMax])) continue;
+                    $remoteOnMinSide = (string)($halvesMax[0]['remotePort'] ?? '');
+                    if ($remoteOnMaxSide !== '' && $portMax !== '' && $remoteOnMaxSide !== $portMax) continue;
+                    if ($remoteOnMinSide !== '' && $portMin !== '' && $remoteOnMinSide !== $portMin) continue;
+                    $bestPortMax = $portMax;
+                    break;
+                }
+                if ($bestPortMax !== null) {
+                    $matchedMax[$bestPortMax] = true;
+                    $this->persistStpEdge($protocol, $topology, $halvesMin, $maxByPort[$bestPortMax], $style, $mstp, $em);
+                } else {
+                    $this->persistStpEdge($protocol, $topology, $halvesMin, [], $style, $mstp, $em);
+                }
+                $stats['created']++;
+            }
+            foreach ($maxByPort as $portMax => $halvesMax) {
+                if (isset($matchedMax[$portMax])) continue;
+                $this->persistStpEdge($protocol, $topology, [], $halvesMax, $style, $mstp, $em);
+                $stats['created']++;
+            }
+        }
+    }
+
+    /**
+     * Persist a single STP/MSTP edge from one physical port-pair.
+     *   $minHalves : every half-edge collected on the min-id side of the pair
+     *                (= all instances of the same local port). Empty if LLDP
+     *                visibility was asymmetric.
+     *   $maxHalves : same on the max-id side.
+     * For MSTP, each instance is stamped onto edge.style.stpInstances. For STP
+     * (single empty-string instance) we end up with one row in stpInstances
+     * but also surface the aggregated stpState / stpStateLocal / stpStateRemote
+     * directly on the edge style for legacy renderers.
+     */
+    private function persistStpEdge(
+        TopologyProtocol $protocol, Topology $topology,
+        array $minHalves, array $maxHalves, array $style, bool $mstp, EntityManagerInterface $em,
+    ): void {
+        if (empty($minHalves) && empty($maxHalves)) return;
+
+        // Orientation: prefer min→max so source/target are deterministic across
+        // regenerations. When only one side exists, use that side as source.
+        if (!empty($minHalves)) {
+            $sourceNode = $minHalves[0]['sourceNode'];
+            $targetNode = $minHalves[0]['targetNode'];
+            $portOnSource = (string)$minHalves[0]['localPort'];
+            $portOnTarget = (string)(($maxHalves[0]['localPort'] ?? $minHalves[0]['remotePort'] ?? ''));
+        } else {
+            $sourceNode = $maxHalves[0]['sourceNode'];
+            $targetNode = $maxHalves[0]['targetNode'];
+            $portOnSource = (string)$maxHalves[0]['localPort'];
+            $portOnTarget = (string)($maxHalves[0]['remotePort'] ?? '');
+        }
+
+        // Index instances by ID on each side so MSTP can pair states per-MSTI.
+        $statesByInstanceMin = [];
+        foreach ($minHalves as $h) {
+            $statesByInstanceMin[(string)$h['instance']] = $h;
+        }
+        $statesByInstanceMax = [];
+        foreach ($maxHalves as $h) {
+            $statesByInstanceMax[(string)$h['instance']] = $h;
+        }
+        $allInstances = array_unique(array_merge(
+            array_keys($statesByInstanceMin),
+            array_keys($statesByInstanceMax),
+        ));
+
+        $instanceRows = [];
+        $aggregateState = null;
+        foreach ($allInstances as $instance) {
+            $a = $statesByInstanceMin[$instance] ?? null;
+            $b = $statesByInstanceMax[$instance] ?? null;
+            $stateA = $a['state'] ?? null;
+            $stateB = $b['state'] ?? null;
+            $perInstanceState = $this->aggregateStpStates($stateA, $stateB);
+            $instanceRows[] = [
+                'instance'       => (string)$instance,
+                'state'          => $perInstanceState,
+                'stateLocal'     => $stateA,
+                'stateRemote'    => $stateB,
+                'roleLocal'      => $a['role'] ?? '',
+                'roleRemote'     => $b['role'] ?? '',
+                'cost'           => ($a['cost'] ?? null) ?? ($b['cost'] ?? null),
+                'costLocal'      => $a['cost'] ?? null,
+                'costRemote'     => $b['cost'] ?? null,
+                'priorityLocal'  => $a['priority'] ?? null,
+                'priorityRemote' => $b['priority'] ?? null,
+            ];
+            $aggregateState = $aggregateState === null
+                ? $perInstanceState
+                : $this->aggregateStpStates($aggregateState, $perInstanceState);
+        }
+
+        // Numeric-aware sort so MSTI 0,1,2,…,10 stays in order in the frontend.
+        usort($instanceRows, static function ($x, $y) {
+            $xn = is_numeric($x['instance']) ? (int)$x['instance'] : null;
+            $yn = is_numeric($y['instance']) ? (int)$y['instance'] : null;
+            if ($xn !== null && $yn !== null) return $xn <=> $yn;
+            return strcmp((string)$x['instance'], (string)$y['instance']);
+        });
+
+        $edgeStyle = $this->applyStpStateStyle($style, $aggregateState ?? 'unknown');
+        $edgeStyle['stpState'] = $aggregateState ?? 'unknown';
+        if ($mstp) {
+            $edgeStyle['stpInstances'] = $instanceRows;
+        } else {
+            $primary = $instanceRows[0] ?? null;
+            if ($primary !== null) {
+                if ($primary['stateLocal']  !== null) $edgeStyle['stpStateLocal']  = $primary['stateLocal'];
+                if ($primary['stateRemote'] !== null) $edgeStyle['stpStateRemote'] = $primary['stateRemote'];
+                if ($primary['roleLocal']   !== '')   $edgeStyle['stpRoleLocal']   = $primary['roleLocal'];
+                if ($primary['roleRemote']  !== '')   $edgeStyle['stpRoleRemote']  = $primary['roleRemote'];
+                if ($primary['cost']        !== null) $edgeStyle['metric']         = $primary['cost'];
+            }
+        }
+
+        $labels = [];
+        if ($portOnSource !== '') {
+            $labels[] = ['text' => $portOnSource, 'position' => 'source', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+        }
+        if ($portOnTarget !== '') {
+            $labels[] = ['text' => $portOnTarget, 'position' => 'target', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 400];
+        }
+        if (!$mstp) {
+            $cost = $instanceRows[0]['cost'] ?? null;
+            if ($cost !== null) {
+                $labels[] = ['text' => (string)$cost, 'position' => 'middle', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 600];
+            }
+        }
+        if (!empty($labels)) $edgeStyle['labels'] = $labels;
+
+        $edge = new TopologyEdge();
+        $edge->setTopology($topology);
+        $edge->setSourceNode($sourceNode);
+        $edge->setTargetNode($targetNode);
+        $edge->setProtocol($protocol);
+        $edge->setStyle($edgeStyle);
+        $em->persist($edge);
+    }
+
+    /**
+     * Drop and recreate one TopologyCluster per (instance, root) pair so the
+     * map renderer can highlight the root bridge. Each cluster has exactly one
+     * member: the root node. Cluster name follows "STP Root" / "MSTI <id> Root"
+     * convention so the UI can pattern-match without inspecting style.
+     */
+    private function emitStpRootClusters(
+        TopologyProtocol $protocol, array $bridgeIndex, array $nodeById, bool $mstp, EntityManagerInterface $em,
+    ): void {
+        $em->createQuery('DELETE FROM App\Entity\TopologyCluster c WHERE c.protocol = :p')
+            ->setParameter('p', $protocol)->execute();
+        $em->flush();
+
+        $topology = $protocol->getTopology();
+        // root[instance] = bridgeId (the most-frequently-reported root for that instance wins,
+        // which makes the result resilient to one device with stale BPDU data)
+        $rootByInstance = [];
+        $rootVoteCount = []; // instance => bridgeId => votes
+        foreach ($bridgeIndex['nodeRootId'] as $nid => $perInstance) {
+            foreach ($perInstance as $instance => $rootId) {
+                $key = $this->normalizeBridgeId($rootId);
+                $rootVoteCount[$instance][$key] = ($rootVoteCount[$instance][$key] ?? 0) + 1;
+            }
+        }
+        foreach ($rootVoteCount as $instance => $votes) {
+            arsort($votes);
+            $rootByInstance[$instance] = (string)array_key_first($votes);
+        }
+
+        $palette = ['#dc2626', '#f97316', '#eab308', '#84cc16', '#0ea5e9', '#6366f1', '#a855f7', '#ec4899'];
+        $idx = 0;
+        foreach ($rootByInstance as $instance => $rootBridgeNorm) {
+            $rootNode = $bridgeIndex['bridgeIdToNode'][$instance][$rootBridgeNorm] ?? null;
+            if (!$rootNode || !isset($nodeById[$rootNode->getId()])) continue;
+
+            $name = $mstp ? "MSTI $instance Root" : "STP Root";
+            $color = $palette[$idx % count($palette)];
+            $cluster = new TopologyCluster();
+            $cluster->setTopology($topology);
+            $cluster->setProtocol($protocol);
+            $cluster->setName($name);
+            $cluster->setStyle([
+                'shape' => 'hull',
+                'borderColor' => $color,
+                'borderWidth' => 1.5,
+                'dash' => 'solid',
+                'fillColor' => $color,
+                'transparent' => true,
+                'padding' => 8,
+                'borderRadius' => 14,
+                'labelPosition' => 'top',
+                'labelFontSize' => 10,
+                'labelColor' => $color,
+                'stpRoot' => true,
+                'stpInstance' => $mstp ? (string)$instance : null,
+            ]);
+            $em->persist($cluster);
+            $em->flush();
+
+            $m = new TopologyClusterMember();
+            $m->setCluster($cluster);
+            $m->setNode($rootNode);
+            $em->persist($m);
+            $em->flush();
+            $idx++;
+        }
+    }
+
+    /**
+     * Build a "value → Node" lookup index identical to the one runProtocolGeneration
+     * builds globally, but parameterized. Used by the STP/MSTP 'lldp' neighbor
+     * resolution mode to scope its match strategy to the LLDP side without
+     * leaking it into the protocol's main mapping.
+     */
+    private function buildNodeIndex(
+        array $nodeById,
+        string $matchField,
+        $matchInvCatId,
+        string $matchInvKey,
+        string $matchInvCol,
+        EntityManagerInterface $em,
+    ): array {
+        $index = [];
+        foreach ($nodeById as $n) {
+            if ($n->getName())      $index[strtolower($n->getName())] = $n;
+            if ($n->getHostname())  $index[strtolower($n->getHostname())] = $n;
+            if ($n->getIpAddress()) $index[strtolower($n->getIpAddress())] = $n;
+        }
+        if ($matchField === 'inventory' && $matchInvCatId && $matchInvCol !== '') {
+            $cat = $em->getRepository(InventoryCategory::class)->find((int)$matchInvCatId);
+            if ($cat && !empty($nodeById)) {
+                $entries = $em->getRepository(NodeInventoryEntry::class)->findBy(['category' => $cat]);
+                foreach ($entries as $e) {
+                    if ($e->getColLabel() !== $matchInvCol) continue;
+                    if ($matchInvKey !== '' && (string)$e->getEntryKey() !== $matchInvKey) continue;
+                    $val = $e->getValue();
+                    if ($val === null || $val === '') continue;
+                    $nid = $e->getNode()->getId();
+                    if (!isset($nodeById[$nid])) continue;
+                    $index[strtolower((string)$val)] = $nodeById[$nid];
+                }
+            }
+        }
+        return $index;
+    }
+
+    /**
+     * Normalize a Bridge ID to its bare MAC (last 6 bytes) so values from
+     * different vendors / commands collapse to the same key. Bridge IDs come
+     * in two shapes:
+     *   - prefixed with priority: "8000.aabb.cc00.0001" (Cisco) or
+     *     "80:00:0c:1c:9e:c8:00:00" (VOSS "DESIGNATED ROOT") — 8 bytes total
+     *   - bare MAC: "0c:2d:3d:ab:00:00" (VOSS "BRIDGE ADDRESS") — 6 bytes
+     * Stripping non-hex chars then keeping the last 12 hex digits yields the
+     * MAC in every case — that's the only stable identity across MSTIs
+     * (priority can differ per instance, the MAC doesn't).
+     */
+    private function normalizeBridgeId(string $v): string
+    {
+        $s = strtolower(trim($v));
+        $s = preg_replace('/[^0-9a-f]/', '', $s) ?? $s;
+        if ($s === '') return '';
+        return strlen($s) > 12 ? substr($s, -12) : $s;
+    }
+
+    /** Map free-text state values to a small canonical set used for styling. */
+    private function normalizeStpState(string $v): string
+    {
+        $s = strtolower(trim($v));
+        if ($s === '') return 'unknown';
+        if (str_contains($s, 'forward') || $s === 'fwd' || $s === 'forwarding') return 'forwarding';
+        if (str_contains($s, 'block') || $s === 'blk' || $s === 'blocking') return 'blocking';
+        if (str_contains($s, 'discard') || $s === 'dis') return 'discarding';
+        if (str_contains($s, 'learn')) return 'learning';
+        if (str_contains($s, 'listen')) return 'listening';
+        if (str_contains($s, 'disabled') || str_contains($s, 'down')) return 'disabled';
+        return 'unknown';
+    }
+
+    /** "Worst" state wins: blocking/discarding beats learning/listening beats forwarding. */
+    private function aggregateStpStates(?string $a, ?string $b): string
+    {
+        $rank = [
+            'blocking' => 5, 'discarding' => 5,
+            'learning' => 4, 'listening' => 4,
+            'disabled' => 3,
+            'unknown' => 2,
+            'forwarding' => 1,
+        ];
+        $candidates = array_filter([$a, $b], static fn($v) => $v !== null && $v !== '');
+        if (empty($candidates)) return 'unknown';
+        if (count($candidates) === 1) return reset($candidates);
+        // If the two sides disagree (one forwarding, one blocking), flag as mixed.
+        if (count(array_unique($candidates)) > 1) {
+            $maxRank = 0;
+            $maxState = 'unknown';
+            foreach ($candidates as $c) {
+                $r = $rank[$c] ?? 0;
+                if ($r > $maxRank) { $maxRank = $r; $maxState = $c; }
+            }
+            return $maxRank >= 5 ? $maxState : 'mixed';
+        }
+        return reset($candidates);
+    }
+
+    /**
+     * Pick a default colour + dash for an STP state. The user's edgeStyle
+     * still wins (we merge it on top), so a custom palette in the wizard
+     * keeps working; but a freshly generated edge has sensible state colours
+     * out of the box.
+     */
+    private function applyStpStateStyle(array $baseStyle, string $state): array
+    {
+        $palette = [
+            'forwarding' => ['color' => '#22c55e', 'dash' => 'solid'],
+            'learning'   => ['color' => '#f59e0b', 'dash' => 'dashed'],
+            'listening'  => ['color' => '#fbbf24', 'dash' => 'dashed'],
+            'blocking'   => ['color' => '#ef4444', 'dash' => 'dotted'],
+            'discarding' => ['color' => '#ef4444', 'dash' => 'dotted'],
+            'disabled'   => ['color' => '#94a3b8', 'dash' => 'dotted'],
+            'mixed'      => ['color' => '#f97316', 'dash' => 'dashed'],
+            'unknown'    => null,
+        ];
+        $override = $palette[$state] ?? null;
+        if (!$override) return $baseStyle;
+        // baseStyle already has user-chosen color/dash from the wizard's Style
+        // step. Only auto-fill when those are still at the indigo-ish default,
+        // so a deliberate user choice survives a regeneration.
+        $isDefaultColor = !isset($baseStyle['color']) || in_array(strtolower($baseStyle['color']), ['#6366f1', '#94a3b8'], true);
+        $isDefaultDash = !isset($baseStyle['dash']) || $baseStyle['dash'] === 'solid';
+        if ($isDefaultColor) $baseStyle['color'] = $override['color'];
+        if ($isDefaultDash) $baseStyle['dash'] = $override['dash'];
+        return $baseStyle;
+    }
+
+    private function stripInstanceSuffix(string $entryKey, string $instance): string
+    {
+        if ($instance === '' || !str_ends_with($entryKey, ':' . $instance)) {
+            return $entryKey;
+        }
+        return substr($entryKey, 0, -strlen(':' . $instance));
     }
 
     private function resolveTargetNode(

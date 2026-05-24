@@ -53,6 +53,15 @@ interface MapOptions {
   aggregateLabelColor?: string;
   /** Initial protocol filter when opening the map. "manual" | protocol id */
   defaultProtocolFilter?: "manual" | number;
+  // STP/MSTP — global toggle for the Root badge (position/size/colours are
+  // configured per-topology via Label layout > badge:stp_root)
+  stpShowRootBadge?: boolean;
+  // STP/MSTP — port role badges on edges
+  stpShowPortRoles?: boolean;
+  stpPortRoleFontSize?: number;
+  // Legend overlay (adapts to the filtered protocol)
+  stpShowLegend?: boolean;
+  stpLegendPosition?: "tl" | "tr" | "bl" | "br";
 }
 
 const AGGREGATE_LABEL_POSITIONS = [
@@ -1207,6 +1216,84 @@ export default function TopologyConfigurePage() {
                   className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs font-mono"
                 />
               </div>
+            </div>
+
+            {/* STP / MSTP display options — lives in the left 1/3 column,
+                under the node design fields. The root badge is configured as
+                a Label element on the right; this panel only carries the
+                toggles + the role/legend options. */}
+            <div className="pt-4 mt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                {t("topology.designStpTitle")}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {t("topology.designStpHint")}
+              </p>
+
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={mapOptions.stpShowRootBadge ?? true}
+                  onChange={(e) => setMapOptions((m) => ({ ...m, stpShowRootBadge: e.target.checked }))}
+                  className="rounded border-slate-300 dark:border-slate-600"
+                />
+                {t("topology.designStpRootBadge")}
+              </label>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-1 pl-6">
+                {t("topology.designStpRootBadgeHint")}
+              </p>
+
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 pt-2">
+                <input
+                  type="checkbox"
+                  checked={mapOptions.stpShowPortRoles ?? true}
+                  onChange={(e) => setMapOptions((m) => ({ ...m, stpShowPortRoles: e.target.checked }))}
+                  className="rounded border-slate-300 dark:border-slate-600"
+                />
+                {t("topology.designStpPortRoles")}
+              </label>
+              {(mapOptions.stpShowPortRoles ?? true) && (
+                <div className="pl-6 space-y-1">
+                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                    {t("topology.designStpPortRoleSize")}
+                  </label>
+                  <input
+                    type="number"
+                    min={4}
+                    max={14}
+                    value={mapOptions.stpPortRoleFontSize ?? 7}
+                    onChange={(e) => setMapOptions((m) => ({ ...m, stpPortRoleFontSize: Number(e.target.value) }))}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                  />
+                </div>
+              )}
+
+              <label className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300 pt-2">
+                <input
+                  type="checkbox"
+                  checked={mapOptions.stpShowLegend ?? true}
+                  onChange={(e) => setMapOptions((m) => ({ ...m, stpShowLegend: e.target.checked }))}
+                  className="rounded border-slate-300 dark:border-slate-600"
+                />
+                {t("topology.designStpLegend")}
+              </label>
+              {(mapOptions.stpShowLegend ?? true) && (
+                <div className="pl-6 space-y-1">
+                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                    {t("topology.designStpLegendPosition")}
+                  </label>
+                  <select
+                    value={mapOptions.stpLegendPosition ?? "br"}
+                    onChange={(e) => setMapOptions((m) => ({ ...m, stpLegendPosition: e.target.value as MapOptions["stpLegendPosition"] }))}
+                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                  >
+                    <option value="br">{t("topology.designStpPosBR")}</option>
+                    <option value="bl">{t("topology.designStpPosBL")}</option>
+                    <option value="tr">{t("topology.designStpPosTR")}</option>
+                    <option value="tl">{t("topology.designStpPosTL")}</option>
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 

@@ -19,6 +19,7 @@ import {
   Layers,
   Loader2,
   Maximize2,
+  RefreshCw,
   SendToBack,
   Settings,
   Square,
@@ -53,6 +54,9 @@ interface GraphEdgeLabel {
   color?: string;
   fontWeight?: number;
   background?: boolean;
+  // Coloured background pill — used by STP/MSTP port role badges. When set,
+  // the label is rendered as a filled rounded rect with white text.
+  backgroundColor?: string;
 }
 
 interface GraphEdgeStyle {
@@ -68,6 +72,27 @@ interface GraphEdgeStyle {
   // When 1 area, the edge is drawn in that area's color; when 2+ areas, the
   // edge is rendered as a zebra-dashed pattern alternating between colors.
   isisAreas?: string[];
+  // STP/MSTP-specific
+  stpState?: string;          // aggregated state (worst of both sides)
+  stpStateLocal?: string;
+  stpStateRemote?: string;
+  stpRoleLocal?: string;
+  stpRoleRemote?: string;
+  metric?: number;
+  // MSTP: per-instance state, populated by generateMstpEdges
+  stpInstances?: {
+    instance: string;
+    state: string;
+    stateLocal?: string | null;
+    stateRemote?: string | null;
+    roleLocal?: string | null;
+    roleRemote?: string | null;
+    cost?: number | null;
+    costLocal?: number | null;
+    costRemote?: number | null;
+    priorityLocal?: number | null;
+    priorityRemote?: number | null;
+  }[];
 }
 
 interface GraphEdge {
@@ -105,6 +130,11 @@ interface GraphClusterStyle {
   // Free-form offset applied to the auto-computed label anchor. Lets the user drag
   // the area label to a custom spot relative to the cluster centroid.
   labelOffset?: { dx: number; dy: number };
+  // STP/MSTP: marks the cluster as a "Root bridge" marker, used by the map to
+  // crown the wrapped node instead of drawing a hull. stpInstance is the MSTI
+  // ID for MSTP; null for plain STP.
+  stpRoot?: boolean;
+  stpInstance?: string | null;
 }
 
 interface GraphCluster {
@@ -167,6 +197,17 @@ interface MapOptions {
   aggregateLabelFontSize?: number;
   aggregateLabelColor?: string;
   defaultProtocolFilter?: "all" | "manual" | number;
+  // STP/MSTP — global toggle for the Root bridge badge. The badge's position,
+  // size and colours are configured per-topology via the Label layout
+  // (badge:stp_root LabelElement). This flag just hides every instance of the
+  // badge from the map without removing the LabelElement.
+  stpShowRootBadge?: boolean;            // default true
+  // STP/MSTP — role badges (R/D/A/B/M/-) on each edge end
+  stpShowPortRoles?: boolean;            // default true
+  stpPortRoleFontSize?: number;          // default 7
+  // Legend overlay (adapts to filtered protocol)
+  stpShowLegend?: boolean;               // default true
+  stpLegendPosition?: "tl" | "tr" | "bl" | "br";  // default "br"
 }
 
 interface TopologyDetail {
@@ -235,6 +276,7 @@ export default function TopologyMap({ topologyId }: Props) {
   const { current } = useAppContext();
   const [data, setData] = useState<GraphResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [regenerating, setRegenerating] = useState(false);
   const [positions, setPositions] = useState<Record<number, { x: number; y: number }>>({});
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -251,6 +293,10 @@ export default function TopologyMap({ topologyId }: Props) {
   // "manual" = manual only, otherwise specific protocol id. "All" was removed because
   // it tends to overcrowd the map; the user explicitly picks a focus.
   const [protocolFilter, setProtocolFilter] = useState<"manual" | number>("manual");
+  // MSTP: when the active protocol is MSTP, this picks which instance drives
+  // the edge colouring and which root cluster is shown. null = "all instances"
+  // (edges fall back to their aggregated state, every root is shown).
+  const [mstpInstance, setMstpInstance] = useState<string | null>(null);
   const viewportSavedRef = useRef(false);
 
   // Annotation drag state — kept in refs to avoid re-renders on every mouse move.
@@ -926,6 +972,87 @@ export default function TopologyMap({ topologyId }: Props) {
     return new Set(data.protocols.filter((p) => p.type === "isis").map((p) => p.id));
   }, [data]);
 
+  // MSTP support: which protocol is currently filtered + what instances it
+  // carries (derived from the edges' style.stpInstances metadata).
+  const activeProtocol = useMemo(() => {
+    if (!data || typeof protocolFilter !== "number") return null;
+    return data.protocols.find((p) => p.id === protocolFilter) ?? null;
+  }, [data, protocolFilter]);
+
+  const isMstpFiltered = activeProtocol?.type === "mstp";
+  const isStpFiltered = activeProtocol?.type === "stp" || activeProtocol?.type === "mstp";
+
+  const mstpInstances = useMemo<string[]>(() => {
+    if (!data || !isMstpFiltered) return [];
+    const set = new Set<string>();
+    for (const e of data.edges) {
+      if (e.protocolId !== protocolFilter) continue;
+      for (const i of e.style.stpInstances ?? []) set.add(i.instance);
+    }
+    // Numeric-aware sort: 0,1,2,…,10 not 0,1,10,2
+    return Array.from(set).sort((a, b) => {
+      const an = Number(a), bn = Number(b);
+      const ok = !Number.isNaN(an) && !Number.isNaN(bn);
+      return ok ? an - bn : a.localeCompare(b);
+    });
+  }, [data, protocolFilter, isMstpFiltered]);
+
+  // MSTP filter must always have an instance selected (no "all" — it would
+  // produce zebra-coloured edges that don't reflect any real topology state).
+  // Default to the smallest instance ID, which by MSTP convention is the CIST.
+  useEffect(() => {
+    if (!isMstpFiltered) {
+      setMstpInstance(null);
+      return;
+    }
+    if (mstpInstances.length === 0) return;
+    if (mstpInstance === null || !mstpInstances.includes(mstpInstance)) {
+      setMstpInstance(mstpInstances[0]);
+    }
+  }, [isMstpFiltered, mstpInstance, mstpInstances]);
+
+  // Per-instance colour palette for MSTP zebra rendering in "all" mode.
+  const mstpInstanceColors = useMemo<Map<string, string>>(() => {
+    const palette = ["#dc2626", "#f97316", "#eab308", "#84cc16", "#0ea5e9", "#6366f1", "#a855f7", "#ec4899"];
+    const m = new Map<string, string>();
+    mstpInstances.forEach((inst, i) => m.set(inst, palette[i % palette.length]));
+    return m;
+  }, [mstpInstances]);
+
+  // Root bridge node IDs for the currently visible STP/MSTP context.
+  // - STP filtered: include every root cluster of that protocol (typically one)
+  // - MSTP filtered + instance selected: include only that instance's root
+  // - MSTP filtered + "all": include every instance's root
+  const stpRootNodeIds = useMemo<Set<number>>(() => {
+    const out = new Set<number>();
+    if (!data || !isStpFiltered) return out;
+    for (const c of data.clusters) {
+      if (c.protocolId !== protocolFilter) continue;
+      if (!c.style?.stpRoot) continue;
+      if (isMstpFiltered && mstpInstance !== null && c.style.stpInstance !== mstpInstance) continue;
+      for (const nid of c.nodeIds) out.add(nid);
+    }
+    return out;
+  }, [data, isStpFiltered, isMstpFiltered, mstpInstance, protocolFilter]);
+
+  // Per-node "this is root for instance X" labels, used for the crown tooltip
+  // when MSTP is filtered without an instance focus.
+  const stpRootInstancesByNode = useMemo<Map<number, string[]>>(() => {
+    const m = new Map<number, string[]>();
+    if (!data || !isStpFiltered) return m;
+    for (const c of data.clusters) {
+      if (c.protocolId !== protocolFilter) continue;
+      if (!c.style?.stpRoot) continue;
+      const label = c.style.stpInstance ?? "";
+      for (const nid of c.nodeIds) {
+        const list = m.get(nid) ?? [];
+        if (label !== "" && !list.includes(label)) list.push(label);
+        m.set(nid, list);
+      }
+    }
+    return m;
+  }, [data, isStpFiltered, protocolFilter]);
+
   const renderShape = (d: NodeDesign) => {
     const w = d.width, h = d.height;
     const fill = d.bgColor, stroke = d.borderColor, sw = d.borderWidth;
@@ -940,21 +1067,35 @@ export default function TopologyMap({ topologyId }: Props) {
   };
 
   const renderLabel = (el: LabelElement, n: GraphNode) => {
-    if (el.field === "badge:compliance" || el.field === "badge:monitoring") {
+    if (el.field === "badge:compliance" || el.field === "badge:monitoring" || el.field === "badge:stp_root") {
       const isCompliance = el.field === "badge:compliance";
+      const isMonitoring = el.field === "badge:monitoring";
+      const isStpRoot = el.field === "badge:stp_root";
+
+      // STP root badge only renders on nodes that ARE the root for the
+      // currently-filtered context, and only when the toggle is enabled.
+      if (isStpRoot) {
+        if ((data?.topology.mapOptions?.stpShowRootBadge ?? true) === false) return null;
+        if (!stpRootNodeIds.has(n.nodeId)) return null;
+      }
+
       const diameter = el.badgeSize ?? el.fontSize;
       const r = diameter / 2;
-      let autoColor = "#94a3b8"; // unknown
+      let autoColor = "#94a3b8";
       let letter = "";
       if (isCompliance) {
         const score = n.complianceScore;
         if (score && COMPLIANCE_COLORS[score]) autoColor = COMPLIANCE_COLORS[score];
         if (el.badgeShowLabel !== false && score) letter = score;
-      } else {
+      } else if (isMonitoring) {
         if (n.isReachable === true) autoColor = "#22c55e";
         else if (n.isReachable === false) autoColor = "#ef4444";
+      } else if (isStpRoot) {
+        autoColor = "#dc2626";
+        if (el.badgeShowLabel !== false) letter = "R";
       }
       const fill = el.badgeBgColor || autoColor;
+      const rootInstances = isStpRoot ? (stpRootInstancesByNode.get(n.nodeId) ?? []) : [];
       return (
         <g style={{ pointerEvents: "none" }}>
           <circle
@@ -979,6 +1120,13 @@ export default function TopologyMap({ topologyId }: Props) {
             >
               {letter}
             </text>
+          )}
+          {isStpRoot && (
+            <title>
+              {isMstpFiltered
+                ? `Root bridge (MSTI ${rootInstances.join(", ")})`
+                : "Root bridge"}
+            </title>
           )}
         </g>
       );
@@ -1111,7 +1259,45 @@ export default function TopologyMap({ topologyId }: Props) {
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
+            {isMstpFiltered && mstpInstances.length > 0 && (
+              <select
+                value={mstpInstance ?? mstpInstances[0]}
+                onChange={(e) => setMstpInstance(e.target.value)}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                title={t("topology.mstpInstance")}
+              >
+                {mstpInstances.map((inst) => (
+                  <option key={inst} value={inst}>{t("topology.mstpInstancePrefix")} {inst}</option>
+                ))}
+              </select>
+            )}
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (regenerating) return;
+              setRegenerating(true);
+              try {
+                await fetch(`/api/topologies/${topologyId}/protocols/generate-all`, { method: "POST" });
+                // Refresh edges/clusters without touching positions or viewport.
+                const res = await fetch(`/api/topologies/${topologyId}/graph`);
+                if (res.ok) {
+                  const g: GraphResponse = await res.json();
+                  setData(g);
+                }
+              } finally {
+                setRegenerating(false);
+              }
+            }}
+            disabled={regenerating}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={t("topology.regenerateProtocols")}
+          >
+            {regenerating
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />}
+            {t("topology.regenerateProtocols")}
+          </button>
           <Link
             href={`/topology/${topologyId}/configure`}
             className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
@@ -1193,6 +1379,9 @@ export default function TopologyMap({ topologyId }: Props) {
             ))}
             {(data.clusters ?? [])
               .filter((cluster) => cluster.protocolId == null || cluster.protocolId === protocolFilter)
+              // STP/MSTP "root" clusters are rendered as a per-node crown badge,
+              // not as a hull/zone, so skip them here.
+              .filter((cluster) => !cluster.style?.stpRoot)
               .map((cluster) => renderCluster(cluster, positions, data.nodes, getDesign, mapCentroid, data.clusters ?? [], handleClusterLabelMouseDown))}
             {data.topology.mapOptions?.aggregateParallelLinks && aggregationGroups.map((g) => {
               const sp = positions[g.sourceNodeId];
@@ -1310,21 +1499,89 @@ export default function TopologyMap({ topologyId }: Props) {
               );
             })}
             {visibleEdges.map((edge) => {
-              const areas = edge.protocolId != null && isisProtocolIdSet.has(edge.protocolId)
-                ? edge.style.isisAreas ?? []
-                : [];
-              const areaColors = areas
+              // ISIS: zebra dash across area colours
+              const isIsis = edge.protocolId != null && isisProtocolIdSet.has(edge.protocolId);
+              const areas = isIsis ? edge.style.isisAreas ?? [] : [];
+              let stripeColors = areas
                 .map((a) => isisAreaColors.get(a))
                 .filter((c): c is string => !!c);
+
+              // MSTP: edge presentation depends on the instance selector.
+              //  - instance chosen → recolour with that instance's per-state palette,
+              //    annotate port labels with priority and add a cost label
+              //  - "all" + multi-instance edge → zebra dash, one stripe per instance colour
+              let effectiveEdge = edge;
+              if (isMstpFiltered && edge.protocolId === protocolFilter) {
+                const instances = edge.style.stpInstances ?? [];
+                if (mstpInstance !== null) {
+                  const found = instances.find((i) => i.instance === mstpInstance);
+                  if (!found) return null;
+                  const hint = stpStatePalette(found.state);
+
+                  // Enrich port labels with port priority (e.g. "1/6 (128)").
+                  // Cost is the same on both sides when symmetric; if costs differ
+                  // we surface both via red middle labels — like ISIS metric mismatch.
+                  const baseLabels = edge.style.labels ?? [];
+                  const annotated: typeof baseLabels = baseLabels.map((lbl) => {
+                    if (lbl.position === "source" && found.priorityLocal != null) {
+                      return { ...lbl, text: `${lbl.text} (${found.priorityLocal})` };
+                    }
+                    if (lbl.position === "target" && found.priorityRemote != null) {
+                      return { ...lbl, text: `${lbl.text} (${found.priorityRemote})` };
+                    }
+                    return lbl;
+                  });
+                  const cl = found.costLocal ?? null;
+                  const cr = found.costRemote ?? null;
+                  if (cl !== null && cr !== null && cl !== cr) {
+                    annotated.push({ text: String(cl), position: "source", fontSize: 6, color: "#dc2626", fontWeight: 700, offset: 9 });
+                    annotated.push({ text: String(cr), position: "target", fontSize: 6, color: "#dc2626", fontWeight: 700, offset: 9 });
+                  } else if (cl !== null || cr !== null) {
+                    const c = cl ?? cr;
+                    annotated.push({ text: String(c), position: "middle", fontSize: 6, color: "#475569", fontWeight: 600 });
+                  }
+
+                  // Port role badges (Root/Designated/Alternate/…) above each
+                  // port label. White text on the role's colour.
+                  if (data.topology.mapOptions?.stpShowPortRoles ?? true) {
+                    const fs = data.topology.mapOptions?.stpPortRoleFontSize ?? 7;
+                    const roleL = stpRoleBadge(found.roleLocal);
+                    const roleR = stpRoleBadge(found.roleRemote);
+                    if (roleL) {
+                      annotated.push({
+                        text: roleL.letter, position: "source", fontSize: fs,
+                        color: "#ffffff", backgroundColor: roleL.color,
+                        fontWeight: 800, offset: -9,
+                      });
+                    }
+                    if (roleR) {
+                      annotated.push({
+                        text: roleR.letter, position: "target", fontSize: fs,
+                        color: "#ffffff", backgroundColor: roleR.color,
+                        fontWeight: 800, offset: -9,
+                      });
+                    }
+                  }
+
+                  effectiveEdge = {
+                    ...edge,
+                    style: { ...edge.style, color: hint.color, dash: hint.dash, labels: annotated },
+                  };
+                } else if (instances.length >= 2) {
+                  stripeColors = instances
+                    .map((i) => mstpInstanceColors.get(i.instance))
+                    .filter((c): c is string => !!c);
+                }
+              }
               return renderEdge(
-                edge,
+                effectiveEdge,
                 positions,
                 getDesign,
                 data.nodes,
                 edgeOffsets.get(edge.id) ?? 0,
                 selectedEdgeId === edge.id,
                 (id) => { setSelectedEdgeId(id); setSelectedNodeId(null); },
-                areaColors,
+                stripeColors,
               );
             })}
             {data.nodes.map((n) => {
@@ -1360,6 +1617,7 @@ export default function TopologyMap({ topologyId }: Props) {
                   {labels.map((el, idx) => (
                     <g key={idx}>{renderLabel(el, n)}</g>
                   ))}
+                  {/* Root badge is now rendered via the badge:stp_root LabelElement (see renderLabel). */}
                 </g>
               );
             })}
@@ -1371,6 +1629,99 @@ export default function TopologyMap({ topologyId }: Props) {
             ))}
           </g>
         </svg>
+
+        {(data.topology.mapOptions?.stpShowLegend ?? true) && (() => {
+          const pos = data.topology.mapOptions?.stpLegendPosition ?? "br";
+          const cls =
+            pos === "tl" ? "top-3 left-3" :
+            pos === "tr" ? "top-3 right-3" :
+            pos === "bl" ? "bottom-3 left-3" :
+                           "bottom-3 right-3";
+
+          if (isStpFiltered) {
+            const STATES: { state: string; key: string }[] = [
+              { state: "forwarding", key: "topology.legendStateForwarding" },
+              { state: "blocking",   key: "topology.legendStateBlocking" },
+              { state: "discarding", key: "topology.legendStateDiscarding" },
+              { state: "learning",   key: "topology.legendStateLearning" },
+              { state: "listening",  key: "topology.legendStateListening" },
+              { state: "disabled",   key: "topology.legendStateDisabled" },
+              { state: "mixed",      key: "topology.legendStateMixed" },
+            ];
+            const ROLES = ["Root", "Designated", "Alternate", "Backup", "Master", "Disabled"];
+            return (
+              <div className={`absolute ${cls} z-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-3 py-2 shadow-md text-xs text-slate-700 dark:text-slate-300 backdrop-blur max-w-[260px] pointer-events-none`}>
+                <div className="font-semibold text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  {isMstpFiltered ? t("topology.legendTitleMstp") : t("topology.legendTitleStp")}
+                </div>
+                <div className="mb-2">
+                  <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                    {t("topology.legendStateSection")}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    {STATES.map(({ state, key }) => {
+                      const p = stpStatePalette(state);
+                      return (
+                        <div key={state} className="flex items-center gap-1.5">
+                          <svg width="18" height="3"><line x1="0" y1="1.5" x2="18" y2="1.5" stroke={p.color} strokeWidth={2.5} strokeDasharray={p.dash === "dashed" ? "3,2" : p.dash === "dotted" ? "1,2" : undefined} /></svg>
+                          <span className="text-[10.5px]">{t(key)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="mb-2">
+                  <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                    {t("topology.legendRoleSection")}
+                  </div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                    {ROLES.map((r) => {
+                      const b = stpRoleBadge(r)!;
+                      return (
+                        <div key={r} className="flex items-center gap-1.5">
+                          <span className="inline-flex items-center justify-center w-4 h-4 rounded text-[9px] font-bold text-white" style={{ background: b.color }}>{b.letter}</span>
+                          <span className="text-[10.5px]">{b.full}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase mb-1">
+                    {t("topology.legendBridgeSection")}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex items-center justify-center rounded-full text-[9px] font-bold text-white"
+                          style={{ background: "#dc2626", width: 14, height: 14 }}>R</span>
+                    <span className="text-[10.5px]">{t("topology.legendRootBridge")}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
+          if (typeof protocolFilter === "number" && isisProtocolIdSet.has(protocolFilter)) {
+            const areas = Array.from(isisAreaColors.entries());
+            if (areas.length === 0) return null;
+            return (
+              <div className={`absolute ${cls} z-10 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 px-3 py-2 shadow-md text-xs text-slate-700 dark:text-slate-300 backdrop-blur max-w-[260px] pointer-events-none`}>
+                <div className="font-semibold text-[10px] uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  {t("topology.legendTitleIsis")}
+                </div>
+                <div className="grid grid-cols-1 gap-y-0.5">
+                  {areas.map(([area, color]) => (
+                    <div key={area} className="flex items-center gap-1.5">
+                      <svg width="18" height="3"><line x1="0" y1="1.5" x2="18" y2="1.5" stroke={color} strokeWidth={3} /></svg>
+                      <span className="text-[10.5px] font-mono">{area}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          }
+
+          return null;
+        })()}
 
         {data.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -2372,6 +2723,34 @@ function findLabelRatio(
   return 0.85;
 }
 
+function stpRoleBadge(role: string | null | undefined): { letter: string; color: string; full: string } | null {
+  if (!role) return null;
+  const r = role.toLowerCase();
+  if (r.startsWith("root"))       return { letter: "R", color: "#22c55e", full: "Root" };
+  if (r.startsWith("desig"))      return { letter: "D", color: "#3b82f6", full: "Designated" };
+  if (r.startsWith("alt"))        return { letter: "A", color: "#f59e0b", full: "Alternate" };
+  if (r.startsWith("back"))       return { letter: "B", color: "#eab308", full: "Backup" };
+  if (r.startsWith("master"))     return { letter: "M", color: "#a855f7", full: "Master" };
+  if (r.startsWith("disab")
+   || r.startsWith("dis")
+   || r === "-")                  return { letter: "-", color: "#94a3b8", full: "Disabled" };
+  // Fallback: first letter, neutral colour
+  return { letter: role.charAt(0).toUpperCase(), color: "#64748b", full: role };
+}
+
+function stpStatePalette(state: string): { color: string; dash: "solid" | "dashed" | "dotted" } {
+  switch (state) {
+    case "forwarding": return { color: "#22c55e", dash: "solid" };
+    case "learning":   return { color: "#f59e0b", dash: "dashed" };
+    case "listening":  return { color: "#fbbf24", dash: "dashed" };
+    case "blocking":   return { color: "#ef4444", dash: "dotted" };
+    case "discarding": return { color: "#ef4444", dash: "dotted" };
+    case "disabled":   return { color: "#94a3b8", dash: "dotted" };
+    case "mixed":      return { color: "#f97316", dash: "dashed" };
+    default:           return { color: "#94a3b8", dash: "solid" };
+  }
+}
+
 function renderEdge(
   edge: GraphEdge,
   positions: Record<number, { x: number; y: number }>,
@@ -2451,8 +2830,8 @@ function renderEdge(
           y={-h / 2}
           width={w + 6}
           height={h}
-          fill="white"
-          fillOpacity={0.9}
+          fill={label.backgroundColor ?? "white"}
+          fillOpacity={label.backgroundColor ? 1 : 0.9}
           rx={2}
         />
         <text

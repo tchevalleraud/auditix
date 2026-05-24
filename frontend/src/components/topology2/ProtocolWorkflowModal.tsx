@@ -5,16 +5,18 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  GitBranch,
   Loader2,
   Network,
   Sigma,
+  TreePine,
   Workflow,
   X,
 } from "lucide-react";
 import { useI18n } from "@/components/I18nProvider";
 import type { InventoryCategoryOption } from "@/components/topology2/NodeLabelEditor";
 
-export type ProtocolType = "lldp" | "isis";
+export type ProtocolType = "lldp" | "isis" | "stp" | "mstp";
 
 export interface EdgeStylePartial {
   type?: "straight" | "orthogonal" | "curved";
@@ -40,6 +42,21 @@ export interface ProtocolMapping {
   linkAreaColumn?: string;
   areaCategoryId?: number | null;
   areaColumn?: string;
+  // STP/MSTP-specific. LLDP-only neighbor resolution, with the three sources
+  // (local identity, LLDP adjacencies = primary category, port state) configured
+  // explicitly.
+  stpLocalCategoryId?: number | null;
+  stpLocalEntryKey?: string;
+  stpLocalColumn?: string;
+  stpStateCategoryId?: number | null;
+  stpStatePortColumn?: string;
+  stpStateColumn?: string;
+  stpRoleColumn?: string;
+  stpInstanceColumn?: string;
+  stpPriorityColumn?: string;
+  stpBridgeCategoryId?: number | null;
+  stpBridgeIdColumn?: string;
+  stpRootIdColumn?: string;
 }
 
 export interface ProtocolDraft {
@@ -60,11 +77,13 @@ interface Props {
   onSubmit: (draft: ProtocolDraft) => Promise<void> | void;
 }
 
-type Step = "protocol" | "mapping" | "aggregation" | "areas" | "style";
+type Step = "protocol" | "mapping" | "aggregation" | "areas" | "bridge" | "style";
 
 const PROTOCOLS: { value: ProtocolType; titleKey: string; descKey: string }[] = [
   { value: "lldp", titleKey: "topology.protocolWizardLldpTitle", descKey: "topology.protocolWizardLldpDesc" },
   { value: "isis", titleKey: "topology.protocolWizardIsisTitle", descKey: "topology.protocolWizardIsisDesc" },
+  { value: "stp",  titleKey: "topology.protocolWizardStpTitle",  descKey: "topology.protocolWizardStpDesc"  },
+  { value: "mstp", titleKey: "topology.protocolWizardMstpTitle", descKey: "topology.protocolWizardMstpDesc" },
 ];
 
 function defaultDraft(): ProtocolDraft {
@@ -88,6 +107,18 @@ function defaultDraft(): ProtocolDraft {
       linkAreaColumn: "",
       areaCategoryId: null,
       areaColumn: "",
+      stpLocalCategoryId: null,
+      stpLocalEntryKey: "",
+      stpLocalColumn: "",
+      stpStateCategoryId: null,
+      stpStatePortColumn: "",
+      stpStateColumn: "",
+      stpRoleColumn: "",
+      stpInstanceColumn: "",
+      stpPriorityColumn: "",
+      stpBridgeCategoryId: null,
+      stpBridgeIdColumn: "",
+      stpRootIdColumn: "",
     },
     edgeStyle: {
       type: "straight",
@@ -98,6 +129,10 @@ function defaultDraft(): ProtocolDraft {
     },
   };
 }
+
+const DEFAULT_NAMES: Record<ProtocolType, string> = {
+  lldp: "LLDP", isis: "ISIS", stp: "STP", mstp: "MSTP",
+};
 
 export default function ProtocolWorkflowModal({
   mode,
@@ -117,12 +152,22 @@ export default function ProtocolWorkflowModal({
   const stepOrder = useMemo<Step[]>(() => {
     const steps: Step[] = [];
     if (mode === "create") steps.push("protocol");
-    steps.push("mapping");
-    if (draft.type === "lldp") steps.push("aggregation");
-    if (draft.type === "isis") steps.push("areas");
+    // STP/MSTP: Bridge (root identity) comes BEFORE Ports (state + neighbor).
+    // The user defines who is who first, then describes the links.
+    if (draft.type === "stp" || draft.type === "mstp") {
+      steps.push("bridge");
+      steps.push("mapping"); // "Ports" — labelled differently below
+    } else {
+      steps.push("mapping");
+      if (draft.type === "lldp") steps.push("aggregation");
+      if (draft.type === "isis") steps.push("areas");
+    }
     steps.push("style");
     return steps;
   }, [mode, draft.type]);
+
+  const isStp = draft.type === "stp" || draft.type === "mstp";
+  const isMstp = draft.type === "mstp";
 
   const [step, setStep] = useState<Step>(() => stepOrder[0]);
   const [submitting, setSubmitting] = useState(false);
@@ -177,17 +222,38 @@ export default function ProtocolWorkflowModal({
   const canAdvance = useMemo(() => {
     switch (step) {
       case "protocol":
-        return draft.type === "lldp" || draft.type === "isis";
-      case "mapping":
+        return ["lldp", "isis", "stp", "mstp"].includes(draft.type);
+      case "mapping": {
+        if (isStp) {
+          // STP/MSTP "Ports" step: three sections must all be filled in.
+          if (draft.name.trim().length === 0) return false;
+          // Section 1: local identity
+          if (!draft.mapping.stpLocalCategoryId) return false;
+          if ((draft.mapping.stpLocalColumn ?? "") === "") return false;
+          // Section 2: LLDP adjacencies
+          if (!draft.inventoryCategoryId) return false;
+          if (draft.mapping.destNodeColumn === "") return false;
+          // Section 3: port state
+          if (!draft.mapping.stpStateCategoryId) return false;
+          if ((draft.mapping.stpStateColumn ?? "") === "") return false;
+          return true;
+        }
         return (
           draft.name.trim().length > 0 &&
           !!draft.inventoryCategoryId &&
           draft.mapping.destNodeColumn !== ""
         );
+      }
       case "aggregation":
         return true;
       case "areas":
         return true;
+      case "bridge":
+        // STP/MSTP "Bridge" step: bridge category + Bridge ID column required.
+        // Neighbor resolution (designated / inline / lldp) is configured on
+        // the Ports step, not here.
+        return !!draft.mapping.stpBridgeCategoryId &&
+          (draft.mapping.stpBridgeIdColumn ?? "") !== "";
       case "style":
         return true;
       default:
@@ -221,15 +287,42 @@ export default function ProtocolWorkflowModal({
       case "protocol":
         return t("topology.protocolWizardStepProtocol");
       case "mapping":
-        return t("topology.protocolWizardStepMapping");
+        return isStp
+          ? t("topology.protocolWizardStepPorts")
+          : t("topology.protocolWizardStepMapping");
       case "aggregation":
         return t("topology.protocolWizardStepAggregation");
       case "areas":
         return t("topology.protocolWizardStepAreas");
+      case "bridge":
+        return t("topology.protocolWizardStepBridge");
       case "style":
         return t("topology.protocolWizardStepStyle");
     }
   };
+
+  const bridgeCatName = useMemo(() => {
+    const id = draft.mapping.stpBridgeCategoryId;
+    if (!id) return null;
+    return inventoryCategories.find((c) => c.id === id)?.name ?? null;
+  }, [draft.mapping.stpBridgeCategoryId, inventoryCategories]);
+  const bridgeCols = colsForCategory(bridgeCatName);
+
+  // STP/MSTP — local identity & port-state inventory pickers
+  const localCatName = useMemo(() => {
+    const id = draft.mapping.stpLocalCategoryId;
+    if (!id) return null;
+    return inventoryCategories.find((c) => c.id === id)?.name ?? null;
+  }, [draft.mapping.stpLocalCategoryId, inventoryCategories]);
+  const localCols = colsForCategory(localCatName);
+  const localKeys = keysForCategory(localCatName);
+
+  const stateCatName = useMemo(() => {
+    const id = draft.mapping.stpStateCategoryId;
+    if (!id) return null;
+    return inventoryCategories.find((c) => c.id === id)?.name ?? null;
+  }, [draft.mapping.stpStateCategoryId, inventoryCategories]);
+  const stateCols = colsForCategory(stateCatName);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -287,7 +380,12 @@ export default function ProtocolWorkflowModal({
               <div className="grid grid-cols-1 gap-3">
                 {PROTOCOLS.map((p) => {
                   const selected = draft.type === p.value;
-                  const Icon = p.value === "isis" ? Sigma : Network;
+                  const Icon =
+                    p.value === "isis" ? Sigma :
+                    p.value === "stp"  ? TreePine :
+                    p.value === "mstp" ? GitBranch :
+                    Network;
+                  const autoNames = Object.values(DEFAULT_NAMES);
                   return (
                     <button
                       key={p.value}
@@ -295,8 +393,8 @@ export default function ProtocolWorkflowModal({
                       onClick={() =>
                         update({
                           type: p.value,
-                          name: draft.name === "" || draft.name === "LLDP" || draft.name === "ISIS"
-                            ? p.value.toUpperCase()
+                          name: draft.name === "" || autoNames.includes(draft.name)
+                            ? DEFAULT_NAMES[p.value]
                             : draft.name,
                         })
                       }
@@ -320,7 +418,7 @@ export default function ProtocolWorkflowModal({
             </div>
           )}
 
-          {step === "mapping" && (
+          {step === "mapping" && !isStp && (
             <div className="space-y-6">
               <div className="space-y-3">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -481,7 +579,7 @@ export default function ProtocolWorkflowModal({
                     ))}
                   </select>
                 </Field>
-                {draft.type !== "isis" ? (
+                {draft.type === "lldp" && (
                   <Field label={t("topology.protocolRemotePortColumn")}>
                     <select
                       value={draft.mapping.remotePortColumn}
@@ -497,7 +595,8 @@ export default function ProtocolWorkflowModal({
                       ))}
                     </select>
                   </Field>
-                ) : (
+                )}
+                {draft.type === "isis" && (
                   <Field label={t("topology.protocolCostColumn")}>
                     <select
                       value={draft.mapping.metricColumn}
@@ -514,6 +613,272 @@ export default function ProtocolWorkflowModal({
                     </select>
                   </Field>
                 )}
+              </Section>
+            </div>
+          )}
+
+          {step === "mapping" && isStp && (
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  {t("topology.protocolWizardIdentitySection")}
+                </h4>
+                <Field label={t("topology.protocolName")}>
+                  <input
+                    type="text"
+                    value={draft.name}
+                    onChange={(e) => update({ name: e.target.value })}
+                    className={inputCls}
+                  />
+                </Field>
+              </div>
+
+              <Section title={t("topology.protocolStpLocalSection")}>
+                <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1 mb-2">
+                  {t("topology.protocolStpLocalHint")}
+                </p>
+                <Field label={t("topology.protocolStpLocalCategory")}>
+                  <select
+                    value={draft.mapping.stpLocalCategoryId ?? ""}
+                    onChange={(e) =>
+                      updateMapping({
+                        stpLocalCategoryId: e.target.value ? Number(e.target.value) : null,
+                        stpLocalEntryKey: "",
+                        stpLocalColumn: "",
+                      })
+                    }
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {inventoryCategories
+                      .filter((c) => c.id !== null)
+                      .map((c) => (
+                        <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                      ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t("topology.protocolStpLocalEntryKey")}
+                  help={t("topology.protocolStpLocalEntryKeyHelp")}
+                >
+                  <select
+                    value={draft.mapping.stpLocalEntryKey ?? ""}
+                    onChange={(e) => updateMapping({ stpLocalEntryKey: e.target.value })}
+                    disabled={localKeys.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">{t("topology.protocolMatchInventoryKeyAny")}</option>
+                    {localKeys.map((k) => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t("topology.protocolStpLocalColumn")}
+                  help={t("topology.protocolStpLocalColumnHelp")}
+                >
+                  <select
+                    value={draft.mapping.stpLocalColumn ?? ""}
+                    onChange={(e) => updateMapping({ stpLocalColumn: e.target.value })}
+                    disabled={localCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {localCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+              </Section>
+
+              <Section title={t("topology.protocolStpAdjacencySection")}>
+                <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1 mb-2">
+                  {t("topology.protocolStpAdjacencyHint")}
+                </p>
+                <Field label={t("topology.protocolStpAdjacencyCategory")}>
+                  <select
+                    value={draft.inventoryCategoryId ?? ""}
+                    onChange={(e) => {
+                      const cid = e.target.value ? Number(e.target.value) : null;
+                      const cname = cid
+                        ? inventoryCategories.find((c) => c.id === cid)?.name ?? null
+                        : null;
+                      update({
+                        inventoryCategoryId: cid,
+                        inventoryCategoryName: cname,
+                      });
+                      updateMapping({ destNodeColumn: "", localPortColumn: "", remotePortColumn: "" });
+                    }}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {inventoryCategories
+                      .filter((c) => c.id !== null)
+                      .map((c) => (
+                        <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                      ))}
+                  </select>
+                </Field>
+                <Field label={t("topology.protocolLocalPortColumn")}>
+                  <select
+                    value={draft.mapping.localPortColumn}
+                    onChange={(e) => updateMapping({ localPortColumn: e.target.value })}
+                    disabled={mainCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {mainCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t("topology.protocolStpRemoteNeighborColumn")}
+                  help={t("topology.protocolStpRemoteNeighborHelp")}
+                >
+                  <select
+                    value={draft.mapping.destNodeColumn}
+                    onChange={(e) => updateMapping({ destNodeColumn: e.target.value })}
+                    disabled={mainCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {mainCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t("topology.protocolRemotePortColumn")}>
+                  <select
+                    value={draft.mapping.remotePortColumn}
+                    onChange={(e) => updateMapping({ remotePortColumn: e.target.value })}
+                    disabled={mainCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {mainCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+              </Section>
+
+              <Section title={t("topology.protocolStpStateSection")}>
+                <p className="text-xs text-slate-500 dark:text-slate-400 -mt-1 mb-2">
+                  {t("topology.protocolStpStateHint")}
+                </p>
+                <Field label={t("topology.protocolStpStateCategory")}>
+                  <select
+                    value={draft.mapping.stpStateCategoryId ?? ""}
+                    onChange={(e) =>
+                      updateMapping({
+                        stpStateCategoryId: e.target.value ? Number(e.target.value) : null,
+                        stpStatePortColumn: "",
+                        stpStateColumn: "",
+                        stpRoleColumn: "",
+                        stpInstanceColumn: "",
+                        metricColumn: "",
+                      })
+                    }
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {inventoryCategories
+                      .filter((c) => c.id !== null)
+                      .map((c) => (
+                        <option key={c.id ?? ""} value={c.id ?? ""}>{c.name}</option>
+                      ))}
+                  </select>
+                </Field>
+                <Field
+                  label={t("topology.protocolStpStatePortColumn")}
+                  help={t("topology.protocolStpStatePortHelp")}
+                >
+                  <select
+                    value={draft.mapping.stpStatePortColumn ?? ""}
+                    onChange={(e) => updateMapping({ stpStatePortColumn: e.target.value })}
+                    disabled={stateCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">{t("topology.protocolStpStatePortFromKey")}</option>
+                    {stateCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t("topology.protocolStpStateColumn")}>
+                  <select
+                    value={draft.mapping.stpStateColumn ?? ""}
+                    onChange={(e) => updateMapping({ stpStateColumn: e.target.value })}
+                    disabled={stateCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {stateCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t("topology.protocolStpRoleColumn")}>
+                  <select
+                    value={draft.mapping.stpRoleColumn ?? ""}
+                    onChange={(e) => updateMapping({ stpRoleColumn: e.target.value })}
+                    disabled={stateCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {stateCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label={t("topology.protocolCostColumn")}>
+                  <select
+                    value={draft.mapping.metricColumn}
+                    onChange={(e) => updateMapping({ metricColumn: e.target.value })}
+                    disabled={stateCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {stateCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
+                {isMstp && (
+                  <Field
+                    label={t("topology.protocolStpInstanceColumn")}
+                    help={t("topology.protocolStpInstanceHelp")}
+                  >
+                    <select
+                      value={draft.mapping.stpInstanceColumn ?? ""}
+                      onChange={(e) => updateMapping({ stpInstanceColumn: e.target.value })}
+                      disabled={stateCols.length === 0}
+                      className={inputCls}
+                    >
+                      <option value="">{t("topology.protocolStpInstanceFromKey")}</option>
+                      {stateCols.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </Field>
+                )}
+                <Field
+                  label={t("topology.protocolStpPriorityColumn")}
+                  help={t("topology.protocolStpPriorityHelp")}
+                >
+                  <select
+                    value={draft.mapping.stpPriorityColumn ?? ""}
+                    onChange={(e) => updateMapping({ stpPriorityColumn: e.target.value })}
+                    disabled={stateCols.length === 0}
+                    className={inputCls}
+                  >
+                    <option value="">—</option>
+                    {stateCols.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </Field>
               </Section>
             </div>
           )}
@@ -630,6 +995,68 @@ export default function ProtocolWorkflowModal({
                     <option key={c} value={c}>
                       {c}
                     </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          )}
+
+          {step === "bridge" && (
+            <div className="space-y-5">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                {isMstp ? t("topology.protocolMstpBridgeHint") : t("topology.protocolStpBridgeHint")}
+              </p>
+              <Field
+                label={t("topology.protocolStpBridgeCategory")}
+                help={isMstp ? t("topology.protocolMstpBridgeCategoryHelp") : t("topology.protocolStpBridgeCategoryHelp")}
+              >
+                <select
+                  value={draft.mapping.stpBridgeCategoryId ?? ""}
+                  onChange={(e) =>
+                    updateMapping({
+                      stpBridgeCategoryId: e.target.value ? Number(e.target.value) : null,
+                      stpBridgeIdColumn: "",
+                      stpRootIdColumn: "",
+                    })
+                  }
+                  className={inputCls}
+                >
+                  <option value="">—</option>
+                  {inventoryCategories
+                    .filter((c) => c.id !== null)
+                    .map((c) => (
+                      <option key={c.id ?? ""} value={c.id ?? ""}>
+                        {c.name}
+                      </option>
+                    ))}
+                </select>
+              </Field>
+              <Field label={t("topology.protocolStpBridgeIdColumn")}>
+                <select
+                  value={draft.mapping.stpBridgeIdColumn ?? ""}
+                  onChange={(e) => updateMapping({ stpBridgeIdColumn: e.target.value })}
+                  disabled={bridgeCols.length === 0}
+                  className={inputCls}
+                >
+                  <option value="">—</option>
+                  {bridgeCols.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field
+                label={t("topology.protocolStpRootIdColumn")}
+                help={t("topology.protocolStpRootIdHelp")}
+              >
+                <select
+                  value={draft.mapping.stpRootIdColumn ?? ""}
+                  onChange={(e) => updateMapping({ stpRootIdColumn: e.target.value })}
+                  disabled={bridgeCols.length === 0}
+                  className={inputCls}
+                >
+                  <option value="">—</option>
+                  {bridgeCols.map((c) => (
+                    <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
               </Field>
