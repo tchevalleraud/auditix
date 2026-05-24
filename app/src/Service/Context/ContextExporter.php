@@ -479,6 +479,8 @@ class ContextExporter
             'extractMode' => $e->getExtractMode(),
             'blockSeparator' => $e->getBlockSeparator(),
             'blockKeyGroup' => $e->getBlockKeyGroup(),
+            'blockKeyTemplate' => $e->getBlockKeyTemplate(),
+            'blockCaptures' => $e->getBlockCaptures(),
             'position' => $e->getPosition(),
         ];
     }

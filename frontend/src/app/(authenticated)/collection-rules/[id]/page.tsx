@@ -23,6 +23,7 @@ import {
   Search,
   Server,
   ChevronDown,
+  ChevronUp,
   Plus,
   Trash2,
   Regex,
@@ -60,7 +61,15 @@ interface ExtractItem {
   extractMode: "line" | "block";
   blockSeparator: string | null;
   blockKeyGroup: number | null;
+  blockKeyTemplate: string | null;
+  blockCaptures: BlockCapture[] | null;
   position: number;
+}
+
+interface BlockCapture {
+  name: string;
+  regex: string;
+  group: number;
 }
 
 interface InventoryCategory {
@@ -102,12 +111,26 @@ interface ConditionItem {
 
 type ConditionAction =
   | { type: "set_tag"; tagId: number | null }
-  | { type: "set_inventory"; categoryId: number | null; key: string; column: string; value: string };
+  | {
+      type: "set_inventory";
+      categoryId: number | null;
+      key: string;
+      column: string;
+      value: string;
+      // "single" (default): write to the exact (key, column) cell.
+      // "all": iterate over every row already produced by THIS rule on the
+      // selected category and stamp the column with the value. Used to mark
+      // static metadata (e.g. MSTP instance ID) when the source command
+      // doesn't include it explicitly.
+      keyMode?: "single" | "all";
+    };
 
 type ConditionResult = ConditionAction[] | null;
 
 interface ConditionBlock {
-  type: "if" | "else_if" | "else";
+  // "always": unconditional, no conditions to edit, the result is applied
+  // regardless. Rendered first in the editor, evaluated first at runtime.
+  type: "if" | "else_if" | "else" | "always";
   logic?: "and" | "or";
   conditions?: ConditionItem[];
   result: ConditionResult;
@@ -205,6 +228,8 @@ export default function CollectionRuleEditPage() {
   const [extractMode, setExtractMode] = useState<"line" | "block">("line");
   const [blockSeparator, setBlockSeparator] = useState("");
   const [blockKeyGroup, setBlockKeyGroup] = useState<number | null>(1);
+  const [blockKeyTemplate, setBlockKeyTemplate] = useState("");
+  const [blockCaptures, setBlockCaptures] = useState<BlockCapture[]>([]);
   const [extractGroups, setExtractGroups] = useState<{ isKey: boolean; label: string }[]>([]);
   const [extractKeyTemplate, setExtractKeyTemplate] = useState("");
   const [extractCategoryId, setExtractCategoryId] = useState<number | null>(null);
@@ -427,6 +452,10 @@ export default function CollectionRuleEditPage() {
       extractMode: extractMode,
       blockSeparator: extractMode === "block" ? (blockSeparator || null) : null,
       blockKeyGroup: extractMode === "block" ? blockKeyGroup : null,
+      blockKeyTemplate: extractMode === "block" && blockKeyTemplate.trim() !== "" ? blockKeyTemplate.trim() : null,
+      blockCaptures: extractMode === "block" && blockCaptures.length > 0
+        ? blockCaptures.filter((c) => c.name.trim() !== "" && c.regex.trim() !== "")
+        : null,
       keyMode: keyIdx >= 0 ? "extract" as const : "manual" as const,
       keyManual: hasKeyTemplate ? extractKeyTemplate.trim() : null,
       keyExtractId: null,
@@ -472,6 +501,8 @@ export default function CollectionRuleEditPage() {
     setExtractMode("line");
     setBlockSeparator("");
     setBlockKeyGroup(1);
+    setBlockKeyTemplate("");
+    setBlockCaptures([]);
     setExtractGroups([]);
     setExtractKeyTemplate("");
     setExtractCategoryId(null);
@@ -491,6 +522,8 @@ export default function CollectionRuleEditPage() {
       extractMode: ext.extractMode,
       blockSeparator: ext.blockSeparator,
       blockKeyGroup: ext.blockKeyGroup,
+      blockKeyTemplate: ext.blockKeyTemplate,
+      blockCaptures: ext.blockCaptures,
       keyMode: ext.keyMode,
       keyManual: ext.keyManual,
       keyExtractId: ext.keyExtractId,
@@ -577,6 +610,8 @@ export default function CollectionRuleEditPage() {
     setExtractMode(e.extractMode || "line");
     setBlockSeparator(e.blockSeparator || "");
     setBlockKeyGroup(e.blockKeyGroup ?? 1);
+    setBlockKeyTemplate(e.blockKeyTemplate || "");
+    setBlockCaptures(e.blockCaptures ?? []);
     setExtractCategoryId(e.categoryId);
     setExtractCategoryKeyLabel(e.categoryKeyLabel || "");
     setExtractNodeField(e.nodeField || "");
@@ -646,6 +681,7 @@ export default function CollectionRuleEditPage() {
     setExtractMode(result.extractMode);
     setBlockSeparator(result.blockSeparator ?? "");
     setBlockKeyGroup(result.blockKeyGroup ?? 1);
+    setBlockKeyTemplate("");
 
     // Determine total group count from columns + optional keyGroup
     const maxColGroup = result.columns.reduce((m, c) => Math.max(m, c.group), 0);
@@ -923,10 +959,36 @@ export default function CollectionRuleEditPage() {
             const end = sepMatches[bi + 1]?.index ?? text.length;
             const blockText = text.substring(start, end);
 
+            // Evaluate per-block named captures (block body, /m mode), then
+            // expose them to the template as ${name}.
+            const vars: Record<string, string> = {};
+            for (const cap of (ext.blockCaptures ?? [])) {
+              if (!cap.name || !cap.regex) continue;
+              try {
+                const cm = new RegExp(cap.regex, "m").exec(blockText);
+                vars[cap.name] = (cm?.[cap.group ?? 1] ?? "").trim();
+              } catch {
+                vars[cap.name] = "";
+              }
+            }
+
             let bKey: string | null = null;
-            const bkg = ext.blockKeyGroup ?? 1;
-            if (sepMatches[bi].groups[bkg] !== undefined) {
-              bKey = sepMatches[bi].groups[bkg].trim();
+            const tpl = ext.blockKeyTemplate?.trim();
+            if (tpl) {
+              // Mirror backend ordering: ${name} first, then $1, $2, … so a
+              // numeric placeholder inside a name doesn't get partially consumed.
+              bKey = tpl
+                .replace(/\$\{([^}]+)\}/g, (_, name) => vars[name] ?? "")
+                .replace(/\$(\d+)/g, (_, n) => {
+                  const idx = Number(n);
+                  return (sepMatches[bi].groups[idx] ?? "").trim();
+                })
+                .trim();
+            } else {
+              const bkg = ext.blockKeyGroup ?? 1;
+              if (sepMatches[bi].groups[bkg] !== undefined) {
+                bKey = sepMatches[bi].groups[bkg].trim();
+              }
             }
 
             applyRegexOnText(blockText, bKey);
@@ -1479,6 +1541,115 @@ export default function CollectionRuleEditPage() {
                                     <span className="text-slate-400 dark:text-slate-500">→ ex. &quot;1/1&quot;, &quot;1/2&quot;, &quot;1/3&quot;, ...</span>
                                   </div>
                                 )}
+
+                                <div className="pt-3 mt-3 border-t border-blue-200/50 dark:border-blue-500/20 space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                      {t("collection_rules.blockCaptures")}
+                                    </label>
+                                    <button
+                                      type="button"
+                                      onClick={() => setBlockCaptures((cs) => [...cs, { name: "", regex: "", group: 1 }])}
+                                      className="flex items-center gap-1 rounded border border-dashed border-slate-300 dark:border-slate-600 px-2 py-0.5 text-[11px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      {t("collection_rules.blockCapturesAdd")}
+                                    </button>
+                                  </div>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.blockCapturesHint")}</p>
+                                  {blockCaptures.length === 0 && (
+                                    <p className="text-[11px] italic text-slate-400 dark:text-slate-500">{t("collection_rules.blockCapturesEmpty")}</p>
+                                  )}
+                                  {blockCaptures.map((cap, ci) => (
+                                    <div key={ci} className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 p-2">
+                                      <div className="flex flex-col gap-0.5">
+                                        <button
+                                          type="button"
+                                          disabled={ci === 0}
+                                          onClick={() => setBlockCaptures((cs) => {
+                                            const next = [...cs];
+                                            [next[ci - 1], next[ci]] = [next[ci], next[ci - 1]];
+                                            return next;
+                                          })}
+                                          className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                                        >
+                                          <ChevronUp className="h-3 w-3" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={ci === blockCaptures.length - 1}
+                                          onClick={() => setBlockCaptures((cs) => {
+                                            const next = [...cs];
+                                            [next[ci + 1], next[ci]] = [next[ci], next[ci + 1]];
+                                            return next;
+                                          })}
+                                          className="p-0.5 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-30 disabled:cursor-not-allowed"
+                                        >
+                                          <ChevronDown className="h-3 w-3" />
+                                        </button>
+                                      </div>
+                                      <input
+                                        type="text"
+                                        value={cap.name}
+                                        onChange={(e) => setBlockCaptures((cs) => cs.map((c, i) => i === ci ? { ...c, name: e.target.value } : c))}
+                                        placeholder={t("collection_rules.blockCapturesName")}
+                                        className="w-28 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-mono"
+                                      />
+                                      <input
+                                        type="text"
+                                        value={cap.regex}
+                                        onChange={(e) => setBlockCaptures((cs) => cs.map((c, i) => i === ci ? { ...c, regex: e.target.value } : c))}
+                                        placeholder={t("collection_rules.blockCapturesRegex")}
+                                        className="flex-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-mono"
+                                      />
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={20}
+                                        value={cap.group}
+                                        onChange={(e) => setBlockCaptures((cs) => cs.map((c, i) => i === ci ? { ...c, group: Number(e.target.value) || 1 } : c))}
+                                        title={t("collection_rules.blockCapturesGroup")}
+                                        className="w-12 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1 text-xs font-mono text-center"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setBlockCaptures((cs) => cs.filter((_, i) => i !== ci))}
+                                        className="p-1 rounded text-slate-400 hover:text-red-500 transition-colors"
+                                      >
+                                        <X className="h-3 w-3" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+
+                                <div className="pt-3 mt-3 border-t border-blue-200/50 dark:border-blue-500/20 space-y-1.5">
+                                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                                    {t("collection_rules.blockKeyTemplate")}
+                                  </label>
+                                  <p className="text-xs text-slate-500 dark:text-slate-400">{t("collection_rules.blockKeyTemplateHint")}</p>
+                                  <input
+                                    type="text"
+                                    value={blockKeyTemplate}
+                                    onChange={(e) => setBlockKeyTemplate(e.target.value)}
+                                    placeholder={t("collection_rules.blockKeyTemplatePlaceholder")}
+                                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-blue-400 dark:focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400/20 transition-colors"
+                                  />
+                                  {blockCaptures.length > 0 && (
+                                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                      {t("collection_rules.blockCapturesAvailable")}:{" "}
+                                      {blockCaptures.filter((c) => c.name.trim()).map((c, i) => (
+                                        <code key={i} className="ml-1 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 font-mono text-[10px]">
+                                          ${`{${c.name}}`}
+                                        </code>
+                                      ))}
+                                    </p>
+                                  )}
+                                  {blockKeyTemplate.trim() !== "" && (
+                                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                                      {t("collection_rules.blockKeyTemplateActive")}
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                             );
                           })()}
@@ -2211,6 +2382,7 @@ const btnPrimaryCls = "flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-w
 const smallInput = "rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2.5 py-1.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none transition-colors";
 
 const blockColors: Record<string, { border: string; bg: string; badge: string }> = {
+  always: { border: "border-l-emerald-500", bg: "bg-emerald-50/50 dark:bg-emerald-500/5", badge: "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" },
   if: { border: "border-l-blue-500", bg: "bg-blue-50/50 dark:bg-blue-500/5", badge: "bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300" },
   else_if: { border: "border-l-amber-500", bg: "bg-amber-50/50 dark:bg-amber-500/5", badge: "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" },
   else: { border: "border-l-slate-400", bg: "bg-slate-50/50 dark:bg-slate-500/5", badge: "bg-slate-200 text-slate-600 dark:bg-slate-600/30 dark:text-slate-300" },
@@ -2846,9 +3018,17 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
     const next = [...blocks];
     const [moved] = next.splice(fromIdx, 1);
     next.splice(toIdx, 0, moved);
+    // "always" blocks always live at the top — stable-sort them up front.
+    next.sort((a, b) => {
+      if (a.type === "always" && b.type !== "always") return -1;
+      if (b.type === "always" && a.type !== "always") return 1;
+      return 0;
+    });
+    // First non-always block must be "if"; later conditionals stay "else_if" or terminal "else".
+    const firstCondIdx = next.findIndex((b) => b.type !== "always");
     next.forEach((b, i) => {
-      if (i === 0 && b.type === "else_if") b.type = "if";
-      else if (i > 0 && b.type === "if") b.type = "else_if";
+      if (i === firstCondIdx && b.type === "else_if") b.type = "if";
+      else if (firstCondIdx >= 0 && i > firstCondIdx && b.type === "if") b.type = "else_if";
     });
     onChange(next);
   };
@@ -2901,11 +3081,26 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
   };
 
   const blockLabel = (type: ConditionBlock["type"]) =>
-    type === "if" ? t("collection_rules.translationIf")
+    type === "always" ? t("collection_rules.translationAlways")
+    : type === "if" ? t("collection_rules.translationIf")
     : type === "else_if" ? t("collection_rules.translationElseIf")
     : t("collection_rules.translationElse");
 
   const hasElse = blocks.some((b) => b.type === "else");
+
+  const addAlways = () => {
+    // Always blocks live at the top of the list, before any if/else_if/else.
+    // Stable position keeps the UI predictable and matches runtime ordering.
+    const firstConditional = blocks.findIndex((b) => b.type !== "always");
+    const newBlock: ConditionBlock = { type: "always", result: defaultResult() };
+    const next = [...blocks];
+    if (firstConditional === -1) {
+      next.push(newBlock);
+    } else {
+      next.splice(firstConditional, 0, newBlock);
+    }
+    onChange(next);
+  };
 
   return (
     <div className="space-y-2">
@@ -2917,20 +3112,20 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
           <div
             key={idx}
             className={`border-l-4 ${colors.border} rounded-lg border border-slate-200 dark:border-slate-700 ${colors.bg} ${dragOverIdx === idx && dragIdx !== idx ? "ring-2 ring-blue-400" : ""}`}
-            draggable
-            onDragStart={(e) => { setDragIdx(idx); e.dataTransfer.effectAllowed = "move"; }}
+            draggable={block.type !== "always"}
+            onDragStart={(e) => { if (block.type === "always") return; setDragIdx(idx); e.dataTransfer.effectAllowed = "move"; }}
             onDragOver={(e) => { e.preventDefault(); setDragOverIdx(idx); }}
             onDragLeave={() => setDragOverIdx(null)}
             onDrop={(e) => { e.preventDefault(); setDragOverIdx(null); if (dragIdx !== null && dragIdx !== idx) reorderBlocks(dragIdx, idx); setDragIdx(null); }}
             onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
           >
-            <div className="flex items-center justify-between px-4 py-2.5 cursor-grab active:cursor-grabbing">
+            <div className={`flex items-center justify-between px-4 py-2.5 ${block.type === "always" ? "" : "cursor-grab active:cursor-grabbing"}`}>
               <div className="flex items-center gap-2">
-                <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />
+                {block.type !== "always" && <GripVertical className="h-3.5 w-3.5 text-slate-300 dark:text-slate-600 shrink-0" />}
                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${colors.badge}`}>
                   {blockLabel(block.type)}
                 </span>
-                {block.type !== "else" && conditions.length > 1 && (
+                {block.type !== "else" && block.type !== "always" && conditions.length > 1 && (
                   <button
                     onClick={() => updateBlock(idx, { ...block, logic: block.logic === "and" ? "or" : "and" })}
                     className={`px-2 py-0.5 rounded text-xs font-semibold cursor-pointer transition-colors ${logicToggleBadge(block.logic)}`}
@@ -2940,7 +3135,7 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {block.type !== "else" && (
+                {block.type !== "else" && block.type !== "always" && (
                   <button
                     onClick={() => {
                       const next = [...conditions, emptyInventoryCondition()];
@@ -2953,7 +3148,7 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
                     <Plus className="h-3 w-3" />
                   </button>
                 )}
-                {idx > 0 && (
+                {(idx > 0 || block.type === "always") && (
                   <button
                     onClick={() => removeBlock(idx)}
                     className="flex items-center gap-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-100/50 dark:hover:bg-red-500/10 transition-colors"
@@ -2964,7 +3159,7 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
               </div>
             </div>
 
-            {block.type !== "else" && conditions.length > 0 && (
+            {block.type !== "else" && block.type !== "always" && conditions.length > 0 && (
               <div className="px-4 pb-3 space-y-2">
                 {conditions.map((cond, ci) => {
                   const condKey = `${idx}-${ci}`;
@@ -3136,7 +3331,14 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
         );
       })}
 
-      <div className="flex items-center gap-2 pl-2">
+      <div className="flex items-center gap-2 pl-2 flex-wrap">
+        <button
+          onClick={addAlways}
+          className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
+        >
+          <Plus className="h-3 w-3" />
+          {t("collection_rules.translationAddAlways")}
+        </button>
         <button
           onClick={addElseIf}
           className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-500/10 border border-dashed border-slate-300 dark:border-slate-600 transition-colors"
@@ -3301,6 +3503,9 @@ function ConditionActionRow({ action, tags, categories, inventoryStructure, isEd
 
     const catName = inventoryStructure.find((c) => c.categoryId === action.categoryId)?.categoryName
       ?? categories.find((c) => c.id === action.categoryId)?.name;
+    const keyLabel = (action.keyMode ?? "single") === "all"
+      ? t("collection_rules.conditionKeyModeAll")
+      : (action.key || "?");
     return (
       <div
         className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 cursor-pointer hover:border-slate-300 dark:hover:border-slate-600 transition-colors group"
@@ -3310,7 +3515,7 @@ function ConditionActionRow({ action, tags, categories, inventoryStructure, isEd
           INV
         </span>
         <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
-          {`${catName || "?"} / ${action.key || "?"}`}
+          {`${catName || "?"} / ${keyLabel}`}
           {action.column && action.column !== "Value#1" ? ` [${action.column}]` : ""}
         </span>
         <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">=</span>
@@ -3375,13 +3580,31 @@ function ConditionActionRow({ action, tags, categories, inventoryStructure, isEd
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionKey")}</span>
-              <SuggestField
-                value={action.key ?? ""}
-                options={keyOptions}
-                placeholder="--"
-                onChange={(v) => onChange({ ...action, key: v })}
-                className="max-w-[180px]"
-              />
+              <select
+                value={action.keyMode ?? "single"}
+                onChange={(e) => {
+                  const next = e.target.value as "single" | "all";
+                  onChange({
+                    ...action,
+                    keyMode: next,
+                    key: next === "all" ? "" : action.key,
+                  });
+                }}
+                className={`${smallInput} min-w-[180px]`}
+                title={t("collection_rules.conditionKeyMode")}
+              >
+                <option value="single">{t("collection_rules.conditionKeyModeSingle")}</option>
+                <option value="all">{t("collection_rules.conditionKeyModeAll")}</option>
+              </select>
+              {(action.keyMode ?? "single") === "single" && (
+                <SuggestField
+                  value={action.key ?? ""}
+                  options={keyOptions}
+                  placeholder="--"
+                  onChange={(v) => onChange({ ...action, key: v })}
+                  className="max-w-[180px]"
+                />
+              )}
             </div>
             {(colOptions.length > 1 || (action.column && action.column !== "Value#1")) && (
               <div className="flex items-center gap-1.5">

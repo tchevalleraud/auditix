@@ -554,6 +554,8 @@ class CollectionRuleController extends AbstractController
             'extractMode' => $e->getExtractMode(),
             'blockSeparator' => $e->getBlockSeparator(),
             'blockKeyGroup' => $e->getBlockKeyGroup(),
+            'blockKeyTemplate' => $e->getBlockKeyTemplate(),
+            'blockCaptures' => $e->getBlockCaptures(),
             'position' => $e->getPosition(),
         ];
     }
@@ -611,6 +613,10 @@ class CollectionRuleController extends AbstractController
         $extract->setExtractMode($data['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE);
         $extract->setBlockSeparator($data['blockSeparator'] ?? null);
         $extract->setBlockKeyGroup(isset($data['blockKeyGroup']) ? (int)$data['blockKeyGroup'] : null);
+        $extract->setBlockKeyTemplate(
+            isset($data['blockKeyTemplate']) && $data['blockKeyTemplate'] !== '' ? (string)$data['blockKeyTemplate'] : null
+        );
+        $extract->setBlockCaptures(is_array($data['blockCaptures'] ?? null) ? $data['blockCaptures'] : null);
 
         $extract->setPosition($maxPos + 1);
         $rule->addExtract($extract);
@@ -643,7 +649,10 @@ class CollectionRuleController extends AbstractController
             $extract->setKeyMode($data['keyMode']);
         }
         if (array_key_exists('keyManual', $data)) {
-            $extract->setKeyManual($data['keyManual'] ?: null);
+            // Use an explicit empty check, NOT `?:` — the latter treats the
+            // string "0" as falsy and would wipe a legitimate literal key.
+            $km = $data['keyManual'];
+            $extract->setKeyManual(($km === null || $km === '') ? null : (string)$km);
         }
         if (array_key_exists('keyGroup', $data)) {
             $extract->setKeyGroup($data['keyGroup'] !== null ? (int)$data['keyGroup'] : null);
@@ -679,6 +688,13 @@ class CollectionRuleController extends AbstractController
         }
         if (array_key_exists('blockKeyGroup', $data)) {
             $extract->setBlockKeyGroup($data['blockKeyGroup'] !== null ? (int)$data['blockKeyGroup'] : null);
+        }
+        if (array_key_exists('blockKeyTemplate', $data)) {
+            $bt = $data['blockKeyTemplate'];
+            $extract->setBlockKeyTemplate(($bt === null || $bt === '') ? null : (string)$bt);
+        }
+        if (array_key_exists('blockCaptures', $data)) {
+            $extract->setBlockCaptures(is_array($data['blockCaptures']) ? $data['blockCaptures'] : null);
         }
 
         $em->flush();

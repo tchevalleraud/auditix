@@ -83,6 +83,29 @@ class CollectionRuleExtract
     #[ORM\Column(nullable: true)]
     private ?int $blockKeyGroup = null;
 
+    /**
+     * Block mode only: optional template that composes the entry key.
+     * Substitutions:
+     *   $1, $2, … → capture groups of blockSeparator
+     *   ${name}   → named blockCaptures evaluated against the block body
+     * When set, takes precedence over blockKeyGroup. Useful when a single line
+     * doesn't carry every piece of identity needed (e.g. an MSTP per-port
+     * block where the entry key should combine Port Number from the separator
+     * line and Instance Id from a line further inside the block).
+     */
+    #[ORM\Column(length: 500, nullable: true)]
+    private ?string $blockKeyTemplate = null;
+
+    /**
+     * Block mode only: per-block named captures. Each entry is
+     * `{ name: string, regex: string, group: int }`. For every block, each
+     * regex is matched against the block body and the chosen capture group is
+     * stored under `name`, then made available to blockKeyTemplate as `${name}`.
+     * Order in the array is the order shown in the UI and used by the live preview.
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $blockCaptures = null;
+
     #[ORM\Column]
     private int $position = 0;
 
@@ -131,6 +154,10 @@ class CollectionRuleExtract
     public function setBlockSeparator(?string $v): static { $this->blockSeparator = $v; return $this; }
     public function getBlockKeyGroup(): ?int { return $this->blockKeyGroup; }
     public function setBlockKeyGroup(?int $v): static { $this->blockKeyGroup = $v; return $this; }
+    public function getBlockKeyTemplate(): ?string { return $this->blockKeyTemplate; }
+    public function setBlockKeyTemplate(?string $v): static { $this->blockKeyTemplate = $v; return $this; }
+    public function getBlockCaptures(): ?array { return $this->blockCaptures; }
+    public function setBlockCaptures(?array $v): static { $this->blockCaptures = $v; return $this; }
     public function getPosition(): int { return $this->position; }
     public function setPosition(int $v): static { $this->position = $v; return $this; }
     public function getRule(): CollectionRule { return $this->rule; }

@@ -692,6 +692,8 @@ class ContextImporter
                 ->setExtractMode($row['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE)
                 ->setBlockSeparator($row['blockSeparator'] ?? null)
                 ->setBlockKeyGroup($row['blockKeyGroup'] ?? null)
+                ->setBlockKeyTemplate($row['blockKeyTemplate'] ?? null)
+                ->setBlockCaptures(is_array($row['blockCaptures'] ?? null) ? $row['blockCaptures'] : null)
                 ->setPosition((int) ($row['position'] ?? 0))
                 ->setRule($rule);
             if ($row['category'] ?? null) {

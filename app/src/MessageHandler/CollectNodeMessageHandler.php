@@ -721,6 +721,15 @@ class CollectNodeMessageHandler
      * Phase 2: evaluate each rule's conditionTree and apply results
      * (set_tag → NodeDynamicTag, set_inventory → NodeInventoryEntry).
      * Tags are deduplicated against manual tags + already-applied dynamic tags.
+     *
+     * Two kinds of blocks coexist in the tree:
+     *   - "if" / "else_if" / "else": evaluated against node state. The first
+     *     matching block's actions are applied (legacy behaviour).
+     *   - "always": no condition, actions applied unconditionally. Used to
+     *     stamp a static value (e.g. MSTP instance ID = "0" when the source
+     *     command doesn't include it).
+     * Always actions run BEFORE conditional ones so a later "if" can read the
+     * value the always block just wrote (rare, but well-defined).
      */
     private function applyConditionTrees(array $rules, Node $node, CollectionTag $tag): void
     {
@@ -733,19 +742,41 @@ class CollectNodeMessageHandler
         foreach ($rules as $rule) {
             /** @var CollectionRule $rule */
             $tree = $rule->getConditionTree();
-            if (!$tree || empty($tree['blocks'] ?? [])) {
+            $blocks = $tree['blocks'] ?? [];
+            if (empty($blocks)) {
                 continue;
             }
 
-            $result = $this->conditionTree->evaluateBlocks($tree['blocks'], [], $node);
-            if (!is_array($result)) {
-                continue;
+            // Split always vs conditional blocks.
+            $alwaysActions = [];
+            $conditionalBlocks = [];
+            foreach ($blocks as $b) {
+                if (!is_array($b)) continue;
+                if (($b['type'] ?? '') === 'always') {
+                    $res = $b['result'] ?? [];
+                    if (is_array($res)) {
+                        foreach ((isset($res['type']) ? [$res] : $res) as $a) {
+                            if (is_array($a)) $alwaysActions[] = $a;
+                        }
+                    }
+                } else {
+                    $conditionalBlocks[] = $b;
+                }
             }
 
-            // Result may be a single action (legacy) or a list of actions.
-            $actions = isset($result['type']) ? [$result] : $result;
-            foreach ($actions as $action) {
-                if (!is_array($action)) continue;
+            // Build the full action list: always first, then the result of the
+            // conditional cascade (if any block matches).
+            $allActions = $alwaysActions;
+            if (!empty($conditionalBlocks)) {
+                $result = $this->conditionTree->evaluateBlocks($conditionalBlocks, [], $node);
+                if (is_array($result)) {
+                    foreach ((isset($result['type']) ? [$result] : $result) as $a) {
+                        if (is_array($a)) $allActions[] = $a;
+                    }
+                }
+            }
+
+            foreach ($allActions as $action) {
                 $type = $action['type'] ?? null;
                 if ($type === 'set_tag') {
                     $tagId = isset($action['tagId']) ? (int) $action['tagId'] : 0;
@@ -765,15 +796,36 @@ class CollectNodeMessageHandler
                     $appliedDynamicTagIds[$tagId] = true;
                 } elseif ($type === 'set_inventory') {
                     $catId = isset($action['categoryId']) ? (int) $action['categoryId'] : 0;
-                    $key = isset($action['key']) ? trim((string) $action['key']) : '';
                     $col = isset($action['column']) && $action['column'] !== '' ? (string) $action['column'] : 'Value#1';
                     $value = (string) ($action['value'] ?? '');
-                    if (!$catId || $key === '') continue;
+                    if (!$catId) continue;
                     $category = $this->em->getRepository(InventoryCategory::class)->find($catId);
                     if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) {
                         continue;
                     }
-                    $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $tag);
+
+                    $keyMode = (string) ($action['keyMode'] ?? 'single');
+                    if ($keyMode === 'all') {
+                        // Stamp every existing row produced by THIS rule on THIS node
+                        // for the chosen category. Doesn't create rows from thin air —
+                        // an extract must have run first and produced at least one entry.
+                        $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
+                            'node' => $node,
+                            'category' => $category,
+                            'rule' => $rule,
+                        ]);
+                        $seenKeys = [];
+                        foreach ($entries as $entry) {
+                            $entryKey = $entry->getEntryKey();
+                            if (isset($seenKeys[$entryKey])) continue;
+                            $seenKeys[$entryKey] = true;
+                            $this->upsertEntry($node, $category, $category->getName(), $catId, $entryKey, $col, $value, $rule, $tag);
+                        }
+                    } else {
+                        $key = isset($action['key']) ? trim((string) $action['key']) : '';
+                        if ($key === '') continue;
+                        $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $tag);
+                    }
                 }
             }
         }
@@ -899,15 +951,54 @@ class CollectNodeMessageHandler
 
         $positions = array_map(fn($m) => (int) $m[1], $matches[0]);
         $blockKeyGroup = $ext->getBlockKeyGroup();
+        $blockKeyTemplate = $ext->getBlockKeyTemplate();
+        $blockCaptures = $ext->getBlockCaptures() ?? [];
 
         for ($i = 0, $n = count($positions); $i < $n; $i++) {
             $start = $positions[$i];
             $end = $positions[$i + 1] ?? strlen($text);
             $blockText = substr($text, $start, $end - $start);
 
-            // Extract the block key from the separator's capture group (if configured)
+            // Evaluate per-block named captures against this block's body.
+            // Each capture's regex runs in /m mode (line-anchored ^/$), and its
+            // chosen group is exposed to the template as ${name}.
+            $vars = [];
+            foreach ($blockCaptures as $cap) {
+                if (!is_array($cap)) continue;
+                $cname = isset($cap['name']) ? (string) $cap['name'] : '';
+                $cregex = isset($cap['regex']) ? (string) $cap['regex'] : '';
+                $cgroup = isset($cap['group']) ? (int) $cap['group'] : 1;
+                if ($cname === '' || $cregex === '') continue;
+                if (@preg_match('~' . $cregex . '~m', $blockText, $cm) === 1) {
+                    $vars[$cname] = trim((string) ($cm[$cgroup] ?? ''));
+                } else {
+                    $vars[$cname] = '';
+                }
+            }
+
+            // Compose the block key.
+            //   blockKeyTemplate wins when set:
+            //     - ${name} → blockCaptures values
+            //     - $1, $2, … → separator capture groups
+            //   else blockKeyGroup picks one separator group (legacy behaviour).
             $blockKey = null;
-            if ($blockKeyGroup !== null && isset($matches[$blockKeyGroup][$i])) {
+            if ($blockKeyTemplate !== null && $blockKeyTemplate !== '') {
+                $tpl = $blockKeyTemplate;
+                $tpl = preg_replace_callback(
+                    '/\$\{([^}]+)\}/',
+                    fn($r) => $vars[$r[1]] ?? '',
+                    $tpl,
+                ) ?? $tpl;
+                $tpl = preg_replace_callback(
+                    '/\$(\d+)/',
+                    function ($r) use ($matches, $i) {
+                        $g = (int) $r[1];
+                        return isset($matches[$g][$i]) ? trim((string) $matches[$g][$i][0]) : '';
+                    },
+                    $tpl,
+                ) ?? $tpl;
+                $blockKey = trim((string) $tpl);
+            } elseif ($blockKeyGroup !== null && isset($matches[$blockKeyGroup][$i])) {
                 $blockKey = trim((string) $matches[$blockKeyGroup][$i][0]);
             }
 
@@ -950,8 +1041,11 @@ class CollectNodeMessageHandler
                 $kg = $ext->getKeyGroup();
                 $key = $m[$kg] ?? null;
             } else {
-                $key = $ext->getKeyManual() ?: $ext->getName();
-                if ($key && preg_match('/\$\d/', $key)) {
+                // Explicit null/empty check — the manual key may legitimately be
+                // the literal "0", which PHP's `?:` would treat as falsy.
+                $km = $ext->getKeyManual();
+                $key = ($km !== null && $km !== '') ? $km : $ext->getName();
+                if ($key !== null && $key !== '' && preg_match('/\$\d/', $key)) {
                     $key = preg_replace_callback('/\$(\d+)/', fn($r) => $m[(int)$r[1]] ?? '', $key);
                 }
             }

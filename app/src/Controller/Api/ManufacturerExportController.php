@@ -567,6 +567,8 @@ class ManufacturerExportController extends AbstractController
                 'extractMode' => $extract->getExtractMode(),
                 'blockSeparator' => $extract->getBlockSeparator(),
                 'blockKeyGroup' => $extract->getBlockKeyGroup(),
+                'blockKeyTemplate' => $extract->getBlockKeyTemplate(),
+                'blockCaptures' => $extract->getBlockCaptures(),
                 'position' => $extract->getPosition(),
             ];
         }
@@ -730,6 +732,8 @@ class ManufacturerExportController extends AbstractController
             $extract->setExtractMode($extData['extractMode'] ?? CollectionRuleExtract::EXTRACT_MODE_LINE);
             $extract->setBlockSeparator($extData['blockSeparator'] ?? null);
             $extract->setBlockKeyGroup($extData['blockKeyGroup'] ?? null);
+            $extract->setBlockKeyTemplate($extData['blockKeyTemplate'] ?? null);
+            $extract->setBlockCaptures(is_array($extData['blockCaptures'] ?? null) ? $extData['blockCaptures'] : null);
             $extract->setPosition($extData['position'] ?? 0);
             $extract->setRule($rule);
 
