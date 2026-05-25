@@ -65,8 +65,10 @@ import {
   Link as LinkIcon,
   Unlink as UnlinkIcon,
   Workflow,
+  Sparkles,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
+import AiAssistParagraphModal, { type AiAssistantOption } from "@/components/AiAssistParagraphModal";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import TextAlign from "@tiptap/extension-text-align";
@@ -2006,6 +2008,10 @@ function ParagraphProperties({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
+  // AI assist state
+  const [aiAssistants, setAiAssistants] = useState<AiAssistantOption[]>([]);
+  const [aiModalOpen, setAiModalOpen] = useState(false);
+
   // Autocomplete state
   const [acOpen, setAcOpen] = useState(false);
   const [acPos, setAcPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -2037,6 +2043,23 @@ function ParagraphProperties({
   useEffect(() => {
     if (!current) return;
     fetch(`/api/inventory-categories/structure?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setInvStructure);
+  }, [current]);
+
+  useEffect(() => {
+    if (!current) {
+      setAiAssistants([]);
+      return;
+    }
+    fetch(`/api/ai/assistants?context=${current.id}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: { id: number; name: string; enabled: boolean; providerName?: string; effectiveModel?: string | null }[]) => {
+        setAiAssistants(
+          (Array.isArray(data) ? data : [])
+            .filter((a) => a.enabled !== false)
+            .map((a) => ({ id: a.id, name: a.name, providerName: a.providerName, effectiveModel: a.effectiveModel ?? null })),
+        );
+      })
+      .catch(() => setAiAssistants([]));
   }, [current]);
 
   const editor = useEditor({
@@ -2280,6 +2303,20 @@ function ParagraphProperties({
           {/* Lists */}
           <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive("bulletList"))} title={t("structure.bulletList")}><List className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive("orderedList"))} title={t("structure.numberedList")}><ListOrdered className="h-3.5 w-3.5" /></button>
+          {aiAssistants.length > 0 && (
+            <>
+              <div className="ml-auto" />
+              <button
+                type="button"
+                onClick={() => setAiModalOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md bg-gradient-to-r from-violet-500 to-fuchsia-500 px-2 py-1 text-[11px] font-medium text-white hover:brightness-110"
+                title={t("structure.aiAssistTitle")}
+              >
+                <Sparkles className="h-3 w-3" />
+                {t("structure.aiAssistButton")}
+              </button>
+            </>
+          )}
         </div>
         {/* Editor */}
         <div className="flex-1 min-h-0 overflow-y-auto">
@@ -2395,6 +2432,16 @@ function ParagraphProperties({
           </div>
         )}
       </div>
+      <AiAssistParagraphModal
+        open={aiModalOpen}
+        onClose={() => setAiModalOpen(false)}
+        assistants={aiAssistants}
+        onInsert={(html) => {
+          editor.commands.setContent(html, { emitUpdate: true });
+          updateBlock(block.id, { content: editor.getHTML() });
+        }}
+        t={t}
+      />
     </div>
   );
 }

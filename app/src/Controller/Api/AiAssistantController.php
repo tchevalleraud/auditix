@@ -237,6 +237,105 @@ class AiAssistantController extends AbstractController
         return $a;
     }
 
+    /**
+     * One-shot text generation used by the report paragraph block "IA Assist"
+     * button. Unlike /api/ai/chat, nothing is persisted: no conversation, no
+     * messages, no tool execution. The LLM is asked to produce TipTap-friendly
+     * HTML directly so the caller can hand the result to editor.setContent().
+     */
+    #[Route('/api/ai/generate-paragraph', methods: ['POST'])]
+    public function generateParagraph(Request $request): JsonResponse
+    {
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['error' => 'Invalid JSON body'], Response::HTTP_BAD_REQUEST);
+        }
+        $assistantId = (int) ($data['assistantId'] ?? 0);
+        if ($assistantId <= 0) {
+            return $this->json(['error' => 'assistantId is required'], Response::HTTP_BAD_REQUEST);
+        }
+        $a = $this->resolveAssistant($assistantId);
+        if ($a === null) {
+            return $this->json(['error' => 'Assistant not found'], Response::HTTP_NOT_FOUND);
+        }
+        if (!$a->isEnabled()) {
+            return $this->json(['error' => 'Assistant is disabled'], Response::HTTP_FAILED_DEPENDENCY);
+        }
+        $provider = $a->getProvider();
+        if ($provider === null || !$provider->isEnabled()) {
+            return $this->json(['error' => 'The configured AI provider is unavailable'], Response::HTTP_FAILED_DEPENDENCY);
+        }
+        $model = $a->getEffectiveModel();
+        if (!$model) {
+            return $this->json(['error' => 'No model selected for this assistant'], Response::HTTP_FAILED_DEPENDENCY);
+        }
+        $prompt = trim((string) ($data['prompt'] ?? ''));
+        if ($prompt === '') {
+            return $this->json(['error' => 'prompt is required'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $base = $a->getSystemPrompt();
+        $format = "You are helping draft a paragraph for a network/IT audit report. "
+            . "Reply ONLY with valid HTML compatible with TipTap (no <html>, <body>, <head>, no Markdown, no code fences). "
+            . "Allowed tags: <p>, <br>, <strong>, <em>, <u>, <s>, <sup>, <sub>, <ul>, <ol>, <li>. "
+            . "Do not include classes, styles, scripts, images, or links. "
+            . "Wrap every paragraph in <p>...</p>. Do not add any commentary before or after the HTML.";
+        $systemPrompt = ($base !== null && $base !== '')
+            ? $base . "\n\n" . $format
+            : $format;
+
+        try {
+            $reply = $this->llm->chat(
+                $provider,
+                $model,
+                [['role' => 'user', 'content' => $prompt]],
+                $systemPrompt,
+                null,
+            );
+        } catch (\Throwable $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_GATEWAY);
+        }
+
+        $content = (string) ($reply['content'] ?? '');
+        $content = $this->sanitizeParagraphHtml($content);
+
+        return $this->json(['content' => $content]);
+    }
+
+    /**
+     * Strip everything except the TipTap-allowed subset, drop attributes, and
+     * fall back to wrapping plain text in <p> if the model returned no HTML.
+     * Belt-and-braces: even if the LLM ignores the formatting instructions we
+     * never inject <script>, <iframe>, on* handlers, etc. into the editor.
+     */
+    private function sanitizeParagraphHtml(string $html): string
+    {
+        $html = trim($html);
+        // Strip fenced code blocks if the model wrapped its reply in ```html ... ```
+        $html = preg_replace('/^```[a-zA-Z0-9]*\s*/', '', $html);
+        $html = preg_replace('/\s*```\s*$/', '', $html ?? '');
+        $html = trim((string) $html);
+        if ($html === '') {
+            return '<p></p>';
+        }
+
+        $allowed = '<p><br><strong><b><em><i><u><s><strike><del><sup><sub><ul><ol><li>';
+        $clean = strip_tags($html, $allowed);
+        // Remove any leftover attributes (strip_tags leaves them in place).
+        $clean = preg_replace('/<([a-zA-Z0-9]+)\s[^>]*>/', '<$1>', $clean);
+        $clean = trim((string) $clean);
+
+        if ($clean === '') {
+            return '<p></p>';
+        }
+
+        // If after sanitizing there is still no block-level tag, wrap as a paragraph.
+        if (!preg_match('/<(p|ul|ol)\b/i', $clean)) {
+            $clean = '<p>' . $clean . '</p>';
+        }
+        return $clean;
+    }
+
     #[Route('/api/ai/conversations', methods: ['GET'])]
     public function listConversations(Request $request): JsonResponse
     {
