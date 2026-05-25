@@ -30,9 +30,6 @@ use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Entity\Schedule;
 use App\Entity\SnmpCredential;
-use App\Entity\TopologyDevice;
-use App\Entity\TopologyLink;
-use App\Entity\TopologyMap;
 use App\Entity\VendorPlugin;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -99,7 +96,6 @@ class ContextImporter
                     'reports' => count($ctxData['reports'] ?? []),
                     'mailReports' => count($ctxData['mailReports'] ?? []),
                     'schedules' => count($ctxData['schedules'] ?? []),
-                    'topologyMaps' => count($ctxData['topologyMaps'] ?? []),
                     'labs' => count($ctxData['labs'] ?? []),
                 ],
             ];
@@ -230,7 +226,6 @@ class ContextImporter
             SnmpCredential::class,
             CliCredential::class,
             Lab::class,
-            TopologyMap::class,
         ];
         foreach ($repos as $cls) {
             $count = (int) $this->em->createQuery(
@@ -305,10 +300,6 @@ class ContextImporter
             $this->importReports($data['reports'] ?? [], $context, $idMap);
             $this->importMailReports($data['mailReports'] ?? [], $context, $idMap);
             $this->importSchedules($data['schedules'] ?? [], $context, $idMap);
-
-            $this->importTopologyMaps($data['topologyMaps'] ?? [], $context, $idMap);
-            $this->importTopologyDevices($data['topologyDevices'] ?? [], $idMap);
-            $this->importTopologyLinks($data['topologyLinks'] ?? [], $idMap);
 
             $this->importLabs($data['labs'] ?? [], $context, $idMap);
             $this->importLabTasks($data['labTasks'] ?? [], $idMap);
@@ -956,70 +947,6 @@ class ContextImporter
             $s->setCollectionIds($this->resolveIdList($row['collections'] ?? [], $idMap));
             $this->em->persist($s);
             $idMap[$row['_ref']] = $s;
-        }
-    }
-
-    private function importTopologyMaps(array $rows, Context $context, array &$idMap): void
-    {
-        foreach ($rows as $row) {
-            $m = (new TopologyMap())
-                ->setName($row['name'] ?? '')
-                ->setDescription($row['description'] ?? null)
-                ->setDefaultProtocol($row['defaultProtocol'] ?? null)
-                ->setLayout($row['layout'] ?? null)
-                ->setDesignConfig($row['designConfig'] ?? [])
-                ->setLinkRules($row['linkRules'] ?? [])
-                ->setContext($context);
-            $this->em->persist($m);
-            $idMap[$row['_ref']] = $m;
-        }
-    }
-
-    private function importTopologyDevices(array $rows, array &$idMap): void
-    {
-        foreach ($rows as $row) {
-            $map = $idMap[$row['map']] ?? null;
-            if (!$map) {
-                continue;
-            }
-            $d = (new TopologyDevice())
-                ->setMap($map)
-                ->setName($row['name'] ?? '')
-                ->setChassisId($row['chassisId'] ?? null)
-                ->setMgmtAddress($row['mgmtAddress'] ?? null)
-                ->setSysDescr($row['sysDescr'] ?? null)
-                ->setStyleOverride($row['styleOverride'] ?? null);
-            if ($row['node'] ?? null) {
-                $d->setNode($idMap[$row['node']] ?? null);
-            }
-            $this->em->persist($d);
-            $idMap[$row['_ref']] = $d;
-        }
-    }
-
-    private function importTopologyLinks(array $rows, array &$idMap): void
-    {
-        foreach ($rows as $row) {
-            $map = $idMap[$row['map']] ?? null;
-            $src = $idMap[$row['sourceDevice']] ?? null;
-            $tgt = $idMap[$row['targetDevice']] ?? null;
-            if (!$map || !$src || !$tgt) {
-                continue;
-            }
-            $l = (new TopologyLink())
-                ->setMap($map)
-                ->setSourceDevice($src)
-                ->setTargetDevice($tgt)
-                ->setProtocol($row['protocol'] ?? TopologyLink::PROTOCOL_LLDP)
-                ->setSourcePort($row['sourcePort'] ?? null)
-                ->setTargetPort($row['targetPort'] ?? null)
-                ->setStatus($row['status'] ?? null)
-                ->setWeight($row['weight'] ?? null)
-                ->setMetadata($row['metadata'] ?? null)
-                ->setStyleOverride($row['styleOverride'] ?? null)
-                ->setIsManual((bool) ($row['isManual'] ?? false));
-            $this->em->persist($l);
-            $idMap[$row['_ref']] = $l;
         }
     }
 

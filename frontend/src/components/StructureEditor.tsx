@@ -74,7 +74,6 @@ import SubscriptExt from "@tiptap/extension-subscript";
 import SuperscriptExt from "@tiptap/extension-superscript";
 import { TextStyle, Color } from "@tiptap/extension-text-style";
 import { Highlight } from "@tiptap/extension-highlight";
-import ViewportFrameSelector from "@/components/topology/ViewportFrameSelector";
 
 // --- Block types ---
 
@@ -293,18 +292,13 @@ export interface CommandListBlock {
 export interface TopologyBlock {
   id: string;
   type: "topology";
-  /** v2 topology (preferred). When set, takes priority over legacy topologyMapId. */
   topologyId?: number | null;
-  /** v2 protocol filter: "manual" | protocol id */
+  /** Protocol filter: "manual" | protocol id */
   protocolFilter?: "manual" | number | null;
-  /** v1 legacy fields (kept for backward compatibility on existing reports) */
-  topologyMapId: number | null;
+  /** When the filtered protocol is MSTP, the MSTI to render (string instance id). */
+  mstpInstance?: string | null;
   width: number;
-  protocol: string;
   showLegend: boolean;
-  showLabels: boolean;
-  showMonitoring: boolean;
-  showCompliance: boolean;
   caption: string;
   pageBreakBefore?: boolean;
   viewportFrame?: {
@@ -963,7 +957,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     } else if (type === "command_list") {
       block = { id, type: "command_list", manufacturerId: null, modelId: null, style: { fontSize: 9 } };
     } else if (type === "topology") {
-      block = { id, type: "topology", topologyId: null, protocolFilter: "manual", topologyMapId: null, width: 100, protocol: "", showLegend: true, showLabels: true, showMonitoring: false, showCompliance: false, caption: "", pageBreakBefore: false };
+      block = { id, type: "topology", topologyId: null, protocolFilter: "manual", width: 100, showLegend: true, caption: "", pageBreakBefore: false };
     } else if (type === "compliance_matrix") {
       block = { id, type: "compliance_matrix", policyId: null, showRuleId: true, showTotal: true, pageBreakBefore: false };
     } else if (type === "rule_non_compliant") {
@@ -1255,9 +1249,6 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         const pf = block.protocolFilter;
         const pfLabel = typeof pf === "number" ? `#${pf}` : (pf ?? "");
         return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyId}{pfLabel ? ` (${pfLabel})` : ""}</span>;
-      }
-      if (block.topologyMapId) {
-        return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyMapId}{block.protocol ? ` (${block.protocol.toUpperCase()})` : ""}</span>;
       }
       return <span className="italic text-slate-400">{t("structure.emptyTopology")}</span>;
     }
@@ -5611,6 +5602,7 @@ function TopologyBlockProperties({
   const { current } = useAppContext();
   const [topologies, setTopologies] = useState<{ id: number; name: string; description: string | null }[]>([]);
   const [protocols, setProtocols] = useState<{ id: number; name: string; type: string }[]>([]);
+  const [mstpInstances, setMstpInstances] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
@@ -5631,15 +5623,61 @@ function TopologyBlockProperties({
       .catch(() => setProtocols([]));
   }, [block.topologyId]);
 
-  // Refresh the preview URL whenever the topology / protocol filter / frame changes.
-  // We request the FULL svg (auto-fit) for the preview, then overlay a rectangle on top
-  // representing the user-selected viewportFrame (if any).
+  // List MSTP instances available on the currently selected protocol — derived
+  // from the edges' style.stpInstances metadata (same as TopologyMap.tsx).
+  // Only loaded when the selected protocol is of type 'mstp'.
+  useEffect(() => {
+    const pf = block.protocolFilter;
+    const selected = typeof pf === "number" ? protocols.find((p) => p.id === pf) : null;
+    if (!selected || selected.type !== "mstp" || !block.topologyId) {
+      setMstpInstances([]);
+      return;
+    }
+    fetch(`/api/topologies/${block.topologyId}/graph`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((g) => {
+        if (!g) return;
+        const set = new Set<string>();
+        for (const e of g.edges ?? []) {
+          if (e.protocolId !== pf) continue;
+          for (const i of e.style?.stpInstances ?? []) set.add(i.instance);
+        }
+        setMstpInstances(Array.from(set).sort((a, b) => {
+          const an = Number(a), bn = Number(b);
+          return (!Number.isNaN(an) && !Number.isNaN(bn)) ? an - bn : a.localeCompare(b);
+        }));
+      })
+      .catch(() => setMstpInstances([]));
+  }, [block.topologyId, block.protocolFilter, protocols]);
+
+  // Auto-pick the smallest instance when MSTP is freshly selected (mirrors
+  // the live map default) and reset to null when MSTP is not active.
+  const selectedProtocol = typeof block.protocolFilter === "number"
+    ? protocols.find((p) => p.id === block.protocolFilter)
+    : null;
+  const isMstpFiltered = selectedProtocol?.type === "mstp";
+  useEffect(() => {
+    if (!isMstpFiltered) {
+      if (block.mstpInstance != null) updateBlock(block.id, { mstpInstance: null });
+      return;
+    }
+    if (mstpInstances.length === 0) return;
+    if (!block.mstpInstance || !mstpInstances.includes(block.mstpInstance)) {
+      updateBlock(block.id, { mstpInstance: mstpInstances[0] });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMstpFiltered, mstpInstances]);
+
+  // Refresh the preview URL whenever the topology / protocol filter / MSTI
+  // / frame changes. We request the FULL svg (auto-fit) for the preview;
+  // a rectangle is overlaid on top to represent the viewportFrame, if any.
   useEffect(() => {
     if (!block.topologyId) { setPreviewUrl(null); return; }
     const pf = block.protocolFilter ?? "manual";
     const pfStr = typeof pf === "number" ? String(pf) : pf;
-    setPreviewUrl(`/api/topologies/${block.topologyId}/svg?protocolFilter=${pfStr}&width=900&t=${Date.now()}`);
-  }, [block.topologyId, block.protocolFilter]);
+    const mi = block.mstpInstance ? `&mstpInstance=${encodeURIComponent(block.mstpInstance)}` : "";
+    setPreviewUrl(`/api/topologies/${block.topologyId}/svg?protocolFilter=${pfStr}${mi}&width=900&t=${Date.now()}`);
+  }, [block.topologyId, block.protocolFilter, block.mstpInstance]);
 
   const selectedTopology = topologies.find((m) => m.id === block.topologyId);
 
@@ -5661,7 +5699,6 @@ function TopologyBlockProperties({
             onChange={(e) => updateBlock(block.id, {
               topologyId: e.target.value ? Number(e.target.value) : null,
               protocolFilter: "manual",
-              topologyMapId: null,
               viewportFrame: null,
             })}
             className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
@@ -5689,13 +5726,34 @@ function TopologyBlockProperties({
             value={typeof block.protocolFilter === "number" ? String(block.protocolFilter) : (block.protocolFilter ?? "manual")}
             onChange={(e) => {
               const v = e.target.value;
-              updateBlock(block.id, { protocolFilter: v === "manual" ? "manual" : Number(v) });
+              updateBlock(block.id, {
+                protocolFilter: v === "manual" ? "manual" : Number(v),
+                mstpInstance: null,
+              });
             }}
             className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
           >
             <option value="manual">{t("topology.filterManual")}</option>
             {protocols.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* MSTP instance picker — only shown when an MSTP protocol is selected */}
+      {block.topologyId && isMstpFiltered && mstpInstances.length > 0 && (
+        <div className="space-y-1.5">
+          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+            {t("topology.mstpInstance")}
+          </label>
+          <select
+            value={block.mstpInstance ?? mstpInstances[0]}
+            onChange={(e) => updateBlock(block.id, { mstpInstance: e.target.value })}
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+          >
+            {mstpInstances.map((inst) => (
+              <option key={inst} value={inst}>{t("topology.mstpInstancePrefix")} {inst}</option>
             ))}
           </select>
         </div>
@@ -5735,38 +5793,11 @@ function TopologyBlockProperties({
         <label className="flex items-center gap-2 cursor-pointer">
           <input
             type="checkbox"
-            checked={block.showLabels}
-            onChange={(e) => updateBlock(block.id, { showLabels: e.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowLabels")}</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
             checked={block.showLegend}
             onChange={(e) => updateBlock(block.id, { showLegend: e.target.checked })}
             className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
           />
           <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowLegend")}</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={block.showMonitoring}
-            onChange={(e) => updateBlock(block.id, { showMonitoring: e.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowMonitoring")}</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={block.showCompliance}
-            onChange={(e) => updateBlock(block.id, { showCompliance: e.target.checked })}
-            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-          />
-          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.topologyShowCompliance")}</span>
         </label>
         <label className="flex items-center gap-2 cursor-pointer">
           <input

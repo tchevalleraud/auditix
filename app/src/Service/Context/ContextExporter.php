@@ -29,9 +29,6 @@ use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Entity\Schedule;
 use App\Entity\SnmpCredential;
-use App\Entity\TopologyDevice;
-use App\Entity\TopologyLink;
-use App\Entity\TopologyMap;
 use App\Entity\VendorPlugin;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -122,7 +119,6 @@ class ContextExporter
         $reports = $this->em->getRepository(Report::class)->findBy(['context' => $context]);
         $mailReports = $this->em->getRepository(MailReport::class)->findBy(['context' => $context]);
         $schedules = $this->em->getRepository(Schedule::class)->findBy(['context' => $context]);
-        $topoMaps = $this->em->getRepository(TopologyMap::class)->findBy(['context' => $context]);
         $labs = $this->em->getRepository(Lab::class)->findBy(['context' => $context]);
 
         $deviceModelIds = array_map(fn(DeviceModel $m) => $m->getId(), $deviceModels);
@@ -172,13 +168,6 @@ class ContextExporter
             }
         }
 
-        $topoDevices = [];
-        $topoLinks = [];
-        foreach ($topoMaps as $map) {
-            $topoDevices = array_merge($topoDevices, $this->em->getRepository(TopologyDevice::class)->findBy(['map' => $map]));
-            $topoLinks = array_merge($topoLinks, $this->em->getRepository(TopologyLink::class)->findBy(['map' => $map]));
-        }
-
         $data = [
             'context' => $this->serializeContextEntity($context),
             'editors' => array_map($this->serializeEditor(...), $editors),
@@ -206,9 +195,6 @@ class ContextExporter
             'reports' => $this->mapWithFiles($reports, 'serializeReport', $bundledFiles, $ctxId),
             'mailReports' => $this->mapWithFiles($mailReports, 'serializeMailReport', $bundledFiles, $ctxId),
             'schedules' => array_map($this->serializeSchedule(...), $schedules),
-            'topologyMaps' => array_map($this->serializeTopologyMap(...), $topoMaps),
-            'topologyDevices' => array_map($this->serializeTopologyDevice(...), $topoDevices),
-            'topologyLinks' => array_map($this->serializeTopologyLink(...), $topoLinks),
             'labs' => array_map($this->serializeLab(...), $labs),
             'labTasks' => array_map($this->serializeLabTask(...), $labTasks),
         ];
@@ -647,51 +633,6 @@ class ContextExporter
                 fn($id) => $this->ref('collection', (int) $id),
                 $s->getCollectionIds() ?? [],
             )),
-        ];
-    }
-
-    private function serializeTopologyMap(TopologyMap $m): array
-    {
-        return [
-            '_ref' => $this->ref('topologyMap', $m->getId()),
-            'name' => $m->getName(),
-            'description' => $m->getDescription(),
-            'defaultProtocol' => $m->getDefaultProtocol(),
-            'layout' => $m->getLayout(),
-            'designConfig' => $m->getDesignConfig(),
-            'linkRules' => $m->getLinkRules(),
-        ];
-    }
-
-    private function serializeTopologyDevice(TopologyDevice $d): array
-    {
-        return [
-            '_ref' => $this->ref('topologyDevice', $d->getId()),
-            'map' => $this->ref('topologyMap', $d->getMap()->getId()),
-            'node' => $this->refOrNull('node', $d->getNode()?->getId()),
-            'name' => $d->getName(),
-            'chassisId' => $d->getChassisId(),
-            'mgmtAddress' => $d->getMgmtAddress(),
-            'sysDescr' => $d->getSysDescr(),
-            'styleOverride' => $d->getStyleOverride(),
-        ];
-    }
-
-    private function serializeTopologyLink(TopologyLink $l): array
-    {
-        return [
-            '_ref' => $this->ref('topologyLink', $l->getId()),
-            'map' => $this->ref('topologyMap', $l->getMap()->getId()),
-            'sourceDevice' => $this->ref('topologyDevice', $l->getSourceDevice()->getId()),
-            'targetDevice' => $this->ref('topologyDevice', $l->getTargetDevice()->getId()),
-            'protocol' => $l->getProtocol(),
-            'sourcePort' => $l->getSourcePort(),
-            'targetPort' => $l->getTargetPort(),
-            'status' => $l->getStatus(),
-            'weight' => $l->getWeight(),
-            'metadata' => $l->getMetadata(),
-            'styleOverride' => $l->getStyleOverride(),
-            'isManual' => $l->getIsManual(),
         ];
     }
 

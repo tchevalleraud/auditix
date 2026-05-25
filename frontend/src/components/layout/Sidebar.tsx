@@ -50,7 +50,6 @@ const contextNav: NavCategory[] = [
     items: [
       { key: "sidebar.dashboard", href: "/", icon: LayoutDashboard },
       { key: "sidebar.topology", href: "/topology", icon: Network },
-      { key: "sidebar.topologyOld", href: "/topology-old", icon: Network, badge: "old" },
       { key: "sidebar.nodes", href: "/nodes", icon: Server },
     ],
   },

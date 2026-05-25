@@ -136,9 +136,9 @@ class DashboardController extends AbstractController
             'vulnerabilities' => $this->buildVulnerabilitySection($contextId, $context, $em),
             'systemUpdates' => $this->buildSystemUpdateSection($contextId, $context, $em),
             'topology' => [
-                'maps' => (int) $em->createQuery('SELECT COUNT(m) FROM App\Entity\TopologyMap m WHERE m.context = :ctx')->setParameter('ctx', $contextId)->getSingleScalarResult(),
-                'devices' => (int) $em->createQuery('SELECT COUNT(d) FROM App\Entity\TopologyDevice d WHERE d.map IN (SELECT m.id FROM App\Entity\TopologyMap m WHERE m.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
-                'links' => (int) $em->createQuery('SELECT COUNT(l) FROM App\Entity\TopologyLink l WHERE l.map IN (SELECT m.id FROM App\Entity\TopologyMap m WHERE m.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'maps'    => (int) $em->createQuery('SELECT COUNT(t) FROM App\Entity\Topology t WHERE t.context = :ctx')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'devices' => (int) $em->createQuery('SELECT COUNT(n) FROM App\Entity\TopologyNode n WHERE n.topology IN (SELECT t.id FROM App\Entity\Topology t WHERE t.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
+                'links'   => (int) $em->createQuery('SELECT COUNT(e) FROM App\Entity\TopologyEdge e WHERE e.topology IN (SELECT t.id FROM App\Entity\Topology t WHERE t.context = :ctx)')->setParameter('ctx', $contextId)->getSingleScalarResult(),
             ],
             'reports' => [
                 'total' => (int) $em->createQuery('SELECT COUNT(r) FROM App\Entity\Report r WHERE r.context = :ctx')->setParameter('ctx', $contextId)->getSingleScalarResult(),
