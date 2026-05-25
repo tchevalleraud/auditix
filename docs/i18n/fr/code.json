@@ -1,4 +1,232 @@
 {
+  "landing.meta.title": {
+    "message": "Auditix · Audit de conformité réseau augmenté par l'IA",
+    "description": "Page meta title for the landing"
+  },
+  "landing.meta.description": {
+    "message": "Auditix 5.0 — collecter, évaluer et reporter sur votre réseau avec un assistant IA à vos côtés.",
+    "description": "Page meta description for the landing"
+  },
+  "landing.hero.pill": {
+    "message": "✨ Auditix 5.0 · Édition IA",
+    "description": "Pill above the hero title"
+  },
+  "landing.hero.title.start": {
+    "message": "L'audit de conformité réseau,",
+    "description": "First part of the hero title"
+  },
+  "landing.hero.title.accent": {
+    "message": "augmenté par l'IA",
+    "description": "Gradient-accented end of the hero title"
+  },
+  "landing.hero.subtitle": {
+    "message": "Collectez les données de votre parc, évaluez-les face à vos politiques, visualisez votre topologie — et interrogez votre réseau en langage naturel avec le nouvel assistant IA.",
+    "description": "Hero subtitle"
+  },
+  "landing.hero.cta.primary": {
+    "message": "Démarrer",
+    "description": "Primary CTA in the hero"
+  },
+  "landing.hero.cta.secondary": {
+    "message": "Voir les cas d'usage",
+    "description": "Secondary CTA in the hero"
+  },
+  "landing.carousel.ariaLabel": {
+    "message": "Tour produit Auditix 5.0",
+    "description": "ARIA label for the homepage carousel"
+  },
+  "landing.slide.dashboard.alt": {
+    "message": "Tableau de bord personnalisable avec un aperçu de la conformité",
+    "description": "Alt text for the dashboard screenshot"
+  },
+  "landing.slide.dashboard.caption": {
+    "message": "Dashboard, personnalisable pour avoir une vue de sa conformité",
+    "description": "Caption for the dashboard slide"
+  },
+  "landing.slide.ai.alt": {
+    "message": "Panneau latéral de l'assistant IA en train de répondre",
+    "description": "Alt text for the AI assistant screenshot"
+  },
+  "landing.slide.ai.caption": {
+    "message": "Besoin d'aide ? L'assistant IA est là pour vous",
+    "description": "Caption for the AI assistant slide"
+  },
+  "landing.slide.topology.alt": {
+    "message": "Carte de topologie en direct avec superpositions de protocoles",
+    "description": "Alt text for the topology screenshot"
+  },
+  "landing.slide.topology.caption": {
+    "message": "Besoin de visibilité ? La topology est toujours à jour !",
+    "description": "Caption for the topology slide"
+  },
+  "landing.slide.compliance.alt": {
+    "message": "Matrice de conformité par politique et par nœud",
+    "description": "Alt text for the compliance matrix screenshot"
+  },
+  "landing.slide.compliance.caption": {
+    "message": "La compliance — une note attribuée selon VOS règles",
+    "description": "Caption for the compliance slide"
+  },
+  "landing.slide.report.alt": {
+    "message": "Rapport PDF avec recommandations rédigées par l'IA",
+    "description": "Alt text for the PDF report screenshot"
+  },
+  "landing.slide.report.caption": {
+    "message": "Un outil web c'est bien, un rapport PDF avec les recommandations c'est mieux !",
+    "description": "Caption for the PDF report slide"
+  },
+  "landing.features.eyebrow": {
+    "message": "Fonctionnalités",
+    "description": "Eyebrow for the features section"
+  },
+  "landing.features.title": {
+    "message": "Tout ce qu'il faut pour auditer un réseau",
+    "description": "Title of the features section"
+  },
+  "landing.features.lead": {
+    "message": "Une seule plateforme, de la sortie brute d'un équipement à un rapport PDF signé — avec une couche IA pour vous aider à rédiger, chercher et recommander.",
+    "description": "Lead of the features section"
+  },
+  "landing.feature.aiAssistants.title": {
+    "message": "Assistants IA",
+    "description": "Title of the AI Assistants feature card"
+  },
+  "landing.feature.aiAssistants.desc": {
+    "message": "Interrogez votre réseau en langage naturel. Les outils sont en lecture seule et les sorties sont anonymisées avant d'atteindre un LLM cloud.",
+    "description": "Description of the AI Assistants feature card"
+  },
+  "landing.feature.aiAssist.title": {
+    "message": "AI Assist dans les rapports",
+    "description": "Title of the AI Assist feature card"
+  },
+  "landing.feature.aiAssist.desc": {
+    "message": "Rédaction de paragraphes en un clic dans les rapports PDF et mail — conserve un style cohérent et accélère vos audits.",
+    "description": "Description of the AI Assist feature card"
+  },
+  "landing.feature.collection.title": {
+    "message": "Collecte automatisée",
+    "description": "Title of the automated collection feature card"
+  },
+  "landing.feature.collection.desc": {
+    "message": "Collectes SSH et SNMP planifiées, règles réutilisables, jointures multi-sources et imports ZIP / CSV en masse.",
+    "description": "Description of the automated collection feature card"
+  },
+  "landing.feature.compliance.title": {
+    "message": "Moteur de conformité",
+    "description": "Title of the compliance engine feature card"
+  },
+  "landing.feature.compliance.desc": {
+    "message": "Éditeur de règles visuel, auto-affectation par politique, introspection debug sur les blocs de règles imbriqués.",
+    "description": "Description of the compliance engine feature card"
+  },
+  "landing.feature.topology.title": {
+    "message": "Topologie en direct",
+    "description": "Title of the topology feature card"
+  },
+  "landing.feature.topology.desc": {
+    "message": "Carte Cytoscape avec filtres LLDP / OSPF / ISIS / BGP / STP, liens manuels et surcouches MSTI multi-instance.",
+    "description": "Description of the topology feature card"
+  },
+  "landing.feature.reports.title": {
+    "message": "Rapports PDF & mail",
+    "description": "Title of the reports feature card"
+  },
+  "landing.feature.reports.desc": {
+    "message": "Éditeur par blocs : graphique, cycle de vie, conformité, topologie et schémas personnalisés. Thème par contexte.",
+    "description": "Description of the reports feature card"
+  },
+  "landing.feature.lifecycle.title": {
+    "message": "Suivi du cycle de vie",
+    "description": "Title of the lifecycle feature card"
+  },
+  "landing.feature.lifecycle.desc": {
+    "message": "Chronologie EoS / EoSM / EoL avec un score de fraîcheur configurable, rafraîchi par les plugins constructeurs.",
+    "description": "Description of the lifecycle feature card"
+  },
+  "landing.feature.auth.title": {
+    "message": "Authentification & SSO",
+    "description": "Title of the auth feature card"
+  },
+  "landing.feature.auth.desc": {
+    "message": "OIDC multi-fournisseur, 2FA TOTP, politique de mot de passe interne et API REST v1 publique avec tokens scopés par contexte.",
+    "description": "Description of the auth feature card"
+  },
+  "landing.feature.audit.title": {
+    "message": "Audit & syslog",
+    "description": "Title of the audit feature card"
+  },
+  "landing.feature.audit.desc": {
+    "message": "Chaque événement de sécurité enregistré, navigable, exportable — et poussable vers un ou plusieurs collecteurs SIEM.",
+    "description": "Description of the audit feature card"
+  },
+  "landing.ai.eyebrow": {
+    "message": "Nouveau en 5.0",
+    "description": "Eyebrow for the AI section"
+  },
+  "landing.ai.title.start": {
+    "message": "Découvrez votre",
+    "description": "First part of the AI section title"
+  },
+  "landing.ai.title.accent": {
+    "message": "copilote réseau",
+    "description": "Gradient-accented end of the AI section title"
+  },
+  "landing.ai.lead": {
+    "message": "Configurez un ou plusieurs fournisseurs LLM (OpenRouter, OpenAI, Anthropic ou votre Ollama local). Définissez des assistants par contexte avec leur propre prompt système. Activez l'usage d'outils pour qu'ils interrogent vos données en toute sécurité — les hostnames sont nettoyés avant tout appel cloud.",
+    "description": "Lead of the AI section"
+  },
+  "landing.ai.cta.primary": {
+    "message": "Lire le guide IA",
+    "description": "Primary CTA of the AI section"
+  },
+  "landing.ai.cta.secondary": {
+    "message": "Voir un cas d'usage",
+    "description": "Secondary CTA of the AI section"
+  },
+  "landing.ai.screenshot.alt": {
+    "message": "Panneau de l'assistant IA montrant les appels d'outils et résultats anonymisés",
+    "description": "Alt text for the AI section screenshot"
+  },
+  "landing.start.eyebrow": {
+    "message": "Par où commencer",
+    "description": "Eyebrow for the where-to-start section"
+  },
+  "landing.start.title": {
+    "message": "Choisissez le chemin qui vous correspond",
+    "description": "Title of the where-to-start section"
+  },
+  "landing.start.install.title": {
+    "message": "Installer Auditix",
+    "description": "Title of the install card"
+  },
+  "landing.start.install.desc": {
+    "message": "Installation en une ligne ou configuration manuelle. Opérationnel en moins de 10 minutes.",
+    "description": "Description of the install card"
+  },
+  "landing.start.guide.title": {
+    "message": "Guide utilisateur",
+    "description": "Title of the user guide card"
+  },
+  "landing.start.guide.desc": {
+    "message": "Documentation de référence pour chaque fonctionnalité, de l'onboarding des nœuds aux thèmes PDF.",
+    "description": "Description of the user guide card"
+  },
+  "landing.start.usecase.title": {
+    "message": "Cas d'usage",
+    "description": "Title of the use cases card"
+  },
+  "landing.start.usecase.desc": {
+    "message": "Recettes pas à pas : 1er audit de conformité, rapport mensuel, recommandations IA, SSO avec Azure AD…",
+    "description": "Description of the use cases card"
+  },
+  "landing.start.api.title": {
+    "message": "Référence API",
+    "description": "Title of the API reference card"
+  },
+  "landing.start.api.desc": {
+    "message": "API REST v1, authentification par token, Swagger UI livré avec chaque instance.",
+    "description": "Description of the API reference card"
+  },
   "theme.ErrorPageContent.title": {
     "message": "Cette page a planté.",
     "description": "The title of the fallback page when the page crashed"

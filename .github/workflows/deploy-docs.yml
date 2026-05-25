@@ -1,5 +1,8 @@
 name: Deploy Documentation
 
+# Builds the Docusaurus site in docs/ and publishes it to GitHub Pages.
+# Final URL: https://tchevalleraud.github.io/auditix/
+
 on:
   push:
     branches: [main]
@@ -17,6 +20,9 @@ concurrency:
   group: pages
   cancel-in-progress: false
 
+env:
+  BASE_URL: /auditix/
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -24,21 +30,27 @@ jobs:
       run:
         working-directory: docs
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
           cache-dependency-path: docs/package-lock.json
 
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
 
-      - run: npm run build
-        env:
-          BASE_URL: /auditix/
+      - name: Build site (fails on broken links)
+        run: npm run build
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
         with:
           path: docs/build
 
@@ -49,5 +61,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4

@@ -36,7 +36,7 @@ Avant d'ajouter des nœuds, configurez votre bibliothèque d'équipements :
 
 ## 5. Ajouter votre premier nœud
 
-Vous pouvez créer les nœuds un par un, ou tous d'un coup via [import CSV](../guide/nodes/nodes).
+Vous pouvez créer les nœuds un par un, ou tous d'un coup via un import CSV depuis la liste des nœuds.
 
 1. Allez dans **Nœuds** dans la barre latérale.
 2. Cliquez sur **Nouveau nœud**.

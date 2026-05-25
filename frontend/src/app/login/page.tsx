@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Loader2, KeyRound, ServerCog, Moon, Sun, ChevronDown } from "lucide-react";
+import { Loader2, KeyRound, ServerCog, Moon, Sun, ChevronDown } from "lucide-react";
 import { useI18n, locales } from "@/components/I18nProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import flagComponents from "@/components/Flags";
 import { useBackendReady } from "@/hooks/useBackendReady";
+import Logo from "@/components/Logo";
 
 type Step = "credentials" | "totp";
 
@@ -160,11 +161,13 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 dark:bg-slate-800 mb-4">
+          <div className="mb-4 flex items-center justify-center">
             {step === "totp" ? (
-              <KeyRound className="h-8 w-8 text-white" />
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 dark:bg-slate-800">
+                <KeyRound className="h-8 w-8 text-white" />
+              </div>
             ) : (
-              <ShieldCheck className="h-8 w-8 text-white" />
+              <Logo size={56} />
             )}
           </div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">

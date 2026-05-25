@@ -2,9 +2,17 @@ import {themes as prismThemes} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
+/**
+ * Auditix documentation site.
+ *
+ * Deployed at https://tchevalleraud.github.io/auditix/ via GitHub Actions.
+ * - In CI, BASE_URL is set to /auditix/ by .github/workflows/deploy-docs.yml.
+ * - Locally, `npm run start` sets BASE_URL=/ so the dev server runs at http://localhost:3000/.
+ * - If you want to mirror prod URLs locally, run `npm run start:prod-url`.
+ */
 const config: Config = {
   title: 'Auditix',
-  tagline: 'Network compliance auditing platform',
+  tagline: 'AI-powered network compliance auditing platform',
   favicon: 'img/favicon.ico',
 
   url: 'https://tchevalleraud.github.io',
@@ -12,9 +20,17 @@ const config: Config = {
 
   organizationName: 'tchevalleraud',
   projectName: 'auditix',
+  deploymentBranch: 'gh-pages',
+  trailingSlash: false,
 
-  onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+  onBrokenLinks: 'throw',
+  onBrokenAnchors: 'warn',
+
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
 
   i18n: {
     defaultLocale: 'en',
@@ -35,7 +51,7 @@ const config: Config = {
           lastVersion: 'current',
           versions: {
             current: {
-              label: '4.1.x',
+              label: '5.0.0',
               badge: true,
             },
           },
@@ -49,12 +65,17 @@ const config: Config = {
   ],
 
   themeConfig: {
+    colorMode: {
+      defaultMode: 'light',
+      respectPrefersColorScheme: true,
+    },
+    image: 'img/banner.svg',
     navbar: {
       title: 'Auditix',
       logo: {
         alt: 'Auditix Logo',
-        src: 'img/logo.png',
-        srcDark: 'img/logo-dark.png',
+        src: 'img/logo.svg',
+        srcDark: 'img/logo-dark.svg',
       },
       items: [
         {
@@ -62,6 +83,16 @@ const config: Config = {
           sidebarId: 'docsSidebar',
           position: 'left',
           label: 'Documentation',
+        },
+        {
+          to: '/usecase/intro',
+          label: 'Use cases',
+          position: 'left',
+        },
+        {
+          to: '/whats-new-5.0',
+          label: "What's new",
+          position: 'left',
         },
         {
           type: 'docsVersionDropdown',
@@ -86,6 +117,16 @@ const config: Config = {
           items: [
             { label: 'Getting Started', to: '/getting-started/installation' },
             { label: 'User Guide', to: '/guide/dashboard' },
+            { label: 'Use cases', to: '/usecase/intro' },
+            { label: 'API reference', to: '/api/overview' },
+          ],
+        },
+        {
+          title: 'AI Edition',
+          items: [
+            { label: 'AI overview', to: '/guide/ai/overview' },
+            { label: 'LLM providers', to: '/admin/ai/llm-providers' },
+            { label: 'Assistants', to: '/guide/ai/assistants' },
           ],
         },
         {
@@ -99,8 +140,8 @@ const config: Config = {
       copyright: `Copyright ${new Date().getFullYear()} Auditix. Built with Docusaurus.`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.oneLight,
+      darkTheme: prismThemes.oneDark,
       additionalLanguages: ['bash', 'yaml', 'json', 'php'],
     },
   } satisfies Preset.ThemeConfig,

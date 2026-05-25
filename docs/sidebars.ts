@@ -3,6 +3,7 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     'intro',
+    'whats-new-5.0',
     {
       type: 'category',
       label: 'Getting Started',
@@ -11,6 +12,7 @@ const sidebars: SidebarsConfig = {
         'getting-started/requirements',
         'getting-started/installation',
         'getting-started/first-steps',
+        'getting-started/architecture',
       ],
     },
     {
@@ -35,6 +37,8 @@ const sidebars: SidebarsConfig = {
           items: [
             'guide/topology/overview',
             'guide/topology/link-rules',
+            'guide/topology/msti',
+            'guide/topology/schemas',
           ],
         },
         {
@@ -44,6 +48,7 @@ const sidebars: SidebarsConfig = {
             'guide/collections/commands',
             'guide/collections/rules',
             'guide/collections/running',
+            'guide/collections/key-templates',
           ],
         },
         {
@@ -68,13 +73,41 @@ const sidebars: SidebarsConfig = {
           label: 'Reports',
           items: [
             'guide/reports/creating',
+            'guide/reports/blocks',
             'guide/reports/themes',
             'guide/reports/mail-reports',
-            'guide/reports/blocks',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'AI features',
+          collapsed: false,
+          items: [
+            'guide/ai/overview',
+            'guide/ai/providers',
+            'guide/ai/assistants',
+            'guide/ai/tools',
+            'guide/ai/ai-assist-blocks',
           ],
         },
         'guide/schedules',
         'guide/monitoring',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'Use cases',
+      items: [
+        'usecase/intro',
+        'usecase/onboard-fleet',
+        'usecase/first-compliance-audit',
+        'usecase/monthly-pdf-report',
+        'usecase/ai-assisted-recommendations',
+        'usecase/ai-network-chat',
+        'usecase/lifecycle-tracking',
+        'usecase/topology-with-msti',
+        'usecase/oidc-azure',
+        'usecase/siem-syslog',
       ],
     },
     {
@@ -84,6 +117,7 @@ const sidebars: SidebarsConfig = {
         'api/overview',
         'api/authentication',
         'api/endpoints',
+        'api/examples',
       ],
     },
     {
@@ -99,6 +133,14 @@ const sidebars: SidebarsConfig = {
             'admin/authentication/oidc',
             'admin/authentication/2fa',
             'admin/authentication/password-policy',
+          ],
+        },
+        {
+          type: 'category',
+          label: 'AI administration',
+          items: [
+            'admin/ai/llm-providers',
+            'admin/ai/ai-settings',
           ],
         },
         {

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  ShieldCheck,
   Box,
   Cpu,
   KeyRound,
@@ -31,6 +30,7 @@ import {
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
+import Logo from "@/components/Logo";
 import type { LucideIcon } from "lucide-react";
 
 interface NavItem {
@@ -201,7 +201,7 @@ export default function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800">
       <div className="flex h-16 items-center gap-3 px-6 border-b border-slate-200 dark:border-slate-800">
-        <ShieldCheck className="h-8 w-8 text-slate-900 dark:text-white" />
+        <Logo size={32} />
         <span className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
           Auditix
         </span>

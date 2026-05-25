@@ -104,4 +104,4 @@ Headers can appear in any order; unknown columns are ignored. References to manu
 
 ## Customisable columns
 
-Columns of the node list (and of every inventory category opened from a node) are configurable per context — see [Inventory categories](../inventory/categories).
+Columns of the node list (and of every inventory category opened from a node) are configurable per context — see [Inventory categories](../inventory/categories.md).

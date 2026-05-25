@@ -1,6 +1,6 @@
 {
   "version.label": {
-    "message": "4.1.x",
+    "message": "5.0.0",
     "description": "The label for version current"
   },
   "sidebar.docsSidebar.category.Getting Started": {
@@ -35,6 +35,14 @@
     "message": "Rapports",
     "description": "The label for category 'Reports' in sidebar 'docsSidebar'"
   },
+  "sidebar.docsSidebar.category.AI features": {
+    "message": "IA",
+    "description": "The label for category 'AI features' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.Use cases": {
+    "message": "Cas d'usage",
+    "description": "The label for category 'Use cases' in sidebar 'docsSidebar'"
+  },
   "sidebar.docsSidebar.category.API": {
     "message": "API",
     "description": "The label for category 'API' in sidebar 'docsSidebar'"
@@ -46,6 +54,10 @@
   "sidebar.docsSidebar.category.Authentication": {
     "message": "Authentification",
     "description": "The label for category 'Authentication' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.AI administration": {
+    "message": "Administration IA",
+    "description": "The label for category 'AI administration' in sidebar 'docsSidebar'"
   },
   "sidebar.docsSidebar.category.Mail": {
     "message": "Messagerie",
