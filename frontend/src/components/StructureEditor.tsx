@@ -64,6 +64,7 @@ import {
   AlignVerticalJustifyEnd,
   Link as LinkIcon,
   Unlink as UnlinkIcon,
+  Workflow,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -299,6 +300,21 @@ export interface TopologyBlock {
   mstpInstance?: string | null;
   width: number;
   showLegend: boolean;
+  caption: string;
+  pageBreakBefore?: boolean;
+  viewportFrame?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null;
+}
+
+export interface SchemaBlock {
+  id: string;
+  type: "schema";
+  schemaId?: number | null;
+  width: number;
   caption: string;
   pageBreakBefore?: boolean;
   viewportFrame?: {
@@ -698,6 +714,7 @@ export type ReportBlock = (
   | ActionListBlock
   | CommandListBlock
   | TopologyBlock
+  | SchemaBlock
   | ComplianceMatrixBlock
   | RuleNonCompliantBlock
   | RuleNodesTableBlock
@@ -821,6 +838,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "equipment_list", labelKey: "structure.addEquipmentList", icon: <ListChecks className="h-4 w-4 text-purple-500" /> },
       { type: "command_list", labelKey: "structure.addCommandList", icon: <TerminalSquare className="h-4 w-4 text-teal-500" /> },
       { type: "topology", labelKey: "structure.addTopology", icon: <Network className="h-4 w-4 text-violet-500" /> },
+      { type: "schema", labelKey: "schemas.addSchema", icon: <Workflow className="h-4 w-4 text-violet-500" /> },
       { type: "cli_command", labelKey: "structure.addCliCommand", icon: <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span> },
     ],
   },
@@ -958,6 +976,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "command_list", manufacturerId: null, modelId: null, style: { fontSize: 9 } };
     } else if (type === "topology") {
       block = { id, type: "topology", topologyId: null, protocolFilter: "manual", width: 100, showLegend: true, caption: "", pageBreakBefore: false };
+    } else if (type === "schema") {
+      block = { id, type: "schema", schemaId: null, width: 100, caption: "", pageBreakBefore: false };
     } else if (type === "compliance_matrix") {
       block = { id, type: "compliance_matrix", policyId: null, showRuleId: true, showTotal: true, pageBreakBefore: false };
     } else if (type === "rule_non_compliant") {
@@ -1252,6 +1272,12 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyTopology")}</span>;
     }
+    if (block.type === "schema") {
+      if (block.schemaId) {
+        return <span className="text-slate-500 text-xs">{t("schemas.schemaBlock")} — #{block.schemaId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("schemas.emptySchema")}</span>;
+    }
     if (block.type === "compliance_matrix") {
       if (block.policyId) {
         return <span className="text-slate-500 text-xs">{t("structure.complianceMatrix")} — policy #{block.policyId}</span>;
@@ -1420,6 +1446,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-600 dark:text-violet-400">
           <Network className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "schema") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-600 dark:text-violet-400">
+          <Workflow className="h-3 w-3" />
         </span>
       );
     }
@@ -1763,6 +1796,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "topology" && (
                 <TopologyBlockProperties block={editingBlock as TopologyBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "schema" && (
+                <SchemaBlockProperties block={editingBlock as SchemaBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "compliance_matrix" && (
                 <ComplianceMatrixProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -5811,6 +5847,122 @@ function TopologyBlockProperties({
       </div>
 
       {/* Caption */}
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyCaption")}
+        </label>
+        <input
+          type="text"
+          value={block.caption}
+          onChange={(e) => updateBlock(block.id, { caption: e.target.value })}
+          placeholder={t("structure.topologyCaptionPlaceholder")}
+          className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+        />
+      </div>
+    </div>
+  );
+}
+
+function SchemaBlockProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: SchemaBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const { current } = useAppContext();
+  const [schemas, setSchemas] = useState<{ id: number; name: string; description: string | null }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!current) return;
+    setLoading(true);
+    fetch(`/api/report-schemas?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setSchemas(data))
+      .finally(() => setLoading(false));
+  }, [current]);
+
+  useEffect(() => {
+    if (!block.schemaId) { setPreviewUrl(null); return; }
+    setPreviewUrl(`/api/report-schemas/${block.schemaId}/svg?width=900&t=${Date.now()}`);
+  }, [block.schemaId]);
+
+  const selectedSchema = schemas.find((s) => s.id === block.schemaId);
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("schemas.schemaBlock")} <span className="text-red-500">*</span>
+        </label>
+        {loading ? (
+          <div className="flex items-center gap-2 text-xs text-slate-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            {t("common.loading")}
+          </div>
+        ) : (
+          <select
+            value={block.schemaId ?? ""}
+            onChange={(e) => updateBlock(block.id, {
+              schemaId: e.target.value ? Number(e.target.value) : null,
+              viewportFrame: null,
+            })}
+            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
+          >
+            <option value="">{t("schemas.schemaSelectSchema")}</option>
+            {schemas.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        )}
+        {selectedSchema?.description && (
+          <p className="text-xs text-slate-400 dark:text-slate-500">{selectedSchema.description}</p>
+        )}
+      </div>
+
+      {previewUrl && block.schemaId && (
+        <TopologyPreviewSelector
+          previewUrl={previewUrl}
+          frame={block.viewportFrame ?? null}
+          onChange={(f) => updateBlock(block.id, { viewportFrame: f })}
+          t={t}
+        />
+      )}
+
+      <div className="space-y-1.5">
+        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          {t("structure.topologyWidth")}
+        </label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={30}
+            max={100}
+            step={5}
+            value={block.width}
+            onChange={(e) => updateBlock(block.id, { width: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-10 text-right">{block.width}%</span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
       <div className="space-y-1.5">
         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
           {t("structure.topologyCaption")}

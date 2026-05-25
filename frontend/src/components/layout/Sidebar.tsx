@@ -27,6 +27,7 @@ import {
   ShieldAlert,
   Layers,
   Mail,
+  Workflow,
 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
@@ -94,6 +95,7 @@ const contextNav: NavCategory[] = [
     label: "sidebar.catReports",
     items: [
       { key: "sidebar.reports", href: "/reports/list", icon: FileBarChart },
+      { key: "sidebar.reportSchemas", href: "/reports/schemas", icon: Workflow },
       { key: "sidebar.mailReports", href: "/reports/mail", icon: Mail },
       { key: "sidebar.reportThemes", href: "/reports/themes", icon: Palette },
     ],

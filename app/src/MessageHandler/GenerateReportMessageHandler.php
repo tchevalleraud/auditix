@@ -33,6 +33,7 @@ class GenerateReportMessageHandler
         private readonly BlockConditionEvaluator $blockConditionEvaluator,
         private readonly LoggerInterface $logger,
         private readonly \App\Service\TopologyV2SvgRenderer $topologyV2Renderer,
+        private readonly \App\Service\ReportSchemaSvgRenderer $reportSchemaRenderer,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -2853,6 +2854,79 @@ class GenerateReportMessageHandler
                 }
 
                 $prevType = 'topology';
+
+            } elseif ($type === 'schema') {
+                $schemaId = $block['schemaId'] ?? null;
+                $schemaWidth = (float) ($block['width'] ?? 100);
+                $caption = $block['caption'] ?? '';
+                $pageBreak = !empty($block['pageBreakBefore']);
+
+                if (!$schemaId) continue;
+
+                $reportSchema = $this->em->getRepository(\App\Entity\ReportSchema::class)->find($schemaId);
+                if (!$reportSchema) continue;
+
+                $opts = ['canvasWidth' => 1200];
+                $vf = $block['viewportFrame'] ?? null;
+                if (is_array($vf) && isset($vf['x'], $vf['y'], $vf['width'], $vf['height'])) {
+                    $opts['viewportFrame'] = [
+                        'x' => (float)$vf['x'],
+                        'y' => (float)$vf['y'],
+                        'width' => (float)$vf['width'],
+                        'height' => (float)$vf['height'],
+                    ];
+                }
+
+                $svg = $this->reportSchemaRenderer->render($reportSchema, $opts);
+                if ($svg === null || $svg === '') continue;
+
+                if ($pageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $tmpSvg = tempnam(sys_get_temp_dir(), 'rsch_') . '.svg';
+                file_put_contents($tmpSvg, $svg);
+
+                $pageW = $pdf->getPageWidth();
+                $contentW = $pageW - $mLeft - $mRight;
+                $imgW = $contentW * ($schemaWidth / 100);
+                $imgX = $mLeft + ($contentW - $imgW) / 2;
+
+                $svgAspect = 1.0;
+                if (preg_match('/width="(\d+(?:\.\d+)?)"/', $svg, $wm) && preg_match('/height="(\d+(?:\.\d+)?)"/', $svg, $hm)) {
+                    $svgAspect = (float) $hm[1] / max((float) $wm[1], 1);
+                }
+                $imgH = $imgW * $svgAspect;
+                $yBefore = $pdf->GetY();
+
+                if ($yBefore + $imgH > $pdf->getPageHeight() - $mBottom) {
+                    $pdf->AddPage();
+                    $yBefore = $pdf->GetY();
+                }
+
+                $pdf->ImageSVG($tmpSvg, $imgX, $yBefore, $imgW, $imgH, '', '', '', 0, false);
+                @unlink($tmpSvg);
+
+                $pdf->SetY($yBefore + $imgH);
+
+                if (!empty($caption)) {
+                    $pdf->Ln(2);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->SetFont($bodyFont, 'I', $bodySize - 1);
+                    $pdf->MultiCell($contentW, 0, $caption, 0, 'C', false, 1, $mLeft);
+                    $pdf->SetFont($bodyFont, '', $bodySize);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'schema';
 
             } elseif ($type === 'compliance_matrix') {
                 $policyId = $block['policyId'] ?? null;
