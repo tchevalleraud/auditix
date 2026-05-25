@@ -27,6 +27,42 @@ class TopologyV2SvgRenderer
     public function __construct(private readonly EntityManagerInterface $em) {}
 
     /**
+     * Mirror of stpStatePalette() in TopologyMap.tsx — derives a default
+     * stroke colour + dash style from a normalised STP state.
+     * @return array{color: string, dash: string}
+     */
+    private function stpStatePalette(string $state): array
+    {
+        return match ($state) {
+            'forwarding' => ['color' => '#22c55e', 'dash' => 'solid'],
+            'learning'   => ['color' => '#f59e0b', 'dash' => 'dashed'],
+            'listening'  => ['color' => '#fbbf24', 'dash' => 'dashed'],
+            'blocking', 'discarding' => ['color' => '#ef4444', 'dash' => 'dotted'],
+            'disabled'   => ['color' => '#94a3b8', 'dash' => 'dotted'],
+            'mixed'      => ['color' => '#f97316', 'dash' => 'dashed'],
+            default      => ['color' => '#94a3b8', 'dash' => 'solid'],
+        };
+    }
+
+    /**
+     * Mirror of stpRoleBadge() in TopologyMap.tsx — abbreviates a port role
+     * to its single-letter badge + colour.
+     * @return array{letter:string,color:string,full:string}|null
+     */
+    private function stpRoleBadge(?string $role): ?array
+    {
+        if ($role === null || $role === '') return null;
+        $r = strtolower($role);
+        if (str_starts_with($r, 'root'))   return ['letter' => 'R', 'color' => '#22c55e', 'full' => 'Root'];
+        if (str_starts_with($r, 'desig'))  return ['letter' => 'D', 'color' => '#3b82f6', 'full' => 'Designated'];
+        if (str_starts_with($r, 'alt'))    return ['letter' => 'A', 'color' => '#f59e0b', 'full' => 'Alternate'];
+        if (str_starts_with($r, 'back'))   return ['letter' => 'B', 'color' => '#eab308', 'full' => 'Backup'];
+        if (str_starts_with($r, 'master')) return ['letter' => 'M', 'color' => '#a855f7', 'full' => 'Master'];
+        if (str_starts_with($r, 'dis') || $r === '-') return ['letter' => '-', 'color' => '#94a3b8', 'full' => 'Disabled'];
+        return ['letter' => strtoupper(substr($role, 0, 1)), 'color' => '#64748b', 'full' => $role];
+    }
+
+    /**
      * @param array{x:float,y:float,width:float,height:float}|null $viewportFrame
      *        When provided, use this rectangle (in WORLD coordinates, can be negative)
      *        as the SVG viewBox instead of the auto-fit bounding box.
@@ -38,6 +74,15 @@ class TopologyV2SvgRenderer
         $showAnnotations = $options['showAnnotations'] ?? true;
         $canvasWidth = (int) ($options['canvasWidth'] ?? 1200);
         $viewportFrame = $options['viewportFrame'] ?? null;
+        // Optional: when the filtered protocol is MSTP, the report editor picks
+        // one MSTI to render. Edges get recoloured to that instance's state and
+        // the root badge points to the root of that instance only.
+        $mstpInstance = $options['mstpInstance'] ?? null;
+        if ($mstpInstance !== null) $mstpInstance = (string) $mstpInstance;
+        // Legend overlay: off by default. Callers explicitly opt in (the report
+        // block's "Show legend" toggle does it for the PDF; the editor preview
+        // never asks for it so the user keeps a clean map while configuring).
+        $showLegend = (bool) ($options['showLegend'] ?? false);
 
         $members = $this->em->getRepository(TopologyNode::class)->findBy(['topology' => $topology]);
         $nodeIds = array_map(fn(TopologyNode $m) => $m->getNode()->getId(), $members);
@@ -121,8 +166,34 @@ class TopologyV2SvgRenderer
             if ($col) $isisAreaColors[$c->getName()] = $col;
         }
         $isisProtocolIds = [];
+        $mstpProtocolIds = [];
+        $stpProtocolIds = [];
         foreach ($this->em->getRepository(TopologyProtocol::class)->findBy(['topology' => $topology]) as $p) {
             if ($p->getType() === TopologyProtocol::TYPE_ISIS) $isisProtocolIds[$p->getId()] = true;
+            if ($p->getType() === TopologyProtocol::TYPE_MSTP) $mstpProtocolIds[$p->getId()] = true;
+            if ($p->getType() === TopologyProtocol::TYPE_STP)  $stpProtocolIds[$p->getId()]  = true;
+        }
+        $filterPid = (is_int($protocolFilter) || ctype_digit((string) $protocolFilter)) ? (int) $protocolFilter : null;
+        $isStpFiltered  = $filterPid !== null && (isset($stpProtocolIds[$filterPid]) || isset($mstpProtocolIds[$filterPid]));
+        $isMstpFiltered = $filterPid !== null && isset($mstpProtocolIds[$filterPid]);
+
+        // Identify STP root node IDs for the current context. The clusters that
+        // emitStpRootClusters() persists carry { stpRoot: true, stpInstance: <id> }
+        // in their style. For MSTP we filter to the selected instance (when one
+        // is picked) so the R badge points to that MSTI's root only.
+        $stpRootNodeIds = [];
+        if ($isStpFiltered) {
+            foreach ($allClusters as $c) {
+                if ($c->getProtocol()?->getId() !== $filterPid) continue;
+                $cs = $c->getStyle();
+                if (empty($cs['stpRoot'])) continue;
+                if ($isMstpFiltered && $mstpInstance !== null
+                    && (string)($cs['stpInstance'] ?? '') !== $mstpInstance) continue;
+                $members = $this->em->getRepository(TopologyClusterMember::class)->findBy(['cluster' => $c]);
+                foreach ($members as $m) {
+                    $stpRootNodeIds[$m->getNode()->getId()] = true;
+                }
+            }
         }
 
         // Aggregation groups: edges sharing the same (pair, aggregationGroup) are
@@ -176,8 +247,11 @@ class TopologyV2SvgRenderer
             }
         }
 
-        // Clusters
+        // Clusters — STP/MSTP "root" clusters are markers, not visual zones;
+        // they're surfaced as the R badge on the root node, not as a labelled
+        // hull. Mirrors the React `.filter((c) => !c.style?.stpRoot)`.
         foreach ($clusters as $c) {
+            if (!empty($c->getStyle()['stpRoot'])) continue;
             $out .= $this->renderCluster($c, $nodeInfo, $clusters, $ox, $oy);
         }
 
@@ -188,6 +262,9 @@ class TopologyV2SvgRenderer
         }
 
         // Edges
+        $showPortRoles  = $mapOptions['stpShowPortRoles'] ?? true;
+        $portRoleFs     = (float) ($mapOptions['stpPortRoleFontSize'] ?? 7);
+        $portRoleBw     = (float) ($mapOptions['stpPortRoleBorderWidth'] ?? 1);
         foreach ($visibleEdges as $e) {
             $eStyle = $e->getStyle() ?? [];
             $areaColors = [];
@@ -197,12 +274,35 @@ class TopologyV2SvgRenderer
                     if (isset($isisAreaColors[$area])) $areaColors[] = $isisAreaColors[$area];
                 }
             }
-            $out .= $this->renderEdge($e, $nodeInfo, $edgeOffsets[$e->getId()] ?? 0, $ox, $oy, $areaColors);
+            // MSTP recolouring + label enrichment when an instance is picked.
+            // Skip the edge entirely if it has no data for that instance, so
+            // the PDF shows only relevant adjacencies (mirrors the map).
+            $styleOverride = null;
+            if ($isMstpFiltered && $pid === $filterPid && $mstpInstance !== null) {
+                $instances = $eStyle['stpInstances'] ?? [];
+                $found = null;
+                foreach ($instances as $i) {
+                    if ((string) ($i['instance'] ?? '') === $mstpInstance) { $found = $i; break; }
+                }
+                if ($found === null) continue;
+                $styleOverride = $this->mstpEdgeStyleForInstance(
+                    $eStyle, $found, $showPortRoles, $portRoleFs, $portRoleBw,
+                );
+            }
+            $out .= $this->renderEdge($e, $nodeInfo, $edgeOffsets[$e->getId()] ?? 0, $ox, $oy, $areaColors, $styleOverride);
         }
 
-        // Nodes
+        // Nodes — pass the STP root info so badge:stp_root LabelElements can
+        // be filtered to render only on the actual root node, and only when
+        // the global stpShowRootBadge toggle is on.
+        $showRootBadge = $mapOptions['stpShowRootBadge'] ?? true;
         foreach ($nodeInfo as $ni) {
-            $out .= $this->renderNode($ni, $ox, $oy);
+            $out .= $this->renderNode(
+                $ni,
+                $ox,
+                $oy,
+                $showRootBadge && isset($stpRootNodeIds[$ni['id']]),
+            );
         }
 
         // Annotations with zIndex >= 0 (foreground)
@@ -214,8 +314,160 @@ class TopologyV2SvgRenderer
             }
         }
 
+        // Legend overlay — only when the caller explicitly opts in (e.g. the
+        // report block's "Show legend" toggle). The live preview in the
+        // editor passes showLegend=false so it stays distraction-free.
+        if ($showLegend) {
+            $legendPos = (string) ($mapOptions['stpLegendPosition'] ?? 'br');
+            $unitPerPx = $vw / max(1, $canvasWidth);
+            if ($isStpFiltered) {
+                $out .= $this->renderStpLegend($minX, $minY, $vw, $vh, $legendPos, $isMstpFiltered, $unitPerPx);
+            } elseif ($filterPid !== null && isset($isisProtocolIds[$filterPid]) && !empty($isisAreaColors)) {
+                $out .= $this->renderIsisLegend($minX, $minY, $vw, $vh, $legendPos, $isisAreaColors, $unitPerPx);
+            }
+        }
+
         $out .= '</svg>';
         return $out;
+    }
+
+    /**
+     * STP/MSTP legend: link-state colours + port-role pills + the root badge.
+     * Sized in WORLD units derived from a target pixel size, so the card
+     * appears at a constant ~physical size in the output SVG no matter how
+     * wide the viewBox is. `unitPerPx` = world units per output pixel.
+     */
+    private function renderStpLegend(float $minX, float $minY, float $vw, float $vh, string $pos, bool $isMstp, float $unitPerPx): string
+    {
+        $states = [
+            ['forwarding', 'Forwarding'],
+            ['blocking',   'Blocking'],
+            ['discarding', 'Discarding'],
+            ['learning',   'Learning'],
+            ['listening',  'Listening'],
+            ['disabled',   'Disabled'],
+            ['mixed',      'Mixed'],
+        ];
+        $roles = ['Root', 'Designated', 'Alternate', 'Backup', 'Master', 'Disabled'];
+
+        // Pixel-anchored sizing. Each constant below is the desired on-screen
+        // px size, multiplied by unitPerPx to convert to world units. The card
+        // ends up the same physical size whether the viewBox is 500 or 5000.
+        $scale = $unitPerPx;
+        $pad = 8 * $scale;
+        $lh  = 11 * $scale;
+        $fs  = 9 * $scale;
+        $titleFs = 8 * $scale;
+        $cardW = 180 * $scale;
+        // Header (title) + states header + states + role header + roles + bridge header + bridge row
+        $rows = 1 + 1 + count($states) + 1 + count($roles) + 1 + 1;
+        $cardH = $rows * $lh + $pad * 2;
+
+        [$x, $y] = $this->legendCornerXY($pos, $minX, $minY, $vw, $vh, $cardW, $cardH, $pad);
+
+        $svg = '<g style="pointer-events:none">';
+        $svg .= '<rect x="' . $this->fmt($x) . '" y="' . $this->fmt($y) . '" width="' . $this->fmt($cardW) . '" height="' . $this->fmt($cardH) . '" rx="' . $this->fmt(4 * $scale) . '" fill="#ffffff" fill-opacity="0.95" stroke="#cbd5e1" stroke-width="' . $this->fmt(0.5 * $scale) . '"/>';
+        $cursorY = $y + $pad + $titleFs * 0.8;
+        $svg .= '<text x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($titleFs) . '" font-weight="700" fill="#475569">' . ($isMstp ? 'MSTP legend' : 'STP legend') . '</text>';
+        $cursorY += $lh;
+
+        // Section: link states (color line + label)
+        $svg .= '<text x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($titleFs * 0.85) . '" font-weight="600" fill="#94a3b8">LINK STATE</text>';
+        $cursorY += $lh;
+        foreach ($states as $s) {
+            $p = $this->stpStatePalette($s[0]);
+            $da = $this->dashFor($p['dash'], 1.0);
+            $sw = 18 * $scale;
+            $lineY = $cursorY - $lh * 0.25;
+            $attr = 'stroke="' . $p['color'] . '" stroke-width="' . $this->fmt(2 * $scale) . '"';
+            if ($da) $attr .= ' stroke-dasharray="' . $da . '"';
+            $svg .= '<line x1="' . $this->fmt($x + $pad) . '" y1="' . $this->fmt($lineY) . '" x2="' . $this->fmt($x + $pad + $sw) . '" y2="' . $this->fmt($lineY) . '" ' . $attr . '/>';
+            $svg .= '<text x="' . $this->fmt($x + $pad + $sw + 4 * $scale) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($fs) . '" fill="#475569">' . htmlspecialchars($s[1]) . '</text>';
+            $cursorY += $lh;
+        }
+
+        // Section: port roles (pill + label)
+        $svg .= '<text x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($titleFs * 0.85) . '" font-weight="600" fill="#94a3b8">PORT ROLE</text>';
+        $cursorY += $lh;
+        $pillSize = 12 * $scale;
+        foreach ($roles as $r) {
+            $b = $this->stpRoleBadge($r);
+            if (!$b) continue;
+            // Pill: rect top at `cursorY - 0.85*pillSize` so its visual centre
+            // sits a hair above the label baseline. The letter inside is
+            // anchored to the pill centre with an explicit dy (≈ 0.35 × font
+            // size in absolute units) so TCPDF, which ignores em-based dy,
+            // still vertically centres the glyph inside the pill.
+            $pillCy = $cursorY - $pillSize * 0.35;
+            $pillFs = $fs * 0.95;
+            $svg .= '<rect x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY - $pillSize * 0.85) . '" width="' . $this->fmt($pillSize) . '" height="' . $this->fmt($pillSize) . '" rx="' . $this->fmt(2 * $scale) . '" fill="' . $b['color'] . '"/>';
+            $svg .= '<text x="' . $this->fmt($x + $pad + $pillSize / 2) . '" y="' . $this->fmt($pillCy) . '" text-anchor="middle" dy="' . $this->fmt($pillFs * 0.35) . '" font-size="' . $this->fmt($pillFs) . '" font-weight="800" fill="#ffffff">' . $b['letter'] . '</text>';
+            $svg .= '<text x="' . $this->fmt($x + $pad + $pillSize + 4 * $scale) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($fs) . '" fill="#475569">' . htmlspecialchars($b['full']) . '</text>';
+            $cursorY += $lh;
+        }
+
+        // Section: root bridge
+        $svg .= '<text x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($titleFs * 0.85) . '" font-weight="600" fill="#94a3b8">BRIDGE</text>';
+        $cursorY += $lh;
+        $rR = 7 * $scale;
+        $bridgeFs = $fs * 0.95;
+        $bridgeCy = $cursorY - $rR * 0.5;
+        $svg .= '<circle cx="' . $this->fmt($x + $pad + $rR) . '" cy="' . $this->fmt($bridgeCy) . '" r="' . $this->fmt($rR) . '" fill="#dc2626"/>';
+        $svg .= '<text x="' . $this->fmt($x + $pad + $rR) . '" y="' . $this->fmt($bridgeCy) . '" text-anchor="middle" dy="' . $this->fmt($bridgeFs * 0.35) . '" font-size="' . $this->fmt($bridgeFs) . '" font-weight="800" fill="#ffffff">R</text>';
+        $svg .= '<text x="' . $this->fmt($x + $pad + $rR * 2 + 4 * $scale) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($fs) . '" fill="#475569">Root bridge</text>';
+
+        $svg .= '</g>';
+        return $svg;
+    }
+
+    /**
+     * ISIS legend: lists each area with its colour. Empty (returns "") when
+     * no area cluster has been generated.
+     * @param array<string,string> $areaColors  area name => stroke colour
+     */
+    private function renderIsisLegend(float $minX, float $minY, float $vw, float $vh, string $pos, array $areaColors, float $unitPerPx): string
+    {
+        $scale = $unitPerPx;
+        $pad = 8 * $scale;
+        $lh  = 11 * $scale;
+        $fs  = 9 * $scale;
+        $titleFs = 8 * $scale;
+        $cardW = 180 * $scale;
+        $cardH = (count($areaColors) + 1) * $lh + $pad * 2;
+        [$x, $y] = $this->legendCornerXY($pos, $minX, $minY, $vw, $vh, $cardW, $cardH, $pad);
+
+        $svg = '<g style="pointer-events:none">';
+        $svg .= '<rect x="' . $this->fmt($x) . '" y="' . $this->fmt($y) . '" width="' . $this->fmt($cardW) . '" height="' . $this->fmt($cardH) . '" rx="' . $this->fmt(4 * $scale) . '" fill="#ffffff" fill-opacity="0.95" stroke="#cbd5e1" stroke-width="' . $this->fmt(0.5 * $scale) . '"/>';
+        $cursorY = $y + $pad + $titleFs * 0.8;
+        $svg .= '<text x="' . $this->fmt($x + $pad) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($titleFs) . '" font-weight="700" fill="#475569">ISIS areas</text>';
+        $cursorY += $lh;
+        $sw = 18 * $scale;
+        foreach ($areaColors as $area => $color) {
+            $lineY = $cursorY - $lh * 0.25;
+            $svg .= '<line x1="' . $this->fmt($x + $pad) . '" y1="' . $this->fmt($lineY) . '" x2="' . $this->fmt($x + $pad + $sw) . '" y2="' . $this->fmt($lineY) . '" stroke="' . $color . '" stroke-width="' . $this->fmt(2.5 * $scale) . '"/>';
+            $svg .= '<text x="' . $this->fmt($x + $pad + $sw + 4 * $scale) . '" y="' . $this->fmt($cursorY) . '" font-size="' . $this->fmt($fs) . '" font-family="monospace" fill="#475569">' . htmlspecialchars((string) $area) . '</text>';
+            $cursorY += $lh;
+        }
+        $svg .= '</g>';
+        return $svg;
+    }
+
+    /**
+     * Translate a corner code ("tl"/"tr"/"bl"/"br") into world-coordinate
+     * (x, y) of the top-left corner of the legend card, with a small inner
+     * padding so it doesn't kiss the viewport edge.
+     */
+    private function legendCornerXY(string $pos, float $minX, float $minY, float $vw, float $vh, float $cardW, float $cardH, float $pad): array
+    {
+        $x = match ($pos) {
+            'tl', 'bl' => $minX + $pad,
+            default    => $minX + $vw - $cardW - $pad,
+        };
+        $y = match ($pos) {
+            'tl', 'tr' => $minY + $pad,
+            default    => $minY + $vh - $cardH - $pad,
+        };
+        return [$x, $y];
     }
 
     private function emptySvg(string $msg): string
@@ -223,7 +475,12 @@ class TopologyV2SvgRenderer
         return '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><rect width="400" height="100" fill="#f8fafc"/><text x="200" y="55" text-anchor="middle" fill="#94a3b8" font-size="14">' . htmlspecialchars($msg) . '</text></svg>';
     }
 
-    private function renderNode(array $ni, float $ox, float $oy): string
+    /**
+     * @param bool $showStpRoot When false, every badge:stp_root LabelElement
+     *        on this node is skipped (node is not a root for the current STP
+     *        protocol/instance context, or the toggle is off).
+     */
+    private function renderNode(array $ni, float $ox, float $oy, bool $showStpRoot = false): string
     {
         $d = $ni['design'];
         $w = (float)($d['width'] ?? 100);
@@ -264,11 +521,16 @@ class TopologyV2SvgRenderer
                 $svg .= '<rect x="' . $this->fmt(-$w / 2) . '" y="' . $this->fmt(-$h / 2) . '" width="' . $this->fmt($w) . '" height="' . $this->fmt($h) . '" rx="8" ry="8" fill="' . $bg . '" stroke="' . $border . '" stroke-width="' . $bw . '"/>';
         }
 
-        // Labels (plain fields + compliance/monitoring badges)
+        // Labels (plain fields + compliance/monitoring/stp_root badges)
         foreach ($d['labelElements'] ?? [] as $el) {
             $field = (string)($el['field'] ?? '');
             if ($field === 'badge:compliance' || $field === 'badge:monitoring') {
                 $svg .= $this->renderBadge($el, $ni, $field === 'badge:compliance');
+                continue;
+            }
+            if ($field === 'badge:stp_root') {
+                if (!$showStpRoot) continue;
+                $svg .= $this->renderStpRootBadge($el);
                 continue;
             }
             $text = $this->resolveFieldValue($field, $ni);
@@ -280,7 +542,7 @@ class TopologyV2SvgRenderer
             $fw = (int)($el['fontWeight'] ?? 600);
             $align = $el['textAlign'] ?? 'center';
             $anchor = $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle');
-            $svg .= '<text x="' . $this->fmt($tx) . '" y="' . $this->fmt($ty) . '" text-anchor="' . $anchor . '" dominant-baseline="central" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
+            $svg .= '<text x="' . $this->fmt($tx) . '" y="' . $this->fmt($ty) . '" text-anchor="' . $anchor . '" dy="' . $this->fmt($fs * 0.35) . '" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
         }
 
         $svg .= '</g>';
@@ -317,7 +579,29 @@ class TopologyV2SvgRenderer
         $svg = '<circle cx="' . $this->fmt($cx) . '" cy="' . $this->fmt($cy) . '" r="' . $this->fmt($r) . '" fill="' . $fill . '" stroke="' . $borderCol . '" stroke-width="' . $this->fmt($borderW) . '"/>';
         if ($letter !== '') {
             $textCol = $el['color'] ?? '#ffffff';
-            $svg .= '<text x="' . $this->fmt($cx) . '" y="' . $this->fmt($cy) . '" text-anchor="middle" dominant-baseline="central" fill="' . $textCol . '" font-size="' . $this->fmt($r * 1.2) . '" font-weight="700">' . htmlspecialchars($letter) . '</text>';
+            $svg .= '<text x="' . $this->fmt($cx) . '" y="' . $this->fmt($cy) . '" text-anchor="middle" dy="' . $this->fmt($r * 1.2 * 0.35) . '" fill="' . $textCol . '" font-size="' . $this->fmt($r * 1.2) . '" font-weight="700">' . htmlspecialchars($letter) . '</text>';
+        }
+        return $svg;
+    }
+
+    /**
+     * Render the STP root badge: a red "R" pill. Mirror of the React render
+     * for badge:stp_root — the caller has already decided whether to render
+     * it at all (root + toggle).
+     */
+    private function renderStpRootBadge(array $el): string
+    {
+        $diameter = (float)($el['badgeSize'] ?? $el['fontSize'] ?? 14);
+        $r = $diameter / 2;
+        $fill = $el['badgeBgColor'] ?? '#dc2626';
+        $borderCol = $el['badgeBorderColor'] ?? '#ffffff';
+        $borderW = (float)($el['badgeBorderWidth'] ?? 1.5);
+        $cx = (float)($el['x'] ?? 0);
+        $cy = (float)($el['y'] ?? 0);
+        $svg = '<circle cx="' . $this->fmt($cx) . '" cy="' . $this->fmt($cy) . '" r="' . $this->fmt($r) . '" fill="' . $fill . '" stroke="' . $borderCol . '" stroke-width="' . $this->fmt($borderW) . '"/>';
+        if (($el['badgeShowLabel'] ?? true) !== false) {
+            $textCol = $el['color'] ?? '#ffffff';
+            $svg .= '<text x="' . $this->fmt($cx) . '" y="' . $this->fmt($cy) . '" text-anchor="middle" dy="' . $this->fmt($r * 1.2 * 0.35) . '" fill="' . $textCol . '" font-size="' . $this->fmt($r * 1.2) . '" font-weight="700">R</text>';
         }
         return $svg;
     }
@@ -464,7 +748,10 @@ class TopologyV2SvgRenderer
         $fill = $mapOptions['aggregateFillColor'] ?? '#ffffff';
         $stroke = $mapOptions['aggregateBorderColor'] ?? '#94a3b8';
         $strokeWidthVal = (float)($mapOptions['aggregateBorderWidth'] ?? 0.5);
-        $labelFill = $mapOptions['aggregateLabelColor'] ?: $stroke;
+        // Use null-coalescing first: `?:` alone would emit "Undefined array key"
+        // when the option is unset, and PHP can leak that warning to the
+        // response body, corrupting the SVG before it reaches the browser.
+        $labelFill = ($mapOptions['aggregateLabelColor'] ?? '') ?: $stroke;
 
         $textX = $cx; $textY = $cy;
         if (!$labelInside && $labelText !== '') {
@@ -483,17 +770,115 @@ class TopologyV2SvgRenderer
             if (!$labelInside) {
                 $svg .= '<rect x="' . $this->fmt($textX - $labelHalfWidth - 1) . '" y="' . $this->fmt($textY - $labelFontSize * 0.7) . '" width="' . $this->fmt($labelHalfWidth * 2 + 2) . '" height="' . $this->fmt($labelFontSize * 1.3) . '" fill="white" fill-opacity="0.95" rx="2"/>';
             }
-            $svg .= '<text x="' . $this->fmt($textX) . '" y="' . $this->fmt($textY) . '" text-anchor="middle" dominant-baseline="central" fill="' . $labelFill . '" font-size="' . $this->fmt($labelFontSize) . '" font-weight="600">' . htmlspecialchars($labelText) . '</text>';
+            $svg .= '<text x="' . $this->fmt($textX) . '" y="' . $this->fmt($textY) . '" text-anchor="middle" dy="' . $this->fmt($labelFontSize * 0.35) . '" fill="' . $labelFill . '" font-size="' . $this->fmt($labelFontSize) . '" font-weight="600">' . htmlspecialchars($labelText) . '</text>';
         }
         $svg .= '</g>';
         return $svg;
     }
 
     /**
+     * Approximate the total horizontal footprint of an edge label in world
+     * units: pill width + gap + main text width. Mirrors the geometry of the
+     * SVG renderer (charW ≈ 0.58 × fontSize) so the caller can compute the
+     * gap needed between adjacent labels on the same tangent line.
+     */
+    private function labelBlockWidth(array $label): float
+    {
+        $fs = (float) ($label['fontSize'] ?? 6);
+        $textW = strlen((string) ($label['text'] ?? '')) * 0.58 * $fs;
+        if (!isset($label['pill'])) return $textW;
+        $pillText = (string) ($label['pill']['text'] ?? '');
+        $pillW = strlen($pillText) * 0.58 * $fs + 4;  // +4 = horizontal padding inside pill
+        $pillGap = 3;
+        return $pillW + $pillGap + $textW;
+    }
+
+    /**
+     * Build a transformed style array for an MSTP edge restricted to one MSTI.
+     * Mirrors the frontend annotated logic:
+     *   - stroke colour & dash come from the instance state
+     *   - port labels get the role pill (R/D/A/B/M/-) on the node side and
+     *     the priority suffix in parentheses
+     *   - cost asymmetry is surfaced via `tangentOffset` (positive at source,
+     *     negative at target) so both cost labels sit on the SAME line
+     *   - symmetric cost stays as a single centred label
+     */
+    private function mstpEdgeStyleForInstance(
+        array $eStyle,
+        array $instance,
+        bool $showRoles,
+        float $roleFs,
+        float $roleBw,
+    ): array {
+        $state = (string) ($instance['state'] ?? 'unknown');
+        $hint = $this->stpStatePalette($state);
+        $style = $eStyle;
+        $style['color'] = $hint['color'];
+        $style['dash']  = $hint['dash'];
+
+        $priorityLocal  = $instance['priorityLocal']  ?? null;
+        $priorityRemote = $instance['priorityRemote'] ?? null;
+        $costLocal      = $instance['costLocal']      ?? null;
+        $costRemote     = $instance['costRemote']     ?? null;
+        $roleLocal  = $showRoles ? $this->stpRoleBadge($instance['roleLocal']  ?? null) : null;
+        $roleRemote = $showRoles ? $this->stpRoleBadge($instance['roleRemote'] ?? null) : null;
+
+        // Track the width of each enriched port label so we can compute the
+        // exact tangent offset needed to keep the asymmetric cost label clear
+        // of the port label on the same line. Source and target labels can
+        // have different lengths (different port names) so each side is
+        // measured independently.
+        $portWidth = ['source' => 0.0, 'target' => 0.0];
+        $labels = [];
+        foreach (($eStyle['labels'] ?? []) as $lbl) {
+            $pos = $lbl['position'] ?? 'middle';
+            if ($pos === 'source' || $pos === 'target') {
+                $prio = $pos === 'source' ? $priorityLocal : $priorityRemote;
+                $role = $pos === 'source' ? $roleLocal     : $roleRemote;
+                if ($prio !== null) $lbl['text'] = ($lbl['text'] ?? '') . " ({$prio})";
+                if ($role !== null) {
+                    $lbl['pill'] = ['text' => $role['letter'], 'bgColor' => $role['color'], 'borderWidth' => $roleBw];
+                    $lbl['fontSize'] = $roleFs;
+                }
+                $portWidth[$pos] = $this->labelBlockWidth($lbl);
+            }
+            $labels[] = $lbl;
+        }
+        if ($costLocal !== null && $costRemote !== null && $costLocal !== $costRemote) {
+            // Asymmetric cost: surfaced on each side. Push the cost label far
+            // enough along the tangent that it clears the port label (which
+            // sits at pt + pillAutoShift). Both shifts share the same nodeMargin
+            // so the cost label keeps a consistent gap from the port label
+            // regardless of port name length.
+            $costFs = 6;
+            $costLW = strlen((string) $costLocal)  * 0.58 * $costFs;
+            $costRW = strlen((string) $costRemote) * 0.58 * $costFs;
+            $gap = 4;
+            $nodeMargin = 2;
+            // pillAutoShift on the port matches the rendering code: when a
+            // pill is present, the port label centre is at pt + totalW/2 +
+            // nodeMargin (i.e. fully outside the node). Cost label needs to
+            // clear the port label on top of that, so its centre is one full
+            // portWidth + nodeMargin + gap + costHalf away from pt.
+            $hasPortPill = $roleLocal !== null || $roleRemote !== null;
+            $tlSource = ($hasPortPill ? $portWidth['source'] + $nodeMargin : $portWidth['source'] / 2) + $gap + $costLW / 2;
+            $tlTarget = ($hasPortPill ? $portWidth['target'] + $nodeMargin : $portWidth['target'] / 2) + $gap + $costRW / 2;
+            $labels[] = ['text' => (string) $costLocal,  'position' => 'source', 'fontSize' => $costFs, 'color' => '#dc2626', 'fontWeight' => 700, 'tangentOffset' => $tlSource];
+            $labels[] = ['text' => (string) $costRemote, 'position' => 'target', 'fontSize' => $costFs, 'color' => '#dc2626', 'fontWeight' => 700, 'tangentOffset' => -$tlTarget];
+        } elseif ($costLocal !== null || $costRemote !== null) {
+            $labels[] = ['text' => (string) ($costLocal ?? $costRemote), 'position' => 'middle', 'fontSize' => 6, 'color' => '#475569', 'fontWeight' => 600];
+        }
+        $style['labels'] = $labels;
+        return $style;
+    }
+
+    /**
      * @param string[] $areaColors  ISIS area colours; 1 = paint stroke with that
      *                              colour, 2+ = render a zebra-dashed pattern.
+     * @param array<string,mixed>|null $styleOverride Use this style instead of
+     *        $e->getStyle() — used by MSTP rendering to recolour per instance.
      */
-    private function renderEdge(TopologyEdge $e, array $nodeInfo, float $offsetIndex, float $ox, float $oy, array $areaColors = []): string
+    private function renderEdge(TopologyEdge $e, array $nodeInfo, float $offsetIndex, float $ox, float $oy, array $areaColors = [], ?array $styleOverride = null): string
     {
         $s = $nodeInfo[$e->getSourceNode()->getId()] ?? null;
         $t = $nodeInfo[$e->getTargetNode()->getId()] ?? null;
@@ -501,7 +886,7 @@ class TopologyV2SvgRenderer
 
         $style = array_merge(
             ['type' => 'straight', 'color' => '#94a3b8', 'width' => 1.5, 'dash' => 'solid', 'curveTension' => 0.3, 'labels' => []],
-            $e->getStyle() ?? []
+            $styleOverride ?? $e->getStyle() ?? []
         );
         // Single area: override the stroke with the area's colour. Multi-area:
         // keep the base colour for fallbacks (e.g. when zebra fails) — the
@@ -537,7 +922,10 @@ class TopologyV2SvgRenderer
             $svg .= ' stroke-linecap="round" stroke-linejoin="round"/>';
         }
 
-        // Labels (port, cost)
+        // Labels (port, cost, role pills) — mirrors the React renderEdge label
+        // logic, including the inline pill (role badge) and tangent offset
+        // (cost asymmetry). The `flipped` adjustment keeps pills on the node
+        // side and shifts cost toward the centre regardless of edge direction.
         foreach ($style['labels'] ?? [] as $label) {
             $text = (string)($label['text'] ?? '');
             if ($text === '') continue;
@@ -548,16 +936,55 @@ class TopologyV2SvgRenderer
             $col = $label['color'] ?? '#475569';
             $fw = (int)($label['fontWeight'] ?? 400);
             $offset = (float)($label['offset'] ?? 0);
-            // Tangent for label rotation
             $pA = $this->pointAt($style, $sx, $sy, $tx, $ty, max(0, $ratio - 0.01), $offsetIndex);
             $pB = $this->pointAt($style, $sx, $sy, $tx, $ty, min(1, $ratio + 0.01), $offsetIndex);
             $angle = rad2deg(atan2($pB['y'] - $pA['y'], $pB['x'] - $pA['x']));
-            if ($angle > 90) $angle -= 180; elseif ($angle < -90) $angle += 180;
-            $svg .= '<g transform="translate(' . $this->fmt($pt['x']) . ' ' . $this->fmt($pt['y']) . ') rotate(' . $this->fmt($angle) . ') translate(0 ' . $this->fmt($offset) . ')">';
-            $w = strlen($text) * $fs * 0.58;
+            $flipped = $angle > 90 || $angle < -90;
+            if ($flipped) $angle += ($angle > 90 ? -180 : 180);
+
+            // Optional pill (role badge)
+            $pill = $label['pill'] ?? null;
+            $pillText = $pill ? (string)($pill['text'] ?? '') : '';
+            $pillW    = $pill ? strlen($pillText) * ($fs * 0.58) + 4 : 0;
+            $pillGap  = $pill ? 3 : 0;
+            $pillOnLeft = $flipped ? ($pos === 'target') : ($pos !== 'target');
+
+            $textW = strlen($text) * $fs * 0.58;
             $h = $fs * 1.3;
-            $svg .= '<rect x="' . $this->fmt(-$w / 2 - 3) . '" y="' . $this->fmt(-$h / 2) . '" width="' . $this->fmt($w + 6) . '" height="' . $this->fmt($h) . '" fill="white" fill-opacity="0.9" rx="2"/>';
-            $svg .= '<text text-anchor="middle" dominant-baseline="central" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
+            $totalW = $pillW + $pillGap + $textW;
+            $blockHalf = $totalW / 2;
+            $textShiftX = $pill ? ($pillOnLeft ? ($pillW + $pillGap) / 2 : -($pillW + $pillGap) / 2) : 0;
+            $pillCenterX = $pill ? ($pillOnLeft ? -$blockHalf + $pillW / 2 : $blockHalf - $pillW / 2) : 0;
+
+            // Auto-shift label away from the node when a pill is attached, plus
+            // any explicit tangentOffset (cost asymmetry). All canonical, sign
+            // flipped if the label was rotated 180° to stay readable.
+            // Auto-shift the WHOLE block (pill + gap + text) entirely outside
+            // the node's bounding box. findLabelRatio() places the label
+            // centre right at the node edge, which puts ~50% of the block
+            // inside the node — fine for plain text on a white background,
+            // but the role pill (R/D/A/B/M) is invisible against the node.
+            // Shifting by half the total width pushes the node-side edge of
+            // the block flush with the node edge, plus a small margin so the
+            // pill clearly stands out.
+            $totalWForShift = $pillW + $pillGap + $textW;
+            $nodeMargin = 2;
+            $pillAutoShift = $pill ? ($totalWForShift / 2 + $nodeMargin) * ($pos === 'target' ? -1 : 1) : 0;
+            $canonicalT = (float)($label['tangentOffset'] ?? 0) + $pillAutoShift;
+            $tangentOffset = $canonicalT * ($flipped ? -1 : 1);
+
+            $svg .= '<g transform="translate(' . $this->fmt($pt['x']) . ' ' . $this->fmt($pt['y']) . ') rotate(' . $this->fmt($angle) . ') translate(' . $this->fmt($tangentOffset) . ' ' . $this->fmt($offset) . ')">';
+            $bgFill = $label['backgroundColor'] ?? 'white';
+            $bgOpac = isset($label['backgroundColor']) ? '1' : '0.9';
+            $svg .= '<rect x="' . $this->fmt(-$blockHalf - 3) . '" y="' . $this->fmt(-$h / 2) . '" width="' . $this->fmt($totalW + 6) . '" height="' . $this->fmt($h) . '" fill="' . $bgFill . '" fill-opacity="' . $bgOpac . '" rx="2"/>';
+            if ($pill) {
+                $bw = (float) ($pill['borderWidth'] ?? 1);
+                $innerW = max(0.0, $pillW - 2 * $bw);
+                $innerH = max(0.0, $h - 2 * $bw);
+                $svg .= '<rect x="' . $this->fmt($pillCenterX - $innerW / 2) . '" y="' . $this->fmt(-$innerH / 2) . '" width="' . $this->fmt($innerW) . '" height="' . $this->fmt($innerH) . '" fill="' . htmlspecialchars((string) $pill['bgColor']) . '" rx="2"/>';
+                $svg .= '<text x="' . $this->fmt($pillCenterX) . '" y="0" text-anchor="middle" dy="' . $this->fmt($fs * 0.95 * 0.35) . '" fill="' . htmlspecialchars((string) ($pill['textColor'] ?? '#ffffff')) . '" font-size="' . $this->fmt($fs * 0.95) . '" font-weight="800">' . htmlspecialchars($pillText) . '</text>';
+            }
+            $svg .= '<text x="' . $this->fmt($textShiftX) . '" text-anchor="middle" dy="' . $this->fmt($fs * 0.35) . '" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
             $svg .= '</g>';
         }
         return $svg;
@@ -775,7 +1202,7 @@ class TopologyV2SvgRenderer
         $pillX = $centered ? $cx - $pillW / 2 : $cx;
         $pillY = $cy - $pillH / 2;
         $svg = '<rect x="' . $this->fmt($pillX) . '" y="' . $this->fmt($pillY) . '" width="' . $this->fmt($pillW) . '" height="' . $this->fmt($pillH) . '" rx="' . $this->fmt($pillH / 2) . '" ry="' . $this->fmt($pillH / 2) . '" fill="' . ($style['fillColor'] ?? '#94a3b8') . '" fill-opacity="0.95" stroke="' . ($style['borderColor'] ?? '#94a3b8') . '" stroke-width="' . max(0.5, ((float)($style['borderWidth'] ?? 1)) * 0.6) . '"/>';
-        $svg .= '<text x="' . $this->fmt($pillX + $pillW / 2) . '" y="' . $this->fmt($pillY + $pillH / 2) . '" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-size="' . $fontSize . '" font-weight="600">' . htmlspecialchars($text) . '</text>';
+        $svg .= '<text x="' . $this->fmt($pillX + $pillW / 2) . '" y="' . $this->fmt($pillY + $pillH / 2) . '" text-anchor="middle" dy="' . $this->fmt($fontSize * 0.35) . '" fill="#ffffff" font-size="' . $fontSize . '" font-weight="600">' . htmlspecialchars($text) . '</text>';
         return $svg;
     }
 
@@ -905,7 +1332,7 @@ class TopologyV2SvgRenderer
                 if (!empty($d['bgColor'])) {
                     $svg .= '<rect x="0" y="0" width="' . $this->fmt($w) . '" height="' . $this->fmt($h) . '" fill="' . $d['bgColor'] . '" rx="2"/>';
                 }
-                $svg .= '<text x="' . $this->fmt($tx) . '" y="' . $this->fmt($h / 2) . '" text-anchor="' . $anchor . '" dominant-baseline="central" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
+                $svg .= '<text x="' . $this->fmt($tx) . '" y="' . $this->fmt($h / 2) . '" text-anchor="' . $anchor . '" dy="' . $this->fmt($fs * 0.35) . '" fill="' . $col . '" font-size="' . $fs . '" font-weight="' . $fw . '">' . htmlspecialchars($text) . '</text>';
                 break;
             case TopologyAnnotation::TYPE_IMAGE:
                 $url = $d['url'] ?? '';

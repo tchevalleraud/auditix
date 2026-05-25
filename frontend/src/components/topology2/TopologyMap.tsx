@@ -57,6 +57,16 @@ interface GraphEdgeLabel {
   // Coloured background pill — used by STP/MSTP port role badges. When set,
   // the label is rendered as a filled rounded rect with white text.
   backgroundColor?: string;
+  // Small coloured pill rendered NEXT TO the main text (same horizontal line)
+  // — used by STP/MSTP to keep [role-badge] [port (priority)] aligned in a
+  // single row. The pill sits on the node side of the text (left at source,
+  // right at target). `borderWidth` carves a margin of the surrounding
+  // background colour around the coloured rect (default 1).
+  pill?: { text: string; bgColor: string; textColor?: string; borderWidth?: number };
+  // Extra shift ALONG the edge's tangent — useful to fan out several labels
+  // anchored at the same position (e.g. port label + cost label both placed
+  // near "source"). Positive moves toward the centre of the link.
+  tangentOffset?: number;
 }
 
 interface GraphEdgeStyle {
@@ -205,6 +215,7 @@ interface MapOptions {
   // STP/MSTP — role badges (R/D/A/B/M/-) on each edge end
   stpShowPortRoles?: boolean;            // default true
   stpPortRoleFontSize?: number;          // default 7
+  stpPortRoleBorderWidth?: number;       // default 1 — white margin around the coloured pill
   // Legend overlay (adapts to filtered protocol)
   stpShowLegend?: boolean;               // default true
   stpLegendPosition?: "tl" | "tr" | "bl" | "br";  // default "br"
@@ -1518,49 +1529,77 @@ export default function TopologyMap({ topologyId }: Props) {
                   if (!found) return null;
                   const hint = stpStatePalette(found.state);
 
-                  // Enrich port labels with port priority (e.g. "1/6 (128)").
-                  // Cost is the same on both sides when symmetric; if costs differ
-                  // we surface both via red middle labels — like ISIS metric mismatch.
+                  // Build a single-row label per end:
+                  //   [role pill] [port (priority)]    [cost (if asymmetric)]
+                  // Pill sits closest to the node; cost is pushed along the
+                  // tangent so it lands next to the port label on the SAME line.
+                  // Symmetric cost stays as a single centred label.
                   const baseLabels = edge.style.labels ?? [];
+                  const showRoles = data.topology.mapOptions?.stpShowPortRoles ?? true;
+                  const roleFs = data.topology.mapOptions?.stpPortRoleFontSize ?? 7;
+                  const roleBw = data.topology.mapOptions?.stpPortRoleBorderWidth ?? 1;
+                  const roleL = showRoles ? stpRoleBadge(found.roleLocal) : null;
+                  const roleR = showRoles ? stpRoleBadge(found.roleRemote) : null;
                   const annotated: typeof baseLabels = baseLabels.map((lbl) => {
-                    if (lbl.position === "source" && found.priorityLocal != null) {
-                      return { ...lbl, text: `${lbl.text} (${found.priorityLocal})` };
+                    if (lbl.position === "source") {
+                      return {
+                        ...lbl,
+                        text: found.priorityLocal != null ? `${lbl.text} (${found.priorityLocal})` : lbl.text,
+                        ...(roleL ? { pill: { text: roleL.letter, bgColor: roleL.color, borderWidth: roleBw }, fontSize: roleFs } : {}),
+                      };
                     }
-                    if (lbl.position === "target" && found.priorityRemote != null) {
-                      return { ...lbl, text: `${lbl.text} (${found.priorityRemote})` };
+                    if (lbl.position === "target") {
+                      return {
+                        ...lbl,
+                        text: found.priorityRemote != null ? `${lbl.text} (${found.priorityRemote})` : lbl.text,
+                        ...(roleR ? { pill: { text: roleR.letter, bgColor: roleR.color, borderWidth: roleBw }, fontSize: roleFs } : {}),
+                      };
                     }
                     return lbl;
                   });
+
                   const cl = found.costLocal ?? null;
                   const cr = found.costRemote ?? null;
                   if (cl !== null && cr !== null && cl !== cr) {
-                    annotated.push({ text: String(cl), position: "source", fontSize: 6, color: "#dc2626", fontWeight: 700, offset: 9 });
-                    annotated.push({ text: String(cr), position: "target", fontSize: 6, color: "#dc2626", fontWeight: 700, offset: 9 });
+                    // Asymmetric cost: each side gets its own red label,
+                    // shifted along the tangent so it lands next to (not on
+                    // top of) the port label. Distance derived from the
+                    // actual port-label width — long port names (e.g. an
+                    // Extreme "1/24") need more clearance than short ones.
+                    const portSrc = annotated.find((l) => l.position === "source");
+                    const portTgt = annotated.find((l) => l.position === "target");
+                    const blockWidth = (lbl: typeof annotated[number] | undefined): number => {
+                      if (!lbl) return 0;
+                      const fs = lbl.fontSize ?? 6;
+                      const textW = (lbl.text?.length ?? 0) * 0.58 * fs;
+                      if (!lbl.pill) return textW;
+                      const pillW = lbl.pill.text.length * 0.58 * fs + 4;
+                      return pillW + 3 + textW;
+                    };
+                    const costFs = 6;
+                    const costLW = String(cl).length * 0.58 * costFs;
+                    const costRW = String(cr).length * 0.58 * costFs;
+                    const gap = 4;
+                    // When the port label carries a pill, it has been pushed
+                    // a full portWidth/2 + nodeMargin away from pt. Cost
+                    // label is then portWidth/2 + gap + costHalf further out.
+                    const nodeMargin = 2;
+                    const hasPortPill = !!(roleL || roleR);
+                    const portW_src = blockWidth(portSrc);
+                    const portW_tgt = blockWidth(portTgt);
+                    const tlSource = (hasPortPill ? portW_src + nodeMargin : portW_src / 2) + gap + costLW / 2;
+                    const tlTarget = (hasPortPill ? portW_tgt + nodeMargin : portW_tgt / 2) + gap + costRW / 2;
+                    annotated.push({
+                      text: String(cl), position: "source", fontSize: costFs,
+                      color: "#dc2626", fontWeight: 700, tangentOffset: tlSource,
+                    });
+                    annotated.push({
+                      text: String(cr), position: "target", fontSize: costFs,
+                      color: "#dc2626", fontWeight: 700, tangentOffset: -tlTarget,
+                    });
                   } else if (cl !== null || cr !== null) {
                     const c = cl ?? cr;
                     annotated.push({ text: String(c), position: "middle", fontSize: 6, color: "#475569", fontWeight: 600 });
-                  }
-
-                  // Port role badges (Root/Designated/Alternate/…) above each
-                  // port label. White text on the role's colour.
-                  if (data.topology.mapOptions?.stpShowPortRoles ?? true) {
-                    const fs = data.topology.mapOptions?.stpPortRoleFontSize ?? 7;
-                    const roleL = stpRoleBadge(found.roleLocal);
-                    const roleR = stpRoleBadge(found.roleRemote);
-                    if (roleL) {
-                      annotated.push({
-                        text: roleL.letter, position: "source", fontSize: fs,
-                        color: "#ffffff", backgroundColor: roleL.color,
-                        fontWeight: 800, offset: -9,
-                      });
-                    }
-                    if (roleR) {
-                      annotated.push({
-                        text: roleR.letter, position: "target", fontSize: fs,
-                        color: "#ffffff", backgroundColor: roleR.color,
-                        fontWeight: 800, offset: -9,
-                      });
-                    }
                   }
 
                   effectiveEdge = {
@@ -2809,6 +2848,10 @@ function renderEdge(
     // Keep text upright (never read upside-down). The flip thresholds are STRICT (> 90 / < -90),
     // so labels follow the natural tangent direction: parallel links curving slightly left/right
     // get a head-left / head-right rotation respectively, matching how a reader would tilt.
+    // `flipped` lets directional labels (pills) know that the local x axis got
+    // mirrored — without that, the role badge ends up on the wrong side of
+    // the port label whenever the edge points right-to-left.
+    const flipped = labelAngle > 90 || labelAngle < -90;
     if (labelAngle > 90) labelAngle -= 180;
     else if (labelAngle < -90) labelAngle += 180;
 
@@ -2817,24 +2860,95 @@ function renderEdge(
     if (!text) return null;
     const fontSize = label.fontSize ?? 10;
     const charW = fontSize * 0.58;
-    const w = text.length * charW;
+    const textW = text.length * charW;
     const h = fontSize * 1.3;
+
+    // Optional inline pill — same horizontal line as the main text. We try to
+    // keep the pill closest to the node, so at "source" it sits to the left,
+    // at "target" to the right, at "middle" to the left by default. When the
+    // tangent flips (right-to-left edge), the local x axis is mirrored, so we
+    // flip the pill side too — otherwise it lands on the wrong end.
+    const pill = label.pill ?? null;
+    const pillText = pill?.text ?? "";
+    const pillW = pill ? pillText.length * (fontSize * 0.58) + 4 : 0;
+    const pillGap = pill ? 3 : 0;
+    const pillOnLeft = flipped
+      ? label.position === "target"
+      : label.position !== "target";
+
+    // Background rect spans pill + text. Origin (0,0) is the centre of the
+    // composite block; the inner shifts below place pill/text on each side.
+    const totalW = pillW + pillGap + textW;
+    const blockHalf = totalW / 2;
+    const textShiftX = pill ? (pillOnLeft ? (pillW + pillGap) / 2 : -(pillW + pillGap) / 2) : 0;
+    const pillCenterX = pill
+      ? (pillOnLeft ? -blockHalf + pillW / 2 : blockHalf - pillW / 2)
+      : 0;
+
+    // Auto-shift the WHOLE block (pill + gap + text) entirely outside the
+    // node's bounding box. findLabelRatio puts the centre at the node edge,
+    // which would leave the role pill (R/D/A/B/M) buried inside the node.
+    // Shifting by half the total width pushes the node-side edge of the
+    // block flush with the node edge, plus a small margin so the pill stays
+    // visibly detached.
+    const totalWForShift = pillW + pillGap + textW;
+    const nodeMargin = 2;
+    const pillAutoShift = pill
+      ? (totalWForShift / 2 + nodeMargin) * (label.position === "target" ? -1 : 1)
+      : 0;
+    const canonicalTangent = (label.tangentOffset ?? 0) + pillAutoShift;
+    const tangentOffset = canonicalTangent * (flipped ? -1 : 1);
+
     return (
       <g
         key={`l${idx}`}
-        transform={`translate(${p.x}, ${p.y}) rotate(${labelAngle}) translate(0, ${offset})`}
+        transform={`translate(${p.x}, ${p.y}) rotate(${labelAngle}) translate(${tangentOffset}, ${offset})`}
         style={{ pointerEvents: "none" }}
       >
         <rect
-          x={-w / 2 - 3}
+          x={-blockHalf - 3}
           y={-h / 2}
-          width={w + 6}
+          width={totalW + 6}
           height={h}
           fill={label.backgroundColor ?? "white"}
           fillOpacity={label.backgroundColor ? 1 : 0.9}
           rx={2}
         />
+        {pill && (() => {
+          // `borderWidth` carves white margin around the coloured pill rect.
+          // The pill keeps its layout footprint (pillW × h) so the surrounding
+          // label geometry doesn't shift — only the inner coloured rect
+          // shrinks. Clamp to non-negative dimensions.
+          const bw = pill.borderWidth ?? 1;
+          const innerW = Math.max(0, pillW - 2 * bw);
+          const innerH = Math.max(0, h - 2 * bw);
+          return (
+            <>
+              <rect
+                x={pillCenterX - innerW / 2}
+                y={-innerH / 2}
+                width={innerW}
+                height={innerH}
+                fill={pill.bgColor}
+                rx={2}
+              />
+              <text
+                x={pillCenterX}
+                y={0}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill={pill.textColor ?? "#ffffff"}
+                fontSize={fontSize * 0.95}
+                fontWeight={800}
+                style={{ userSelect: "none" }}
+              >
+                {pillText}
+              </text>
+            </>
+          );
+        })()}
         <text
+          x={textShiftX}
           textAnchor="middle"
           dominantBaseline="central"
           fill={label.color ?? "#475569"}

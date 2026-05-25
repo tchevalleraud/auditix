@@ -59,6 +59,7 @@ interface MapOptions {
   // STP/MSTP — port role badges on edges
   stpShowPortRoles?: boolean;
   stpPortRoleFontSize?: number;
+  stpPortRoleBorderWidth?: number;
   // Legend overlay (adapts to the filtered protocol)
   stpShowLegend?: boolean;
   stpLegendPosition?: "tl" | "tr" | "bl" | "br";
@@ -1253,18 +1254,34 @@ export default function TopologyConfigurePage() {
                 {t("topology.designStpPortRoles")}
               </label>
               {(mapOptions.stpShowPortRoles ?? true) && (
-                <div className="pl-6 space-y-1">
-                  <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
-                    {t("topology.designStpPortRoleSize")}
-                  </label>
-                  <input
-                    type="number"
-                    min={4}
-                    max={14}
-                    value={mapOptions.stpPortRoleFontSize ?? 7}
-                    onChange={(e) => setMapOptions((m) => ({ ...m, stpPortRoleFontSize: Number(e.target.value) }))}
-                    className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
-                  />
+                <div className="pl-6 grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                      {t("topology.designStpPortRoleSize")}
+                    </label>
+                    <input
+                      type="number"
+                      min={4}
+                      max={14}
+                      value={mapOptions.stpPortRoleFontSize ?? 7}
+                      onChange={(e) => setMapOptions((m) => ({ ...m, stpPortRoleFontSize: Number(e.target.value) }))}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                      {t("topology.designStpPortRoleBorder")}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={4}
+                      step={0.5}
+                      value={mapOptions.stpPortRoleBorderWidth ?? 1}
+                      onChange={(e) => setMapOptions((m) => ({ ...m, stpPortRoleBorderWidth: Number(e.target.value) }))}
+                      className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-sm"
+                    />
+                  </div>
                 </div>
               )}
 

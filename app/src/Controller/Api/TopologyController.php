@@ -2473,6 +2473,13 @@ class TopologyController extends AbstractController
             'showClusters' => $request->query->getBoolean('clusters', true),
             'showAnnotations' => $request->query->getBoolean('annotations', true),
         ];
+        $mstpInstance = $request->query->get('mstpInstance');
+        if ($mstpInstance !== null && $mstpInstance !== '') {
+            $opts['mstpInstance'] = (string) $mstpInstance;
+        }
+        // Legend is opt-in via the query string. Default false matches how the
+        // structure-editor preview is meant to look — clean map, no legend.
+        $opts['showLegend'] = $request->query->getBoolean('showLegend', false);
         $vf = $request->query->get('viewportFrame');
         if (is_string($vf) && $vf !== '') {
             $parts = array_map('floatval', explode(',', $vf));
