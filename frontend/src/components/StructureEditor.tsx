@@ -59,6 +59,7 @@ import {
   ArrowLeftRight,
   Columns2,
   GitBranch,
+  Repeat,
   AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
@@ -190,6 +191,21 @@ export interface InventoryNodeRule {
   colLabel?: string;
 }
 
+export type InventoryValueFilterOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+export interface InventoryValueFilter {
+  id: string;
+  colLabel: string;
+  operator: InventoryValueFilterOperator;
+  value: string;
+}
+
 export interface InventoryTableBlock {
   id: string;
   type: "inventory_table";
@@ -208,6 +224,12 @@ export interface InventoryTableBlock {
   hostnameVAlign?: "top" | "middle" | "bottom";
   fontSize?: number;
   styleRules?: InventoryStyleRule[];
+  /** single_node_full: colLabels to hide (kept in data, omitted at render). */
+  hiddenColumns?: string[];
+  /** single_node_full: keep only rows whose values match these conditions. */
+  valueFilters?: InventoryValueFilter[];
+  /** single_node_full: 'all' = AND between filters, 'any' = OR. */
+  valueFiltersMatch?: "all" | "any";
 }
 
 export interface CliStyleRule {
@@ -681,6 +703,24 @@ export interface ConditionalBlock {
   useParentDepth?: boolean;
 }
 
+// === Repeat per node ===
+// Container that renders its children once for every selected node, with
+// node-scoped fields (e.g. inventory_table.singleNodeId) bound to the current
+// iteration. Selection mirrors inventory_table's: manual nodeIds[] + optional
+// auto-rules. Child types are restricted by the editor (see ALLOWED_REPEAT_CHILDREN).
+export interface RepeatPerNodeBlock {
+  id: string;
+  type: "repeat_per_node";
+  label: string;
+  nodeIds: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+  children: ReportBlock[];
+  pageBreakBefore?: boolean;
+  structureDepth?: StructureDepth;
+  useParentDepth?: boolean;
+}
+
 // === Timeline ===
 export interface TimelineBlock {
   id: string;
@@ -732,7 +772,14 @@ export type ReportBlock = (
   | InventoryDiffBlock
   | TwoColumnBlock
   | ConditionalBlock
+  | RepeatPerNodeBlock
 ) & { inheritFromParent?: boolean };
+
+// Whitelist of child block types allowed inside repeat_per_node. Tighten the
+// palette at insertion time and skip non-allowed children at render time.
+// heading + paragraph also accept {{for.node.xxx}} placeholders that resolve
+// against the current iteration's node.
+export const ALLOWED_REPEAT_CHILDREN: ReportBlock["type"][] = ["heading", "paragraph", "inventory_table"];
 
 interface ReportNodeRef {
   id: number;
@@ -756,6 +803,13 @@ interface Props {
   // overlaying its scope on every child whose inheritFromParent !== false.
   // We surface a per-row toggle so the user can opt a single child out.
   parentInherits?: boolean;
+  // When set, restrict the palette to these types. The parent (e.g.
+  // repeat_per_node) provides the list and we hide everything else.
+  allowedBlockTypes?: ReportBlock["type"][];
+  // When set, the parent block type for child editors that need to adapt
+  // their UI (e.g. inventory_table inside repeat_per_node hides the node
+  // picker because the loop drives it).
+  parentBlockType?: ReportBlock["type"];
 }
 
 function uid() {
@@ -765,7 +819,7 @@ function uid() {
 // Resolve the structure depth for a container block, applying back-compat
 // rules: explicit `structureDepth` wins, the legacy `useParentDepth` boolean
 // maps to `'follow'`, and absent/invalid values fall back to 1 (H1 / root).
-function resolveStructureDepth(block: TwoColumnBlock | ConditionalBlock): StructureDepth {
+function resolveStructureDepth(block: TwoColumnBlock | ConditionalBlock | RepeatPerNodeBlock): StructureDepth {
   const sd = block.structureDepth;
   if (sd === "follow") return "follow";
   if (typeof sd === "number" && sd >= 1 && sd <= 6) return sd as StructureDepth;
@@ -787,7 +841,7 @@ function computeDepths(blocks: ReportBlock[]): number[] {
     if (block.type === "heading") {
       lastHeadingLevel = block.level;
       depths.push(block.level - 1);
-    } else if (block.type === "conditional" || block.type === "two_column") {
+    } else if (block.type === "conditional" || block.type === "two_column" || block.type === "repeat_per_node") {
       const sd = resolveStructureDepth(block);
       if (sd === "follow") {
         depths.push(lastHeadingLevel);
@@ -882,6 +936,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
     items: [
       { type: "two_column", labelKey: "structure.addTwoColumn", icon: <Columns2 className="h-4 w-4 text-slate-500" /> },
       { type: "conditional", labelKey: "structure.addConditional", icon: <GitBranch className="h-4 w-4 text-slate-500" /> },
+      { type: "repeat_per_node", labelKey: "structure.addRepeatPerNode", icon: <Repeat className="h-4 w-4 text-slate-500" /> },
     ],
   },
 ];
@@ -891,19 +946,28 @@ function BlockMenu({
   side,
   verticalAnchor,
   t,
+  allowedBlockTypes,
 }: {
   onPick: (type: ReportBlock["type"]) => void;
   side: "left" | "right";
   verticalAnchor: "top" | "bottom";
   t: (key: string) => string;
+  allowedBlockTypes?: ReportBlock["type"][];
 }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const subMenuHorizontal = side === "right" ? "left-full ml-1" : "right-full mr-1";
   const subMenuVertical = verticalAnchor === "top" ? "top-0" : "bottom-0";
 
+  const allowed = allowedBlockTypes ? new Set(allowedBlockTypes) : null;
+  const categories = allowed
+    ? BLOCK_CATEGORIES
+        .map((cat) => ({ ...cat, items: cat.items.filter((it) => allowed.has(it.type)) }))
+        .filter((cat) => cat.items.length > 0)
+    : BLOCK_CATEGORIES;
+
   return (
     <div className="py-1" onMouseLeave={() => setHoverIdx(null)}>
-      {BLOCK_CATEGORIES.map((cat, ci) => {
+      {categories.map((cat, ci) => {
         const active = hoverIdx === ci;
         return (
           <div key={cat.labelKey} className="relative" onMouseEnter={() => setHoverIdx(ci)}>
@@ -940,7 +1004,7 @@ function BlockMenu({
   );
 }
 
-export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes, embedded = false, parentInherits = false }: Props) {
+export default function StructureEditor({ blocks, onChange, t, reportType, reportNodes, embedded = false, parentInherits = false, allowedBlockTypes, parentBlockType }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -1108,6 +1172,17 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         label: "",
         condition: { id: uid(), kind: "group", op: "and", items: [] },
         inheritScopeToChildren: true,
+        children: [],
+        pageBreakBefore: false,
+      };
+    } else if (type === "repeat_per_node") {
+      block = {
+        id,
+        type: "repeat_per_node",
+        label: "",
+        nodeIds: [],
+        nodeRules: [],
+        nodeRulesMatch: "any",
         children: [],
         pageBreakBefore: false,
       };
@@ -1381,6 +1456,17 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="text-slate-500 text-xs">{label} — {itemCount} {block.condition.op.toUpperCase()} — {childCount} {t("structure.condChildBlocks")}</span>;
     }
+    if (block.type === "repeat_per_node") {
+      const childCount = block.children.length;
+      const ruleCount = (block.nodeRules ?? []).length;
+      const label = block.label || t("structure.repeatPerNode");
+      const manualCount = block.nodeIds.length;
+      const sourceParts: string[] = [];
+      if (manualCount > 0) sourceParts.push(`${manualCount} ${t("structure.repeatPerNodeNodes")}`);
+      if (ruleCount > 0) sourceParts.push(`${ruleCount} ${t("structure.repeatPerNodeRules")}`);
+      const source = sourceParts.length > 0 ? sourceParts.join(" + ") : t("structure.repeatPerNodeNoSource");
+      return <span className="text-slate-500 text-xs">{label} — {source} — {childCount} {t("structure.condChildBlocks")}</span>;
+    }
     // paragraph
     return block.content
       ? block.content.replace(/<[^>]*>/g, "").substring(0, 60) || <span className="italic text-slate-400">{t("structure.emptyParagraph")}</span>
@@ -1563,6 +1649,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
         </span>
       );
     }
+    if (block.type === "repeat_per_node") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-500/15 px-2 py-0.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+          <Repeat className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
         P
@@ -1594,6 +1687,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                   side="left"
                   verticalAnchor="top"
                   t={t}
+                  allowedBlockTypes={allowedBlockTypes}
                 />
               </div>
             )}
@@ -1626,6 +1720,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                       onToggle={setInsertMenuIdx}
                       onInsert={insertBlock}
                       t={t}
+                      allowedBlockTypes={allowedBlockTypes}
                     />
                     {idx === blocks.length - 1 && (
                       <InsertLine
@@ -1635,6 +1730,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                         onToggle={setInsertMenuIdx}
                         onInsert={insertBlock}
                         t={t}
+                        allowedBlockTypes={allowedBlockTypes}
                       />
                     )}
 
@@ -1770,10 +1866,10 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
             {/* Modal body */}
             <div className={`flex-1 min-h-0 px-6 py-5 ${editingBlock.type === "paragraph" ? "flex flex-col" : editingBlock.type === "two_column" ? "flex flex-col overflow-visible" : "overflow-y-auto"}`}>
               {editingBlock.type === "heading" && (
-                <HeadingProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+                <HeadingProperties block={editingBlock} updateBlock={updateBlock} t={t} parentBlockType={parentBlockType} />
               )}
               {editingBlock.type === "paragraph" && (
-                <ParagraphProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
+                <ParagraphProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} parentBlockType={parentBlockType} />
               )}
               {editingBlock.type === "image" && (
                 <ImageProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -1782,7 +1878,7 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
                 <TableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "inventory_table" && (
-                <InventoryTableProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
+                <InventoryTableProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} parentBlockType={parentBlockType} />
               )}
               {editingBlock.type === "cli_command" && (
                 <CliCommandProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -1847,6 +1943,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               {editingBlock.type === "conditional" && (
                 <ConditionalProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
               )}
+              {editingBlock.type === "repeat_per_node" && (
+                <RepeatPerNodeProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} reportNodes={reportNodes} />
+              )}
             </div>
           </div>
         </div>
@@ -1863,6 +1962,7 @@ function InsertLine({
   onToggle,
   onInsert,
   t,
+  allowedBlockTypes,
 }: {
   index: number;
   position: "before" | "after";
@@ -1870,6 +1970,7 @@ function InsertLine({
   onToggle: (idx: number | null) => void;
   onInsert: (type: ReportBlock["type"], atIndex: number) => void;
   t: (key: string) => string;
+  allowedBlockTypes?: ReportBlock["type"][];
 }) {
   const isActive = activeIndex === index;
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -1928,6 +2029,7 @@ function InsertLine({
             side="right"
             verticalAnchor={openUpward ? "bottom" : "top"}
             t={t}
+            allowedBlockTypes={allowedBlockTypes}
           />
         </div>
       )}
@@ -1940,23 +2042,55 @@ function HeadingProperties({
   block,
   updateBlock,
   t,
+  parentBlockType,
 }: {
   block: HeadingBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
+  parentBlockType?: ReportBlock["type"];
 }) {
+  const inRepeatContainer = parentBlockType === "repeat_per_node";
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const insertAtCursor = (template: string) => {
+    const input = inputRef.current;
+    if (!input) {
+      updateBlock(block.id, { content: (block.content ?? "") + template });
+      return;
+    }
+    const start = input.selectionStart ?? block.content.length;
+    const end = input.selectionEnd ?? start;
+    const next = block.content.slice(0, start) + template + block.content.slice(end);
+    updateBlock(block.id, { content: next });
+    // Restore focus + caret after the inserted token
+    requestAnimationFrame(() => {
+      input.focus();
+      const caret = start + template.length;
+      input.setSelectionRange(caret, caret);
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex items-end gap-3">
         <div className="flex-1 space-y-1.5">
           <label className={labelClass}>{t("structure.headingPlaceholder")}</label>
-          <input
-            type="text"
-            value={block.content}
-            onChange={(e) => updateBlock(block.id, { content: e.target.value })}
-            placeholder={t("structure.headingPlaceholder")}
-            className={inputClass}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              ref={inputRef}
+              type="text"
+              value={block.content}
+              onChange={(e) => updateBlock(block.id, { content: e.target.value })}
+              placeholder={t("structure.headingPlaceholder")}
+              className={`${inputClass} flex-1`}
+            />
+            {inRepeatContainer && (
+              <ForNodeVariablePicker onPick={insertAtCursor} t={t} mode="simple" />
+            )}
+          </div>
+          {inRepeatContainer && (
+            <p className="text-[10px] text-slate-400">{t("structure.forNodeHint")}</p>
+          )}
         </div>
         <div className="space-y-1.5">
           <label className={labelClass}>{t("structure.headingLevel")}</label>
@@ -1984,6 +2118,207 @@ function HeadingProperties({
   );
 }
 
+// Floating menu that inserts {{for.node.xxx}} placeholders. mode='simple' only
+// exposes the simple node fields; mode='full' also walks the inventory tree.
+function ForNodeVariablePicker({
+  onPick,
+  t,
+  mode,
+}: {
+  onPick: (template: string) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  mode: "simple" | "full";
+}) {
+  const { current } = useAppContext();
+  const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<"root" | "category" | "key" | "column">("root");
+  const [category, setCategory] = useState<string | null>(null);
+  const [entryKey, setEntryKey] = useState<string | null>(null);
+  const [structure, setStructure] = useState<InvStructure[]>([]);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open || mode !== "full" || !current) return;
+    fetch(`/api/inventory-categories/structure?context=${current.id}`)
+      .then((r) => r.ok ? r.json() : [])
+      .then((data: InvStructure[]) => setStructure(data))
+      .catch(() => {});
+  }, [open, mode, current]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setStep("root");
+        setCategory(null);
+        setEntryKey(null);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  const simpleFields: { id: string; label: string }[] = [
+    { id: "hostname", label: t("structure.forNodeFieldHostname") },
+    { id: "name", label: t("structure.forNodeFieldName") },
+    { id: "ip", label: t("structure.forNodeFieldIp") },
+    { id: "manufacturer", label: t("structure.forNodeFieldManufacturer") },
+    { id: "model", label: t("structure.forNodeFieldModel") },
+    { id: "version", label: t("structure.forNodeFieldVersion") },
+    { id: "productModel", label: t("structure.forNodeFieldProductModel") },
+  ];
+
+  const insertSimple = (id: string) => {
+    onPick(`{{for.node.${id}}}`);
+    setOpen(false);
+    setStep("root");
+  };
+  const insertInventory = (cat: string, key: string, col?: string) => {
+    onPick(col ? `{{for.node.${cat}.${key}.${col}}}` : `{{for.node.${cat}.${key}}}`);
+    setOpen(false);
+    setStep("root");
+    setCategory(null);
+    setEntryKey(null);
+  };
+
+  const close = () => {
+    setOpen(false);
+    setStep("root");
+    setCategory(null);
+    setEntryKey(null);
+  };
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="shrink-0 inline-flex items-center gap-1 rounded-md border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 px-2.5 py-1.5 text-xs font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors"
+        title={t("structure.forNodeInsertVariable")}
+      >
+        <Repeat className="h-3 w-3" />
+        {`{{ }}`}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-30 w-72 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg max-h-80 overflow-y-auto">
+          {step !== "root" && (
+            <button
+              type="button"
+              onClick={() => {
+                if (step === "column") setStep("key");
+                else if (step === "key") setStep("category");
+                else if (step === "category") setStep("root");
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-xs text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700 border-b border-slate-200 dark:border-slate-700"
+            >
+              <ChevronLeft className="h-3 w-3" /> {t("structure.forNodeBack")}
+            </button>
+          )}
+
+          {step === "root" && (
+            <>
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{t("structure.forNodeSimpleFields")}</div>
+              {simpleFields.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  onClick={() => insertSimple(f.id)}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <span className="flex-1 text-left">{f.label}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">{`{{for.node.${f.id}}}`}</span>
+                </button>
+              ))}
+              {mode === "full" && (
+                <>
+                  <div className="border-t border-slate-200 dark:border-slate-700" />
+                  <button
+                    type="button"
+                    onClick={() => setStep("category")}
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  >
+                    <span className="flex-1 text-left">{t("structure.forNodeInventoryValue")}</span>
+                    <ChevronRight className="h-3 w-3 text-slate-400" />
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {step === "category" && (
+            <>
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{t("structure.invSourceCategory")}</div>
+              {structure.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-slate-400 italic text-center">{t("structure.inventoryNoData")}</p>
+              ) : (
+                structure.map((c) => (
+                  <button
+                    key={c.categoryName}
+                    type="button"
+                    onClick={() => { setCategory(c.categoryName); setStep("key"); }}
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  >
+                    <span className="flex-1 text-left">{c.categoryName}</span>
+                    <span className="text-[10px] text-slate-400">{c.entries.length}</span>
+                    <ChevronRight className="h-3 w-3 text-slate-400" />
+                  </button>
+                ))
+              )}
+            </>
+          )}
+
+          {step === "key" && category && (
+            <>
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{category}</div>
+              {(structure.find((c) => c.categoryName === category)?.entries ?? []).map((e) => (
+                <button
+                  key={e.key}
+                  type="button"
+                  onClick={() => {
+                    if (e.columns.length <= 1) {
+                      insertInventory(category, e.key);
+                    } else {
+                      setEntryKey(e.key);
+                      setStep("column");
+                    }
+                  }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <span className="flex-1 text-left truncate">{e.key}</span>
+                  <span className="text-[10px] text-slate-400">{e.columns.length}</span>
+                  {e.columns.length > 1 && <ChevronRight className="h-3 w-3 text-slate-400" />}
+                </button>
+              ))}
+            </>
+          )}
+
+          {step === "column" && category && entryKey && (
+            <>
+              <div className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">{category} / {entryKey}</div>
+              {(structure.find((c) => c.categoryName === category)?.entries.find((e) => e.key === entryKey)?.columns ?? []).map((col) => (
+                <button
+                  key={col}
+                  type="button"
+                  onClick={() => insertInventory(category, entryKey, col)}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  <span className="flex-1 text-left truncate">{col}</span>
+                </button>
+              ))}
+            </>
+          )}
+
+          <div className="border-t border-slate-200 dark:border-slate-700 px-3 py-1.5">
+            <button type="button" onClick={close} className="text-[10px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">{t("common.cancel")}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // --- Paragraph inline properties (TipTap WYSIWYG) ---
 interface InvStructure {
   categoryId: number | null;
@@ -1997,13 +2332,16 @@ function ParagraphProperties({
   t,
   reportType,
   reportNodes,
+  parentBlockType,
 }: {
   block: ParagraphBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
   reportType?: "general" | "node";
   reportNodes?: ReportNodeRef[];
+  parentBlockType?: ReportBlock["type"];
 }) {
+  const inRepeatContainer = parentBlockType === "repeat_per_node";
   const { current } = useAppContext();
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
@@ -2303,6 +2641,16 @@ function ParagraphProperties({
           {/* Lists */}
           <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive("bulletList"))} title={t("structure.bulletList")}><List className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive("orderedList"))} title={t("structure.numberedList")}><ListOrdered className="h-3.5 w-3.5" /></button>
+          {inRepeatContainer && (
+            <>
+              <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+              <ForNodeVariablePicker
+                onPick={(tpl) => editor.chain().focus().insertContent(tpl).run()}
+                t={t}
+                mode="full"
+              />
+            </>
+          )}
           {aiAssistants.length > 0 && (
             <>
               <div className="ml-auto" />
@@ -3111,17 +3459,31 @@ function InventoryTableProperties({
   t,
   reportType,
   reportNodes,
+  parentBlockType,
 }: {
   block: InventoryTableBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
   reportType?: "general" | "node";
   reportNodes?: ReportNodeRef[];
+  parentBlockType?: ReportBlock["type"];
 }) {
   const { current } = useAppContext();
   const isNodeReport = reportType === "node";
-  const mode = block.mode ?? "multi_node_columns";
-  const [tab, setTab] = useState<"columns" | "source" | "equipment" | "style" | "preview">(
+  // Parent-driven mode: when this block lives inside a repeat_per_node
+  // container, the parent loop owns device selection and we must run as
+  // single_node_full. We hide the mode switcher and the device picker.
+  const inRepeatContainer = parentBlockType === "repeat_per_node";
+  const mode = inRepeatContainer ? "single_node_full" : (block.mode ?? "multi_node_columns");
+
+  // Force the block model to single_node_full once we land inside a
+  // repeat_per_node parent (covers blocks created outside and moved in).
+  useEffect(() => {
+    if (inRepeatContainer && block.mode !== "single_node_full") {
+      updateBlock(block.id, { mode: "single_node_full" });
+    }
+  }, [inRepeatContainer, block.id, block.mode, updateBlock]);
+  const [tab, setTab] = useState<"columns" | "source" | "equipment" | "display" | "style" | "preview">(
     mode === "single_node_full" ? "source" : "columns"
   );
 
@@ -3438,6 +3800,12 @@ function InventoryTableProperties({
       if (isNodeReport && reportNodes && reportNodes.length > 0) {
         return reportNodes.slice(0, 1).map((n) => ({ id: n.id, hostname: n.hostname, name: n.name, ipAddress: n.ipAddress } as NodeItem));
       }
+      // Inside a repeat_per_node container singleNodeId is null (driven by the
+      // parent loop). Show a representative node so the preview still renders
+      // the table structure for the chosen category.
+      if (inRepeatContainer && allNodes.length > 0) {
+        return [allNodes[0]];
+      }
       const sn = block.singleNodeId ? allNodes.find((n) => n.id === block.singleNodeId) : null;
       return sn ? [sn] : [];
     }
@@ -3451,45 +3819,92 @@ function InventoryTableProperties({
 
   const showColumnsTab = mode === "multi_node_columns";
   const showSingleSourceTab = mode === "single_node_full";
+  const showSingleDisplayTab = mode === "single_node_full";
   const showEquipmentTab = mode === "multi_node_columns" && !isNodeReport;
+
+  // --- Display / filter helpers (single_node_full) ---
+  const hiddenColumns = block.hiddenColumns ?? [];
+  const valueFilters = block.valueFilters ?? [];
+  const valueFiltersMatch = block.valueFiltersMatch ?? "all";
+
+  const toggleHiddenColumn = (colLabel: string, hide: boolean) => {
+    const next = hide
+      ? Array.from(new Set([...hiddenColumns, colLabel]))
+      : hiddenColumns.filter((c) => c !== colLabel);
+    updateBlock(block.id, { hiddenColumns: next });
+  };
+
+  const addValueFilter = () => {
+    const filter: InventoryValueFilter = {
+      id: uid(),
+      colLabel: singleCategoryColLabels[0] ?? "",
+      operator: "eq",
+      value: "",
+    };
+    updateBlock(block.id, { valueFilters: [...valueFilters, filter] });
+  };
+  const updateValueFilter = (fid: string, patch: Partial<InventoryValueFilter>) => {
+    updateBlock(block.id, {
+      valueFilters: valueFilters.map((f) => (f.id === fid ? { ...f, ...patch } : f)),
+    });
+  };
+  const removeValueFilter = (fid: string) => {
+    updateBlock(block.id, { valueFilters: valueFilters.filter((f) => f.id !== fid) });
+  };
+
+  const filterOperatorOptions: { value: InventoryValueFilterOperator; label: string }[] = [
+    { value: "eq", label: "=" },
+    { value: "neq", label: "!=" },
+    { value: "contains", label: t("structure.ruleContains") },
+    { value: "not_contains", label: t("structure.ruleNotContains") },
+    { value: "starts_with", label: t("structure.invRuleStartsWith") },
+    { value: "ends_with", label: t("structure.invRuleEndsWith") },
+  ];
 
   return (
     <div className="space-y-4">
-      {/* Mode banner */}
-      <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide">{t("structure.invModeTitle")}</span>
-          {isNodeReport && (
-            <span className="text-[10px] text-violet-600 dark:text-violet-400 italic">{t("structure.invModeNodeReportHint")}</span>
-          )}
+      {/* Mode banner — hidden when a parent loop (repeat_per_node) owns the device */}
+      {inRepeatContainer ? (
+        <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 flex items-center gap-2">
+          <Repeat className="h-4 w-4 text-violet-500" />
+          <span className="text-xs text-slate-700 dark:text-slate-300 flex-1">{t("structure.invModeRepeatLocked")}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => { updateBlock(block.id, { mode: "multi_node_columns" }); setTab("columns"); }}
-            className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
-              mode === "multi_node_columns"
-                ? "border-violet-500 bg-white dark:bg-slate-900"
-                : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
-            }`}
-          >
-            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeMultiTitle")}</span>
-            <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeMultiDesc")}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => { updateBlock(block.id, { mode: "single_node_full" }); setTab("source"); }}
-            className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
-              mode === "single_node_full"
-                ? "border-violet-500 bg-white dark:bg-slate-900"
-                : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
-            }`}
-          >
-            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeSingleTitle")}</span>
-            <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeSingleDesc")}</span>
-          </button>
+      ) : (
+        <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-violet-700 dark:text-violet-300 uppercase tracking-wide">{t("structure.invModeTitle")}</span>
+            {isNodeReport && (
+              <span className="text-[10px] text-violet-600 dark:text-violet-400 italic">{t("structure.invModeNodeReportHint")}</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => { updateBlock(block.id, { mode: "multi_node_columns" }); setTab("columns"); }}
+              className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
+                mode === "multi_node_columns"
+                  ? "border-violet-500 bg-white dark:bg-slate-900"
+                  : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
+              }`}
+            >
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeMultiTitle")}</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeMultiDesc")}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { updateBlock(block.id, { mode: "single_node_full" }); setTab("source"); }}
+              className={`flex flex-col gap-1 rounded-md border-2 px-3 py-2 text-left transition-colors ${
+                mode === "single_node_full"
+                  ? "border-violet-500 bg-white dark:bg-slate-900"
+                  : "border-transparent bg-white/50 dark:bg-slate-900/50 hover:bg-white dark:hover:bg-slate-900"
+              }`}
+            >
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t("structure.invModeSingleTitle")}</span>
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invModeSingleDesc")}</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tabs */}
       <div className="flex border-b border-slate-200 dark:border-slate-700">
@@ -3509,6 +3924,16 @@ function InventoryTableProperties({
             {(block.nodeIds.length > 0 || (nodeRules.length > 0 && rulePreview.length > 0)) && (
               <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
                 {block.nodeIds.length + ruleMatchedNodes.length}
+              </span>
+            )}
+          </button>
+        )}
+        {showSingleDisplayTab && (
+          <button type="button" className={tabBtnClass(tab === "display")} onClick={() => setTab("display")}>
+            {t("structure.invDisplayTab")}
+            {(hiddenColumns.length > 0 || valueFilters.length > 0) && (
+              <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+                {hiddenColumns.length + valueFilters.length}
               </span>
             )}
           </button>
@@ -3843,7 +4268,13 @@ function InventoryTableProperties({
       {/* Source tab — single_node_full mode */}
       {tab === "source" && (
         <div className="space-y-4">
-          {!isNodeReport && (
+          {inRepeatContainer && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 flex items-center gap-2">
+              <Repeat className="h-4 w-4 text-violet-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300 flex-1">{t("structure.invSourceFromRepeat")}</span>
+            </div>
+          )}
+          {!isNodeReport && !inRepeatContainer && (
             <div className="space-y-1.5">
               <label className={labelClass}>{t("structure.invSourceNode")}</label>
               <select
@@ -3860,7 +4291,7 @@ function InventoryTableProperties({
               </select>
             </div>
           )}
-          {isNodeReport && reportNodes && reportNodes.length > 0 && (
+          {isNodeReport && !inRepeatContainer && reportNodes && reportNodes.length > 0 && (
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 flex items-center gap-2">
               <Server className="h-4 w-4 text-violet-500" />
               <span className="text-sm text-slate-700 dark:text-slate-300">
@@ -3975,6 +4406,129 @@ function InventoryTableProperties({
           </div>
 
           <p className="text-[10px] text-slate-400">{t("structure.invSourceHint")}</p>
+        </div>
+      )}
+
+      {/* Display / filters tab — single_node_full mode */}
+      {tab === "display" && (
+        <div className="space-y-4">
+          {!block.singleCategory && (
+            <p className="text-xs text-slate-400 italic">{t("structure.invDisplayPickCategoryFirst")}</p>
+          )}
+
+          {/* Visible columns */}
+          {block.singleCategory && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 space-y-2">
+              <div>
+                <label className={labelClass}>{t("structure.invDisplayColumnsTitle")}</label>
+                <p className="text-[10px] text-slate-400">{t("structure.invDisplayColumnsHint")}</p>
+              </div>
+              {singleCategoryColLabels.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic">{t("structure.inventoryNoData")}</p>
+              ) : (
+                <div className="grid grid-cols-2 gap-1.5">
+                  {singleCategoryColLabels.map((cl) => {
+                    const hidden = hiddenColumns.includes(cl);
+                    return (
+                      <label key={cl} className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!hidden}
+                          onChange={(e) => toggleHiddenColumn(cl, !e.target.checked)}
+                          className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-400"
+                        />
+                        <span className={`text-xs truncate ${hidden ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-300"}`}>
+                          {cl}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Value filters */}
+          {block.singleCategory && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className={labelClass}>{t("structure.invDisplayFiltersTitle")}</label>
+                  <p className="text-[10px] text-slate-400">{t("structure.invDisplayFiltersHint")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addValueFilter}
+                  className="flex items-center gap-1.5 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("structure.invDisplayFiltersAdd")}
+                </button>
+              </div>
+
+              {valueFilters.length > 1 && (
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invDisplayMatchMode")}</span>
+                  <div className="inline-flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => updateBlock(block.id, { valueFiltersMatch: "all" })}
+                      className={`px-2 py-0.5 text-[11px] font-medium ${valueFiltersMatch === "all" ? "bg-violet-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}
+                    >
+                      {t("structure.invDisplayMatchAll")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateBlock(block.id, { valueFiltersMatch: "any" })}
+                      className={`px-2 py-0.5 text-[11px] font-medium ${valueFiltersMatch === "any" ? "bg-violet-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}
+                    >
+                      {t("structure.invDisplayMatchAny")}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {valueFilters.length === 0 && (
+                <p className="text-[11px] text-slate-400 italic">{t("structure.invDisplayFiltersEmpty")}</p>
+              )}
+
+              {valueFilters.map((f) => (
+                <div key={f.id} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2">
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={f.colLabel}
+                      onChange={(e) => updateValueFilter(f.id, { colLabel: e.target.value })}
+                      className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.invCountPickColumn")}</option>
+                      {singleCategoryColLabels.map((cl) => (
+                        <option key={cl} value={cl}>{cl}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={f.operator}
+                      onChange={(e) => updateValueFilter(f.id, { operator: e.target.value as InventoryValueFilterOperator })}
+                      className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      {filterOperatorOptions.map((op) => (
+                        <option key={op.value} value={op.value}>{op.label}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={f.value}
+                      onChange={(e) => updateValueFilter(f.id, { value: e.target.value })}
+                      placeholder={t("structure.invDisplayFilterValuePlaceholder")}
+                      className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                    />
+                    <button onClick={() => removeValueFilter(f.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -9922,6 +10476,379 @@ function ConditionalProperties({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// --- Repeat per node properties ---
+function RepeatPerNodeProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+  reportNodes,
+}: {
+  block: RepeatPerNodeBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+  reportNodes?: ReportNodeRef[];
+}) {
+  const { current } = useAppContext();
+  const isNodeReport = reportType === "node";
+
+  const updateField = <K extends keyof RepeatPerNodeBlock>(key: K, value: RepeatPerNodeBlock[K]) => {
+    updateBlock(block.id, { [key]: value } as Partial<ReportBlock>);
+  };
+
+  const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
+  const [nodesLoaded, setNodesLoaded] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const [tags, setTags] = useState<InvTagItem[]>([]);
+  const [manufacturers, setManufacturers] = useState<InvManufacturerItem[]>([]);
+  const [models, setModels] = useState<InvModelItem[]>([]);
+  const [rulePreview, setRulePreview] = useState<number[]>([]);
+  const [rulePreviewLoading, setRulePreviewLoading] = useState(false);
+
+  useEffect(() => {
+    if (!current || nodesLoaded) return;
+    fetch(`/api/nodes?context=${current.id}`)
+      .then((r) => r.json())
+      .then((data: NodeItem[]) => { setAllNodes(data); setNodesLoaded(true); })
+      .catch(() => setNodesLoaded(true));
+  }, [current, nodesLoaded]);
+
+  useEffect(() => {
+    if (!current || isNodeReport) return;
+    fetch(`/api/node-tags?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setTags).catch(() => {});
+    fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setManufacturers).catch(() => {});
+    fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []).then(setModels).catch(() => {});
+  }, [current, isNodeReport]);
+
+  const nodeRules = block.nodeRules ?? [];
+  const nodeRulesMatch = block.nodeRulesMatch ?? "any";
+  useEffect(() => {
+    if (!current || isNodeReport || nodeRules.length === 0) {
+      setRulePreview([]);
+      return;
+    }
+    setRulePreviewLoading(true);
+    fetch(`/api/nodes/match?context=${current.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: nodeRules, match: nodeRulesMatch }),
+    })
+      .then((r) => r.ok ? r.json() : { nodeIds: [] })
+      .then((data: { nodeIds: number[] }) => setRulePreview(data.nodeIds ?? []))
+      .catch(() => setRulePreview([]))
+      .finally(() => setRulePreviewLoading(false));
+  }, [current, isNodeReport, JSON.stringify(nodeRules), nodeRulesMatch]);
+
+  const selectedNodes = allNodes.filter((n) => block.nodeIds.includes(n.id));
+  const ruleMatchedNodes = allNodes.filter((n) => rulePreview.includes(n.id) && !block.nodeIds.includes(n.id));
+  const availableNodes = allNodes.filter(
+    (n) =>
+      !block.nodeIds.includes(n.id) &&
+      (nodeSearch === "" ||
+        (n.hostname ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        (n.name ?? "").toLowerCase().includes(nodeSearch.toLowerCase()) ||
+        n.ipAddress.includes(nodeSearch))
+  );
+
+  const addNode = (id: number) => updateField("nodeIds", [...block.nodeIds, id]);
+  const removeNode = (id: number) => updateField("nodeIds", block.nodeIds.filter((n) => n !== id));
+
+  const addNodeRule = () => {
+    const r: InventoryNodeRule = { id: uid(), type: "tag", operator: "eq" };
+    updateField("nodeRules", [...nodeRules, r]);
+  };
+  const updateNodeRule = (rid: string, patch: Partial<InventoryNodeRule>) => {
+    updateField("nodeRules", nodeRules.map((r) => (r.id === rid ? { ...r, ...patch } : r)));
+  };
+  const removeNodeRule = (rid: string) => {
+    updateField("nodeRules", nodeRules.filter((r) => r.id !== rid));
+  };
+
+  const ruleTypeOptions: { value: InventoryNodeRuleType; label: string }[] = [
+    { value: "tag", label: t("structure.invRuleTypeTag") },
+    { value: "discoveredVersion", label: t("structure.invRuleTypeVersion") },
+    { value: "manufacturer", label: t("structure.invRuleTypeManufacturer") },
+    { value: "model", label: t("structure.invRuleTypeModel") },
+    { value: "productModel", label: t("structure.invRuleTypeProductModel") },
+    { value: "hostname", label: t("structure.invRuleTypeHostname") },
+  ];
+  const ruleOperatorOptions: { value: InventoryNodeRuleOperator; label: string }[] = [
+    { value: "eq", label: "=" },
+    { value: "neq", label: "!=" },
+    { value: "contains", label: t("structure.ruleContains") },
+    { value: "not_contains", label: t("structure.ruleNotContains") },
+    { value: "starts_with", label: t("structure.invRuleStartsWith") },
+    { value: "ends_with", label: t("structure.invRuleEndsWith") },
+  ];
+
+  const totalCount = selectedNodes.length + ruleMatchedNodes.length;
+  const [tab, setTab] = useState<"document" | "equipment">("document");
+
+  const tabBtnClass = (active: boolean) =>
+    `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      active
+        ? "border-violet-500 text-violet-600 dark:text-violet-400"
+        : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+    }`;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50/40 dark:bg-violet-900/10 px-3 py-2 flex items-center gap-2">
+        <Repeat className="h-4 w-4 text-violet-500" />
+        <span className="text-xs text-slate-700 dark:text-slate-300 flex-1">{t("structure.repeatPerNodeBanner")}</span>
+        <span className="text-[11px] font-bold text-violet-600 dark:text-violet-400">{totalCount} {t("structure.repeatPerNodeNodes")}</span>
+      </div>
+
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={tabBtnClass(tab === "document")} onClick={() => setTab("document")}>
+          {t("structure.repeatPerNodeTabDocument")}
+        </button>
+        <button type="button" className={tabBtnClass(tab === "equipment")} onClick={() => setTab("equipment")}>
+          {t("structure.repeatPerNodeTabEquipment")}
+          {totalCount > 0 && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {totalCount}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {tab === "document" && (
+        <div className="space-y-5">
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.repeatPerNodeLabel")}</label>
+            <input
+              type="text"
+              value={block.label}
+              onChange={(e) => updateField("label", e.target.value)}
+              placeholder={t("structure.repeatPerNodeLabelPlaceholder")}
+              className={inputClass}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-6">
+            <label className="flex items-center gap-2">
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.structureDepthLabel")}</span>
+              <StructureDepthSelect
+                value={block.structureDepth ?? (block.useParentDepth ? "follow" : 1)}
+                onChange={(v) => updateField("structureDepth", v)}
+                t={t}
+              />
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!block.pageBreakBefore}
+                onChange={(e) => updateField("pageBreakBefore", e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+            </label>
+          </div>
+
+          <div className="space-y-1.5 pt-3 border-t border-slate-200 dark:border-slate-700">
+            <label className={labelClass}>{t("structure.condChildren")} ({block.children.length})</label>
+            <p className="text-[10px] text-slate-400">{t("structure.repeatPerNodeChildrenHint")}</p>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-900/30 min-h-[40vh] max-h-[60vh] overflow-visible flex flex-col">
+              <StructureEditor
+                blocks={block.children}
+                onChange={(b) => updateField("children", b)}
+                t={t}
+                reportType={reportType}
+                reportNodes={reportNodes}
+                embedded
+                allowedBlockTypes={ALLOWED_REPEAT_CHILDREN}
+                parentBlockType="repeat_per_node"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === "equipment" && (
+        <div className="space-y-4">
+          {selectedNodes.length > 0 && (
+            <div className="space-y-1">
+              <label className={labelClass}>{t("structure.inventorySelected")}</label>
+              <div className="max-h-48 overflow-y-auto space-y-1">
+                {selectedNodes.map((node) => (
+                  <div key={node.id} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-1.5">
+                    <Server className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                    <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+                      {node.hostname || node.name || node.ipAddress}
+                    </span>
+                    <span className="text-[10px] text-slate-400">{node.ipAddress}</span>
+                    <button onClick={() => removeNode(node.id)} className="p-0.5 text-slate-400 hover:text-red-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.inventoryAddEquipment")}</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                value={nodeSearch}
+                onChange={(e) => setNodeSearch(e.target.value)}
+                placeholder={t("common.search")}
+                className={`${inputClass} pl-8`}
+              />
+            </div>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto space-y-1 rounded-lg border border-slate-200 dark:border-slate-700 p-1.5">
+            {!nodesLoaded && (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+              </div>
+            )}
+            {nodesLoaded && availableNodes.length === 0 && (
+              <p className="text-xs text-slate-400 italic text-center py-3">{t("common.noResult")}</p>
+            )}
+            {availableNodes.map((node) => (
+              <button
+                key={node.id}
+                onClick={() => addNode(node.id)}
+                className="w-full flex items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+                <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate">
+                  {node.hostname || node.name || node.ipAddress}
+                </span>
+                <span className="text-[10px] text-slate-400 shrink-0">{node.ipAddress}</span>
+              </button>
+            ))}
+          </div>
+
+          {!isNodeReport && (
+            <div className="space-y-2 pt-3 border-t border-slate-200 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className={labelClass}>{t("structure.invAutoRulesTitle")}</label>
+                  <p className="text-[10px] text-slate-400">{t("structure.invAutoRulesHint")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addNodeRule}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("structure.invAutoRulesAdd")}
+                </button>
+              </div>
+
+              {nodeRules.length > 1 && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-slate-500">{t("structure.invAutoRulesMatch")}</span>
+                  <div className="inline-flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <button type="button" onClick={() => updateField("nodeRulesMatch", "any")} className={`px-2 py-0.5 text-[11px] font-medium ${nodeRulesMatch === "any" ? "bg-violet-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}>{t("structure.invAutoRulesAny")}</button>
+                    <button type="button" onClick={() => updateField("nodeRulesMatch", "all")} className={`px-2 py-0.5 text-[11px] font-medium ${nodeRulesMatch === "all" ? "bg-violet-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}>{t("structure.invAutoRulesAll")}</button>
+                  </div>
+                </div>
+              )}
+
+              {nodeRules.map((rule) => (
+                <div key={rule.id} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={rule.type}
+                      onChange={(e) => updateNodeRule(rule.id, { type: e.target.value as InventoryNodeRuleType, value: undefined, tagId: undefined })}
+                      className="bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      {ruleTypeOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                    </select>
+                    <select
+                      value={rule.operator}
+                      onChange={(e) => updateNodeRule(rule.id, { operator: e.target.value as InventoryNodeRuleOperator })}
+                      className="bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      {ruleOperatorOptions.map((o) => (<option key={o.value} value={o.value}>{o.label}</option>))}
+                    </select>
+                    {rule.type === "tag" && (
+                      <select
+                        value={rule.tagId ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { tagId: e.target.value ? Number(e.target.value) : undefined })}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="">{t("structure.invRulePickTag")}</option>
+                        {tags.map((tg) => (<option key={tg.id} value={tg.id}>{tg.name}</option>))}
+                      </select>
+                    )}
+                    {rule.type === "manufacturer" && (
+                      <select
+                        value={rule.value ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { value: e.target.value })}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="">{t("structure.invRulePickManufacturer")}</option>
+                        {manufacturers.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                      </select>
+                    )}
+                    {rule.type === "model" && (
+                      <select
+                        value={rule.value ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { value: e.target.value })}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400"
+                      >
+                        <option value="">{t("structure.invRulePickModel")}</option>
+                        {models.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
+                      </select>
+                    )}
+                    {(rule.type === "discoveredVersion" || rule.type === "productModel" || rule.type === "hostname") && (
+                      <input
+                        type="text"
+                        value={rule.value ?? ""}
+                        onChange={(e) => updateNodeRule(rule.id, { value: e.target.value })}
+                        placeholder={t("structure.invRuleValuePlaceholder")}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                      />
+                    )}
+                    <button onClick={() => removeNodeRule(rule.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {nodeRules.length > 0 && (
+                <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40 p-2 space-y-1">
+                  <div className="flex items-center gap-2 text-[11px] text-slate-500">
+                    {rulePreviewLoading ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Search className="h-3 w-3" />
+                    )}
+                    <span>{t("structure.invAutoRulesMatched", { count: String(rulePreview.length) })}</span>
+                  </div>
+                  {ruleMatchedNodes.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {ruleMatchedNodes.slice(0, 12).map((n) => (
+                        <span key={n.id} className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-700 dark:text-violet-300">
+                          <Server className="h-2.5 w-2.5" />
+                          {n.hostname || n.name || n.ipAddress}
+                        </span>
+                      ))}
+                      {ruleMatchedNodes.length > 12 && (
+                        <span className="text-[10px] text-slate-400">+{ruleMatchedNodes.length - 12}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ class BlockConditionEvaluator
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
+        private readonly NodeTagResolver $tagResolver,
     ) {}
 
     public function evaluate(?array $tree, ?Node $forNode, ?Report $report): bool
@@ -244,17 +245,7 @@ class BlockConditionEvaluator
         if ($scope === 'tag') {
             $tagIds = array_map('intval', (array) ($leaf['tagIds'] ?? []));
             if (empty($tagIds)) return [];
-            $candidates = $repo->findBy(['context' => $context]);
-            $matched = [];
-            foreach ($candidates as $n) {
-                foreach ($n->getTags() as $tg) {
-                    if (in_array((int) $tg->getId(), $tagIds, true)) {
-                        $matched[$n->getId()] = $n;
-                        break;
-                    }
-                }
-            }
-            return array_values($matched);
+            return $this->tagResolver->getNodesWithAnyTag($context, $tagIds);
         }
         return $repo->findBy(['context' => $context]);
     }

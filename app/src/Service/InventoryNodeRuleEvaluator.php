@@ -20,6 +20,7 @@ class InventoryNodeRuleEvaluator
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
+        private readonly NodeTagResolver $tagResolver,
     ) {}
 
     /**
@@ -60,10 +61,7 @@ class InventoryNodeRuleEvaluator
         if ($type === 'tag') {
             $tagId = isset($rule['tagId']) ? (int) $rule['tagId'] : null;
             if (!$tagId) return false;
-            $hasTag = false;
-            foreach ($node->getTags() as $t) {
-                if ($t->getId() === $tagId) { $hasTag = true; break; }
-            }
+            $hasTag = $this->tagResolver->nodeHasAnyTag($node, [$tagId]);
             return $op === 'neq' ? !$hasTag : $hasTag;
         }
 

@@ -13,6 +13,7 @@ use App\Message\GenerateReportMessage;
 use App\Service\BlockConditionEvaluator;
 use App\Service\ComplianceEvaluator;
 use App\Service\InventoryNodeRuleEvaluator;
+use App\Service\NodeTagResolver;
 use App\Service\SystemUpdateScoreCalculator;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -34,6 +35,7 @@ class GenerateReportMessageHandler
         private readonly LoggerInterface $logger,
         private readonly \App\Service\TopologyV2SvgRenderer $topologyV2Renderer,
         private readonly \App\Service\ReportSchemaSvgRenderer $reportSchemaRenderer,
+        private readonly NodeTagResolver $tagResolver,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -1439,7 +1441,6 @@ class GenerateReportMessageHandler
                         ->andWhere('e.categoryName = :cat')
                         ->setParameter('n', $node)
                         ->setParameter('cat', $singleCategory)
-                        ->orderBy('e.entryKey', 'ASC')
                         ->addOrderBy('e.colLabel', 'ASC')
                         ->getQuery()
                         ->getResult();
@@ -1455,6 +1456,46 @@ class GenerateReportMessageHandler
                         $rowMap[$k][$cl] = $entry->getValue() ?? '';
                     }
                     $rowKeys = array_keys($rowMap);
+                    sort($rowKeys, SORT_NATURAL | SORT_FLAG_CASE);
+
+                    // Apply value filters (rows must match), then drop hidden columns.
+                    $valueFilters = array_values(array_filter($block['valueFilters'] ?? [], 'is_array'));
+                    if (!empty($valueFilters)) {
+                        $matchAll = (($block['valueFiltersMatch'] ?? 'all') === 'all');
+                        $rowKeys = array_values(array_filter($rowKeys, function ($k) use ($rowMap, $valueFilters, $matchAll) {
+                            foreach ($valueFilters as $f) {
+                                $cl = (string) ($f['colLabel'] ?? '');
+                                if ($cl === '') continue;
+                                $cell = mb_strtolower((string) ($rowMap[$k][$cl] ?? ''));
+                                $expected = mb_strtolower((string) ($f['value'] ?? ''));
+                                $op = (string) ($f['operator'] ?? 'eq');
+                                $hit = match ($op) {
+                                    'eq' => $cell === $expected,
+                                    'neq' => $cell !== $expected,
+                                    'contains' => $expected !== '' && str_contains($cell, $expected),
+                                    'not_contains' => $expected === '' || !str_contains($cell, $expected),
+                                    'starts_with' => $expected !== '' && str_starts_with($cell, $expected),
+                                    'ends_with' => $expected !== '' && str_ends_with($cell, $expected),
+                                    default => true,
+                                };
+                                if ($matchAll && !$hit) return false;
+                                if (!$matchAll && $hit) return true;
+                            }
+                            return $matchAll;
+                        }));
+                    }
+
+                    $hiddenColumns = array_values(array_filter((array) ($block['hiddenColumns'] ?? []), 'is_string'));
+                    if (!empty($hiddenColumns)) {
+                        $colLabels = array_values(array_filter($colLabels, fn($cl) => !in_array($cl, $hiddenColumns, true)));
+                    }
+
+                    if (empty($rowKeys)) {
+                        // Filters dropped every row → skip block entirely.
+                        if ($pSpaceAfter > 0) $pdf->Ln($pSpaceAfter);
+                        $prevType = 'table';
+                        continue;
+                    }
 
                     $pageW = $pdf->getPageWidth();
                     $contentW = $pageW - $mLeft - $mRight;
@@ -3516,7 +3557,11 @@ class GenerateReportMessageHandler
                 if ($crScope === 'device' && !empty($crNodeIds)) {
                     $crQb->andWhere('n.id IN (:nodeIds)')->setParameter('nodeIds', $crNodeIds);
                 } elseif ($crScope === 'tag' && !empty($crNodeTagIds)) {
-                    $crQb->innerJoin('n.tags', 'nt')->andWhere('nt.id IN (:tagIds)')->setParameter('tagIds', $crNodeTagIds);
+                    $crTagNodeIds = $this->tagResolver->getNodeIdsWithAnyTag($report->getContext(), $crNodeTagIds);
+                    if (empty($crTagNodeIds)) {
+                        continue;
+                    }
+                    $crQb->andWhere('n.id IN (:tagNodeIds)')->setParameter('tagNodeIds', $crTagNodeIds);
                 } elseif ($crScope === 'device' || $crScope === 'tag') {
                     // Filter selected but empty → no results
                     continue;
@@ -3871,7 +3916,13 @@ class GenerateReportMessageHandler
                         if ($rsScope === 'device' && !empty($rsNodeIdsSel)) {
                             $rsQb->andWhere('n.id IN (:nodeIds)')->setParameter('nodeIds', $rsNodeIdsSel);
                         } elseif ($rsScope === 'tag' && !empty($rsNodeTagIds)) {
-                            $rsQb->innerJoin('n.tags', 'nt')->andWhere('nt.id IN (:tagIds)')->setParameter('tagIds', $rsNodeTagIds);
+                            $rsTagNodeIds = $report?->getContext()
+                                ? $this->tagResolver->getNodeIdsWithAnyTag($report->getContext(), $rsNodeTagIds)
+                                : [];
+                            if (empty($rsTagNodeIds)) {
+                                continue;
+                            }
+                            $rsQb->andWhere('n.id IN (:tagNodeIds)')->setParameter('tagNodeIds', $rsTagNodeIds);
                         } elseif ($rsScope === 'device' || $rsScope === 'tag') {
                             continue;
                         }
@@ -4696,15 +4747,7 @@ class GenerateReportMessageHandler
                     } elseif ($idScope === 'tag') {
                         $tagIds = array_map('intval', (array) ($block['tagIds'] ?? []));
                         if (!empty($tagIds)) {
-                            $candidates = $this->em->getRepository(Node::class)->findBy(['context' => $reportContext]);
-                            foreach ($candidates as $n) {
-                                foreach ($n->getTags() as $tg) {
-                                    if (in_array((int) $tg->getId(), $tagIds, true)) {
-                                        $targetNodes[] = $n;
-                                        break;
-                                    }
-                                }
-                            }
+                            $targetNodes = $this->tagResolver->getNodesWithAnyTag($reportContext, $tagIds);
                         }
                     } else {
                         $targetNodes = $this->em->getRepository(Node::class)->findBy(['context' => $reportContext]);
@@ -4976,6 +5019,36 @@ class GenerateReportMessageHandler
                     );
                     $prevType = 'conditional';
                 }
+
+            } elseif ($type === 'repeat_per_node') {
+                $rpnNodes = $this->resolveRepeatNodes($block, $forNode, $report);
+                if (empty($rpnNodes)) {
+                    continue;
+                }
+                $rpnChildren = is_array($block['children'] ?? null) ? $block['children'] : [];
+                if (empty($rpnChildren)) {
+                    continue;
+                }
+                if (!empty($block['pageBreakBefore']) || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                }
+                foreach ($rpnNodes as $iterNode) {
+                    $overlaid = array_map(
+                        fn($c) => is_array($c) ? $this->overlayCurrentNodeOnBlock($c, $iterNode) : $c,
+                        $rpnChildren,
+                    );
+                    $this->renderBlocks(
+                        $pdf, $overlaid, $headingsByLevel, $styles, $numberingEnabled,
+                        $mLeft, $mTop, $mRight, $mBottom,
+                        $forNode, $report, $summaryPageMap, $collectedPageMap,
+                        true,
+                        $counters,
+                    );
+                }
+                $prevType = 'repeat_per_node';
             }
         }
     }
@@ -5244,6 +5317,179 @@ class GenerateReportMessageHandler
     }
 
     /**
+     * Resolve the ordered set of nodes a repeat_per_node block iterates over,
+     * combining manual nodeIds + auto-rules (InventoryNodeRuleEvaluator). For
+     * node-type reports, $forNode wins and short-circuits everything (same
+     * pattern as inventory_table).
+     *
+     * @return Node[]
+     */
+    private function resolveRepeatNodes(array $block, ?Node $forNode, ?Report $report): array
+    {
+        if ($forNode) return [$forNode];
+        $context = $report?->getContext();
+        if (!$context) return [];
+
+        $ids = [];
+        foreach ((array) ($block['nodeIds'] ?? []) as $nid) {
+            $nid = (int) $nid;
+            if ($nid > 0) $ids[$nid] = true;
+        }
+        $rules = is_array($block['nodeRules'] ?? null) ? $block['nodeRules'] : [];
+        if (!empty($rules)) {
+            $match = (($block['nodeRulesMatch'] ?? 'any') === 'all') ? 'all' : 'any';
+            foreach ($this->inventoryRuleEvaluator->matchNodeIds($context, $rules, $match) as $rid) {
+                $ids[(int) $rid] = true;
+            }
+        }
+        if (empty($ids)) return [];
+
+        $nodes = $this->em->getRepository(Node::class)->findBy(['context' => $context, 'id' => array_keys($ids)]);
+        // Preserve manual-selection order: manual nodeIds first (in given order),
+        // then auto-matched nodes in repository order.
+        $byId = [];
+        foreach ($nodes as $n) $byId[$n->getId()] = $n;
+        $ordered = [];
+        foreach ((array) ($block['nodeIds'] ?? []) as $nid) {
+            $nid = (int) $nid;
+            if (isset($byId[$nid])) {
+                $ordered[] = $byId[$nid];
+                unset($byId[$nid]);
+            }
+        }
+        foreach ($byId as $n) $ordered[] = $n;
+        return $ordered;
+    }
+
+    /**
+     * Bind a repeat_per_node iteration's current $node onto a child block.
+     * The mapping per type mirrors how each block reads its "single node"
+     * field — same shape as overlayScopeOnBlock, but with a concrete node
+     * instead of an inherited scope. Add cases here when adding new allowed
+     * child block types to the repeat container.
+     */
+    private function overlayCurrentNodeOnBlock(array $block, Node $node): array
+    {
+        $type = (string) ($block['type'] ?? '');
+        $nodeId = (int) $node->getId();
+
+        switch ($type) {
+            case 'inventory_table':
+                // Force single_node_full and bind the iteration's node.
+                $block['mode'] = 'single_node_full';
+                $block['singleNodeId'] = $nodeId;
+                break;
+
+            case 'heading':
+                // Resolve {{for.node.xxx}} placeholders against the iteration node.
+                if (isset($block['content']) && is_string($block['content'])) {
+                    $block['content'] = $this->resolveForNodeVariables($block['content'], $node);
+                }
+                break;
+
+            case 'paragraph':
+                if (isset($block['content']) && is_string($block['content'])) {
+                    $block['content'] = $this->resolveForNodeVariables($block['content'], $node);
+                }
+                break;
+
+            case 'two_column':
+                $block['leftBlocks'] = array_map(
+                    fn($c) => is_array($c) ? $this->overlayCurrentNodeOnBlock($c, $node) : $c,
+                    $block['leftBlocks'] ?? [],
+                );
+                $block['rightBlocks'] = array_map(
+                    fn($c) => is_array($c) ? $this->overlayCurrentNodeOnBlock($c, $node) : $c,
+                    $block['rightBlocks'] ?? [],
+                );
+                break;
+        }
+
+        return $block;
+    }
+
+    /**
+     * Resolve {{for.node.xxx}} placeholders against a given iteration node.
+     * Two shapes are accepted:
+     *   - {{for.node.<field>}}              → single-segment simple field
+     *     (hostname, name, ip/ipAddress, manufacturer, model, version /
+     *     discoveredVersion, productModel)
+     *   - {{for.node.<cat>.<key>[.<col>]}}  → inventory lookup, matching the
+     *     existing {{node.<cat>.<key>[.<col>]}} convention
+     * Anything else is left untouched so the standard resolver can still pick
+     * it up later in the pipeline.
+     */
+    private function resolveForNodeVariables(string $text, Node $node): string
+    {
+        if (strpos($text, '{{') === false) {
+            return $text;
+        }
+
+        $simpleFields = [
+            'hostname' => fn() => (string) ($node->getHostname() ?? ''),
+            'name' => fn() => (string) ($node->getName() ?? ''),
+            'ip' => fn() => (string) ($node->getIpAddress() ?? ''),
+            'ipaddress' => fn() => (string) ($node->getIpAddress() ?? ''),
+            'manufacturer' => fn() => (string) ($node->getManufacturer()?->getName() ?? ''),
+            'model' => fn() => (string) ($node->getModel()?->getName() ?? ''),
+            'version' => fn() => (string) ($node->getDiscoveredVersion() ?? ''),
+            'discoveredversion' => fn() => (string) ($node->getDiscoveredVersion() ?? ''),
+            'productmodel' => fn() => (string) ($node->getProductModel() ?? ''),
+        ];
+
+        // Inventory data cache for this node, keyed by lowercase
+        // category → key → colLabel → value.
+        $invData = null;
+        $loadInv = function () use ($node, &$invData): array {
+            if ($invData !== null) return $invData;
+            $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy(['node' => $node]);
+            $data = [];
+            foreach ($entries as $entry) {
+                $cat = mb_strtolower((string) $entry->getCategoryName());
+                $key = mb_strtolower((string) $entry->getEntryKey());
+                $col = mb_strtolower((string) $entry->getColLabel());
+                $data[$cat][$key][$col] = $entry->getValue() ?? '';
+            }
+            $invData = $data;
+            return $invData;
+        };
+
+        return preg_replace_callback(
+            '/\{\{\s*for\.node\.([^}]+?)\s*\}\}/',
+            function ($matches) use ($simpleFields, $loadInv) {
+                $raw = trim($matches[1]);
+                if ($raw === '') return $matches[0];
+
+                $parts = explode('.', $raw);
+                if (count($parts) === 1) {
+                    $field = mb_strtolower($parts[0]);
+                    if (isset($simpleFields[$field])) {
+                        return $simpleFields[$field]();
+                    }
+                    // Unknown single-segment field — leave intact rather than
+                    // emit an empty string, so the user spots the typo.
+                    return $matches[0];
+                }
+                if (count($parts) === 2 || count($parts) === 3) {
+                    $data = $loadInv();
+                    $cat = mb_strtolower($parts[0]);
+                    $key = mb_strtolower($parts[1]);
+                    if (count($parts) === 2) {
+                        if (isset($data[$cat][$key])) {
+                            return (string) reset($data[$cat][$key]);
+                        }
+                        return '';
+                    }
+                    $col = mb_strtolower($parts[2]);
+                    return (string) ($data[$cat][$key][$col] ?? '');
+                }
+                return $matches[0];
+            },
+            $text,
+        );
+    }
+
+    /**
      * Walk the block tree to compute TOC entries. Mirrors the rendering pass:
      *   - "conditional" branches recurse only when their condition evaluates true
      *   - "two_column" recurses into both columns
@@ -5299,6 +5545,29 @@ class GenerateReportMessageHandler
                     $children = is_array($block['children'] ?? null) ? $block['children'] : [];
                     $this->collectTocEntries($children, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
                 }
+            } elseif ($type === 'repeat_per_node') {
+                $rpnNodes = $this->resolveRepeatNodes($block, $forNode, $report);
+                if (empty($rpnNodes)) {
+                    continue;
+                }
+                if (!$firstBlockDone) {
+                    $pageNum++;
+                    $firstBlockDone = true;
+                } elseif (!empty($block['pageBreakBefore'])) {
+                    $pageNum++;
+                }
+                $children = is_array($block['children'] ?? null) ? $block['children'] : [];
+                // Walk once per iteration so headings inside (when supported)
+                // get a TOC entry per node. The current allowed children
+                // (inventory_table) don't contribute headings, so this is a
+                // no-op today but stays correct as more child types open up.
+                foreach ($rpnNodes as $iterNode) {
+                    $overlaid = array_map(
+                        fn($c) => is_array($c) ? $this->overlayCurrentNodeOnBlock($c, $iterNode) : $c,
+                        $children,
+                    );
+                    $this->collectTocEntries($overlaid, $pageNum, $firstBlockDone, $tocEntries, $forNode, $report);
+                }
             } else {
                 // Any other content block contributes only by consuming the implicit first AddPage.
                 if (!$firstBlockDone) {
@@ -5347,6 +5616,16 @@ class GenerateReportMessageHandler
                     }
                 }
                 foreach ($this->collectRecommendationSources($children, $forNode, $report) as $x) $out[] = $x;
+            } elseif ($type === 'repeat_per_node') {
+                $rpnNodes = $this->resolveRepeatNodes($b, $forNode, $report);
+                $children = is_array($b['children'] ?? null) ? $b['children'] : [];
+                foreach ($rpnNodes as $iterNode) {
+                    $overlaid = array_map(
+                        fn($c) => is_array($c) ? $this->overlayCurrentNodeOnBlock($c, $iterNode) : $c,
+                        $children,
+                    );
+                    foreach ($this->collectRecommendationSources($overlaid, $forNode, $report) as $x) $out[] = $x;
+                }
             }
         }
         return $out;
@@ -5372,6 +5651,9 @@ class GenerateReportMessageHandler
                 if ($this->containsRecommendationSummary($left)) return true;
                 if ($this->containsRecommendationSummary($right)) return true;
             } elseif ($type === 'conditional') {
+                $children = is_array($b['children'] ?? null) ? $b['children'] : [];
+                if ($this->containsRecommendationSummary($children)) return true;
+            } elseif ($type === 'repeat_per_node') {
                 $children = is_array($b['children'] ?? null) ? $b['children'] : [];
                 if ($this->containsRecommendationSummary($children)) return true;
             }
@@ -5412,17 +5694,7 @@ class GenerateReportMessageHandler
         if ($mode === 'tag') {
             $tagIds = array_map('intval', (array) ($block['tagIds'] ?? []));
             if (empty($tagIds)) return [];
-            $candidates = $this->em->getRepository(Node::class)->findBy(['context' => $context]);
-            $matched = [];
-            foreach ($candidates as $n) {
-                foreach ($n->getTags() as $tg) {
-                    if (in_array((int) $tg->getId(), $tagIds, true)) {
-                        $matched[$n->getId()] = $n;
-                        break;
-                    }
-                }
-            }
-            return array_values($matched);
+            return $this->tagResolver->getNodesWithAnyTag($context, $tagIds);
         }
 
         // mode = all
@@ -5458,7 +5730,7 @@ class GenerateReportMessageHandler
                 }
                 case 'tag': {
                     $names = [];
-                    foreach ($n->getTags() as $tg) {
+                    foreach ($this->tagResolver->getTagsForNode($n) as $tg) {
                         $names[] = (string) $tg->getName();
                     }
                     return empty($names) ? ['—'] : $names;
@@ -7475,7 +7747,7 @@ class GenerateReportMessageHandler
                     $tagName = $args[0] ?? '';
                     $count = 0;
                     foreach ($contextNodes as $n) {
-                        foreach ($n->getTags() as $tag) {
+                        foreach ($this->tagResolver->getTagsForNode($n) as $tag) {
                             if (strcasecmp($tag->getName(), $tagName) === 0) { $count++; break; }
                         }
                     }

@@ -357,10 +357,12 @@ class InventoryCategoryController extends AbstractController
             $categories[$catKey]['entries'][$key]['columns'][] = $col;
         }
 
-        // Convert to indexed arrays
+        // Convert to indexed arrays + natural-sort entry keys (so 1/2 < 1/10).
         $result = [];
         foreach ($categories as $cat) {
-            $cat['entries'] = array_values($cat['entries']);
+            $entries = array_values($cat['entries']);
+            usort($entries, fn($a, $b) => strnatcasecmp((string) $a['key'], (string) $b['key']));
+            $cat['entries'] = $entries;
             $result[] = $cat;
         }
 
