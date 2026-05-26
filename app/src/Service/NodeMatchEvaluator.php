@@ -4,7 +4,9 @@ namespace App\Service;
 
 use App\Entity\Context;
 use App\Entity\Node;
+use App\Entity\NodeDynamicTag;
 use App\Entity\NodeInventoryEntry;
+use App\Entity\NodeTag;
 use Doctrine\ORM\EntityManagerInterface;
 
 class NodeMatchEvaluator
@@ -122,20 +124,15 @@ class NodeMatchEvaluator
 
     private function evaluateTagCondition(Node $node, string $operator, ?string $value): bool
     {
-        $tags = $node->getTags();
+        $tags = $this->getAllNodeTags($node);
 
-        // Operators that check presence/absence
-        if ($operator === 'exists') {
-            return !$tags->isEmpty();
+        if ($operator === 'exists' || $operator === 'is_not_empty') {
+            return !empty($tags);
         }
         if ($operator === 'not_exists' || $operator === 'is_empty') {
-            return $tags->isEmpty();
-        }
-        if ($operator === 'is_not_empty') {
-            return !$tags->isEmpty();
+            return empty($tags);
         }
 
-        // For comparison operators, check if ANY tag name matches
         foreach ($tags as $tag) {
             if ($this->complianceEvaluator->compareValue($tag->getName(), $operator, $value)) {
                 return true;
@@ -143,6 +140,26 @@ class NodeMatchEvaluator
         }
 
         return false;
+    }
+
+    /**
+     * Return both manual tags (Node ↔ NodeTag) and dynamic tags applied by
+     * collection rules (NodeDynamicTag), deduplicated by tag id.
+     *
+     * @return NodeTag[]
+     */
+    private function getAllNodeTags(Node $node): array
+    {
+        $byId = [];
+        foreach ($node->getTags() as $tag) {
+            $byId[$tag->getId()] = $tag;
+        }
+        $dynamic = $this->em->getRepository(NodeDynamicTag::class)->findBy(['node' => $node]);
+        foreach ($dynamic as $d) {
+            $tag = $d->getTag();
+            $byId[$tag->getId()] = $tag;
+        }
+        return array_values($byId);
     }
 
     private function getInventoryValue(Node $node, array $condition): ?string
