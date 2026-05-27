@@ -185,6 +185,7 @@ export default function NodeDetailPage() {
   const [selectedInventoryCat, setSelectedInventoryCat] = useState(0);
   const [inventoryTags, setInventoryTags] = useState<InventoryTagItem[]>([]);
   const [selectedInventoryTag, setSelectedInventoryTag] = useState<string>("latest");
+  const [collapsedInventoryGroups, setCollapsedInventoryGroups] = useState<Record<string, boolean>>({});
 
   // Monitoring state
   const [monitoringData, setMonitoringData] = useState<SnmpMonitoringResponse | null>(null);
@@ -1378,24 +1379,86 @@ export default function NodeDetailPage() {
           ) : inventoryData.length > 0 ? (
             <div className="flex flex-1 min-h-0">
               {/* Sidebar */}
-              <div className="w-52 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto">
+              <div className="w-64 flex-shrink-0 border-r border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/30 overflow-y-auto">
                 <nav className="py-2">
-                  {inventoryData.map((cat, catIdx) => (
-                    <button
-                      key={catIdx}
-                      onClick={() => setSelectedInventoryCat(catIdx)}
-                      className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
-                        selectedInventoryCat === catIdx
-                          ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium border-r-2 border-r-slate-900 dark:border-r-slate-100 shadow-sm"
-                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="truncate">{cat.categoryName}</span>
-                        <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 rounded-full px-1.5 py-0.5 flex-shrink-0">{cat.rows.length}</span>
-                      </div>
-                    </button>
-                  ))}
+                  {(() => {
+                    type GroupItem = { idx: number; cat: InventoryCatData; childLabel: string };
+                    const groups: { prefix: string; items: GroupItem[] }[] = [];
+                    const indexByPrefix = new Map<string, number>();
+                    inventoryData.forEach((cat, idx) => {
+                      const sepIdx = cat.categoryName.indexOf(" - ");
+                      const prefix = sepIdx > 0 ? cat.categoryName.slice(0, sepIdx) : cat.categoryName;
+                      const childLabel = sepIdx > 0 ? cat.categoryName.slice(sepIdx + 3) : cat.categoryName;
+                      let groupIdx = indexByPrefix.get(prefix);
+                      if (groupIdx === undefined) {
+                        groupIdx = groups.length;
+                        indexByPrefix.set(prefix, groupIdx);
+                        groups.push({ prefix, items: [] });
+                      }
+                      groups[groupIdx].items.push({ idx, cat, childLabel });
+                    });
+                    return groups.map((group) => {
+                      if (group.items.length === 1) {
+                        const { idx, cat } = group.items[0];
+                        const isActive = selectedInventoryCat === idx;
+                        return (
+                          <button
+                            key={`g-${group.prefix}`}
+                            onClick={() => setSelectedInventoryCat(idx)}
+                            className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                              isActive
+                                ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium border-r-2 border-r-slate-900 dark:border-r-slate-100 shadow-sm"
+                                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate">{cat.categoryName}</span>
+                              <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 rounded-full px-1.5 py-0.5 flex-shrink-0">{cat.rows.length}</span>
+                            </div>
+                          </button>
+                        );
+                      }
+                      const collapsed = collapsedInventoryGroups[group.prefix] === true;
+                      const groupHasActive = group.items.some((it) => it.idx === selectedInventoryCat);
+                      return (
+                        <div key={`g-${group.prefix}`}>
+                          <button
+                            onClick={() => setCollapsedInventoryGroups((prev) => ({ ...prev, [group.prefix]: !collapsed }))}
+                            className={`w-full text-left px-4 py-2 text-xs font-semibold uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+                              groupHasActive
+                                ? "text-slate-700 dark:text-slate-200"
+                                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300"
+                            }`}
+                          >
+                            {collapsed ? <ChevronRight className="h-3 w-3 flex-shrink-0" /> : <ChevronDown className="h-3 w-3 flex-shrink-0" />}
+                            <span className="truncate">{group.prefix}</span>
+                          </button>
+                          {!collapsed && group.items.map((item) => {
+                            const isActive = selectedInventoryCat === item.idx;
+                            return (
+                              <button
+                                key={item.idx}
+                                onClick={() => setSelectedInventoryCat(item.idx)}
+                                className={`w-full text-left pl-6 pr-4 py-2 text-sm transition-colors ${
+                                  isActive
+                                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-medium border-r-2 border-r-slate-900 dark:border-r-slate-100 shadow-sm"
+                                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 min-w-0">
+                                    <span className="text-slate-300 dark:text-slate-600 flex-shrink-0">└─</span>
+                                    <span className="truncate">{item.childLabel}</span>
+                                  </div>
+                                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 rounded-full px-1.5 py-0.5 flex-shrink-0">{item.cat.rows.length}</span>
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    });
+                  })()}
                 </nav>
               </div>
 
