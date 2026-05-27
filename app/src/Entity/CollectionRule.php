@@ -54,6 +54,9 @@ class CollectionRule
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $conditionTree = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -89,5 +92,8 @@ class CollectionRule
     public function setTranslations(?array $v): static { $this->translations = $v; return $this; }
     public function getConditionTree(): ?array { return $this->conditionTree; }
     public function setConditionTree(?array $v): static { $this->conditionTree = $v; return $this; }
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

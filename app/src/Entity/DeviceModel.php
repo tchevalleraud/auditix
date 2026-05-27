@@ -46,6 +46,9 @@ class DeviceModel
     #[ORM\JoinTable(name: 'device_model_collection_rule')]
     private Collection $manualRules;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -55,6 +58,10 @@ class DeviceModel
         $this->manualRules = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
     }
+
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
 
     public function getId(): ?int
     {

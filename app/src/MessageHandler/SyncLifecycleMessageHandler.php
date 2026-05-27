@@ -8,6 +8,7 @@ use App\Entity\ProductRange;
 use App\Entity\VendorPlugin;
 use App\Message\RecalculateNodeScoreMessage;
 use App\Message\SyncLifecycleMessage;
+use App\Plugin\Capability\ProvidesLifecycleData;
 use App\Plugin\VendorPluginRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Mercure\HubInterface;
@@ -99,6 +100,10 @@ class SyncLifecycleMessageHandler
         $plugin = $this->pluginRegistry->get($pluginIdentifier);
         if (!$plugin) {
             return ['synced' => 0, 'error' => "Plugin '$pluginIdentifier' not found"];
+        }
+
+        if (!$plugin instanceof ProvidesLifecycleData) {
+            return ['synced' => 0, 'error' => "Plugin '$pluginIdentifier' does not provide lifecycle data"];
         }
 
         // Get plugin config from database

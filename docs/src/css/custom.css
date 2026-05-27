@@ -1018,6 +1018,112 @@ code {
   margin-bottom: 5rem;
 }
 
+/* ---------- Feature page · Examples gallery ---------- */
+.ax-feature-page__examples {
+  margin-top: 5rem;
+}
+
+.ax-examples {
+  display: flex;
+  flex-direction: column;
+  gap: 4rem;
+  margin-top: 2rem;
+}
+
+.ax-example {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 3rem;
+  align-items: center;
+}
+
+.ax-example--reversed .ax-example__copy {
+  order: 2;
+}
+
+.ax-example--reversed .ax-example__media {
+  order: 1;
+}
+
+.ax-example__title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.75rem;
+  color: var(--ifm-heading-color);
+  letter-spacing: -0.01em;
+}
+
+.ax-example__description {
+  font-size: 1rem;
+  color: var(--ax-slate-500);
+  line-height: 1.65;
+  margin: 0;
+}
+
+[data-theme='dark'] .ax-example__description {
+  color: var(--ax-slate-300);
+}
+
+.ax-example__frame {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--ifm-toc-border-color);
+  background: var(--ifm-background-color);
+  box-shadow: 0 18px 40px -20px rgba(15, 23, 42, 0.25);
+}
+
+.ax-example__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--ax-slate-100);
+  border-bottom: 1px solid var(--ifm-toc-border-color);
+}
+
+[data-theme='dark'] .ax-example__bar {
+  background: var(--ax-slate-900);
+}
+
+.ax-example__dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+}
+
+.ax-example__dot:nth-child(1) { background: #ff5f56; }
+.ax-example__dot:nth-child(2) { background: #ffbd2e; }
+.ax-example__dot:nth-child(3) { background: #27c93f; }
+
+.ax-example__bar-title {
+  margin-left: 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--ax-slate-500);
+}
+
+.ax-example__shot {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--ax-slate-100);
+}
+
+[data-theme='dark'] .ax-example__shot {
+  background: var(--ax-slate-900);
+}
+
+.ax-example__shot img,
+.ax-example__shot svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+}
+
 @media (max-width: 996px) {
   .ax-feature-page__intro {
     grid-template-columns: 1fr;
@@ -1025,6 +1131,15 @@ code {
   }
   .ax-feature-page__copy { order: 2; }
   .ax-feature-page__media { order: 1; }
+
+  .ax-example {
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+  }
+  .ax-example__copy,
+  .ax-example--reversed .ax-example__copy { order: 2; }
+  .ax-example__media,
+  .ax-example--reversed .ax-example__media { order: 1; }
 }
 
 /* ---------- Changelog page ---------- */

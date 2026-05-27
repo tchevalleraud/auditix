@@ -17,6 +17,7 @@ import {
   KeyRound,
   ListTodo,
   Mail,
+  Package,
   Radio,
   ScrollText,
   Settings,
@@ -62,6 +63,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       { label: t("settings.tabMonitoring"), tab: "monitoring", icon: Activity },
       { label: t("settings.tabVulnerability"), tab: "vulnerability", icon: ShieldAlert },
       { label: t("settings.tabSystemUpdates"), tab: "systemUpdates", icon: Wrench },
+      { label: t("settings.tabVendorPlugins"), tab: "vendorPlugins", icon: Package },
       { label: t("settings.tabNodeColumns"), tab: "nodeColumns", icon: Columns3 },
     ];
     if (current && !current.isDefault) {
@@ -93,6 +95,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           { label: t("sidebar.mailServers"), href: "/settings/global/mail", icon: Mail },
           { label: t("sidebar.syslogServers"), href: "/settings/global/syslog", icon: Radio },
           { label: t("sidebar.llmProviders"), href: "/settings/global/llm-providers", icon: Bot },
+          { label: t("sidebar.vendorPlugins"), href: "/settings/global/vendor-plugins", icon: Package },
         ],
       });
     }

@@ -89,7 +89,8 @@
     "llmProviders": "LLM providers",
     "audit": "Audit log",
     "nginx": "NGINX",
-    "workers": "Workers"
+    "workers": "Workers",
+    "vendorPlugins": "Vendor plugins"
   },
   "topbar": {
     "backToContext": "Back to context",
@@ -336,10 +337,12 @@
     "vulnerabilityWeight": "Vulnerability weight",
     "systemUpdateWeight": "System updates weight",
     "tabSystemUpdates": "System Updates",
+    "tabVendorPlugins": "Vendor plugins",
     "systemUpdateEnabled": "Enable system updates scoring",
     "systemUpdateEnabledHelp": "Evaluate equipment lifecycle status (version currency, end-of-sale/support/life)",
     "pluginsTitle": "Vendor plugins",
     "pluginsHelp": "Plugins automatically fetch lifecycle data from equipment vendors",
+    "pluginsMovedHelp": "Plugin activation and configuration moved to its own tab.",
     "pluginEnabled": "Enabled",
     "pluginDisabled": "Disabled",
     "pluginSyncNow": "Sync",
@@ -4055,5 +4058,50 @@
     "approvalPayloadLabel": "Data that would be sent to the LLM",
     "approveSend": "Send to LLM",
     "rejectSend": "Don't send"
+  },
+  "vendorPlugins": {
+    "title": "Vendor plugins",
+    "subtitle": "Upload and manage Vendor Plugins (commands, extraction rules, lifecycle data) for this Auditix instance.",
+    "dropHint": "Drag & drop a plugin .zip here, or choose a file (max 50 MB).",
+    "chooseFile": "Choose file",
+    "uploadFailed": "Upload failed.",
+    "uninstallFailed": "Uninstall failed.",
+    "errZipOnly": "Only .zip archives are accepted.",
+    "errTooLarge": "Archive too large (max 50 MB).",
+    "empty": "No plugin installed.",
+    "colPlugin": "Plugin",
+    "colSignature": "Signature",
+    "colCapabilities": "Capabilities",
+    "colInstalled": "Installed",
+    "sigOfficial": "Official",
+    "sigCommunity": "Community",
+    "sigInvalid": "Invalid",
+    "confirmTitle": "Install plugin from unknown source",
+    "confirmBody1": "This plugin will run arbitrary PHP code with full access to your Auditix instance and its database.",
+    "confirmBody2": "Only install plugins from sources you trust. Official plugins are signed and verified automatically — community plugins are not.",
+    "confirmFile": "File",
+    "confirmInstall": "I understand — install",
+    "export": "Export as ZIP"
+  },
+  "pluginConfig": {
+    "title": "Configure plugin",
+    "button": "Configure",
+    "saving": "Saving…",
+    "saveFailed": "Failed to save configuration.",
+    "empty": "This plugin has no configuration options."
+  },
+  "vendorPluginsCtx": {
+    "title": "Vendor plugins in this context",
+    "subtitle": "Enable, configure and sync vendor plugins for this context. Installation is shared across all contexts.",
+    "manageInstall": "Manage installations",
+    "empty": "No plugin installed on this instance yet.",
+    "installFirst": "Install one →",
+    "enable": "Enable in this context",
+    "disable": "Disable in this context",
+    "toggleFailed": "Toggle failed.",
+    "supports": "Supports",
+    "lastSync": "Last sync",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…"
   }
 }

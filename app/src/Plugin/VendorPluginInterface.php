@@ -2,36 +2,39 @@
 
 namespace App\Plugin;
 
-use App\Entity\Context;
-
+/**
+ * Interface de base d'un Vendor Plugin.
+ *
+ * Toutes les fonctionnalités étendues (lifecycle, commandes, règles, page de config)
+ * sont exposées via des interfaces séparées dans App\Plugin\Capability\.
+ * Un plugin n'implémente que les capabilities qu'il fournit.
+ */
 interface VendorPluginInterface
 {
     /**
-     * Unique identifier, e.g. "extreme_networks".
+     * Identifiant unique du plugin (kebab-case, [a-z0-9-]+).
      */
     public function getIdentifier(): string;
 
     /**
-     * Human-readable name, e.g. "Extreme Networks".
+     * Version sémantique du plugin (semver).
+     */
+    public function getVersion(): string;
+
+    /**
+     * Nom lisible affiché dans l'UI.
      */
     public function getDisplayName(): string;
 
     /**
-     * Manufacturer names this plugin can handle (used for auto-matching).
+     * Description courte affichée dans l'UI.
+     */
+    public function getDescription(): string;
+
+    /**
+     * Noms d'éditeurs (manufacturer) couverts par ce plugin (matching auto avec Editor.name).
      *
      * @return string[]
      */
     public function getSupportedManufacturers(): array;
-
-    /**
-     * Fetch lifecycle data for product ranges from vendor sources.
-     *
-     * @return LifecycleData[]
-     */
-    public function fetchLifecycleData(Context $context, array $config = []): array;
-
-    /**
-     * JSON-schema-like array describing the configuration fields this plugin expects.
-     */
-    public function getConfigurationSchema(): array;
 }

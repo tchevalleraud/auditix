@@ -1,0 +1,14 @@
+# Ed25519 public keys trusted to sign "official" Vendor Plugins.
+#
+# Each entry:
+#   - key_id      : opaque identifier matched against plugin.yaml > signature.key_id
+#   - algorithm   : only "ed25519" is supported in v1
+#   - public_key  : base64-encoded 32-byte Ed25519 public key
+#
+# Plugins signed with a key listed here are marked `official` on install.
+# Plugins signed with an unknown key are rejected at install time.
+# Plugins with no signature at all are marked `community` (with a confirmation
+# screen on install) — they are NOT rejected.
+#
+# Generate a fresh keypair with: php bin/console app:plugin:keygen
+keys: []

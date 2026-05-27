@@ -26,6 +26,9 @@ class Editor
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private ?Context $context = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -33,6 +36,10 @@ class Editor
     {
         $this->createdAt = new \DateTimeImmutable();
     }
+
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
 
     public function getId(): ?int
     {

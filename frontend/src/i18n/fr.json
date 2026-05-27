@@ -89,7 +89,8 @@
     "llmProviders": "Fournisseurs LLM",
     "audit": "Journal d'audit",
     "nginx": "NGINX",
-    "workers": "Workers"
+    "workers": "Workers",
+    "vendorPlugins": "Plugins vendor"
   },
   "topbar": {
     "backToContext": "Retour au contexte",
@@ -1112,6 +1113,7 @@
     "tabMembers": "Membres",
     "tabVulnerability": "Vulnerabilites",
     "tabSystemUpdates": "Mises a jour",
+    "tabVendorPlugins": "Plugins vendor",
     "tabLab": "Lab",
     "labTitle": "Page publique Lab",
     "labDesc": "Activez une page publique pour permettre aux etudiants de valider la configuration de leur lab",
@@ -1162,8 +1164,9 @@
     "systemUpdateWeight": "Poids mises a jour",
     "systemUpdateEnabled": "Activer le scoring des mises a jour",
     "systemUpdateEnabledHelp": "Evalue le cycle de vie des equipements (version, fin de commercialisation/support/vie)",
-    "pluginsTitle": "Plugins constructeur",
+    "pluginsTitle": "Plugins vendor",
     "pluginsHelp": "Les plugins recuperent automatiquement les donnees de cycle de vie aupres des constructeurs",
+    "pluginsMovedHelp": "L'activation et la configuration des plugins ont leur propre onglet maintenant.",
     "pluginEnabled": "Active",
     "pluginDisabled": "Desactive",
     "pluginSyncNow": "Synchroniser",
@@ -4027,5 +4030,50 @@
     "approvalPayloadLabel": "Données qui seraient envoyées au LLM",
     "approveSend": "Envoyer au LLM",
     "rejectSend": "Ne pas envoyer"
+  },
+  "vendorPlugins": {
+    "title": "Plugins vendor",
+    "subtitle": "Uploadez et gérez les plugins vendor (commandes, règles d'extraction, données de cycle de vie) de cette instance Auditix.",
+    "dropHint": "Glissez-déposez ici un .zip de plugin, ou choisissez un fichier (max 50 Mo).",
+    "chooseFile": "Choisir un fichier",
+    "uploadFailed": "Échec de l'upload.",
+    "uninstallFailed": "Échec de la désinstallation.",
+    "errZipOnly": "Seules les archives .zip sont acceptées.",
+    "errTooLarge": "Archive trop volumineuse (max 50 Mo).",
+    "empty": "Aucun plugin installé.",
+    "colPlugin": "Plugin",
+    "colSignature": "Signature",
+    "colCapabilities": "Capabilités",
+    "colInstalled": "Installé le",
+    "sigOfficial": "Officiel",
+    "sigCommunity": "Communautaire",
+    "sigInvalid": "Invalide",
+    "confirmTitle": "Installer un plugin de source inconnue",
+    "confirmBody1": "Ce plugin exécutera du code PHP arbitraire avec un accès complet à votre instance Auditix et à sa base de données.",
+    "confirmBody2": "N'installez que des plugins issus de sources de confiance. Les plugins officiels sont signés et vérifiés automatiquement — pas les plugins communautaires.",
+    "confirmFile": "Fichier",
+    "confirmInstall": "J'ai compris — installer",
+    "export": "Exporter en ZIP"
+  },
+  "pluginConfig": {
+    "title": "Configurer le plugin",
+    "button": "Configurer",
+    "saving": "Enregistrement…",
+    "saveFailed": "Échec de l'enregistrement de la configuration.",
+    "empty": "Ce plugin n'a aucune option de configuration."
+  },
+  "vendorPluginsCtx": {
+    "title": "Plugins vendor pour ce contexte",
+    "subtitle": "Activez, configurez et synchronisez les plugins vendor pour ce contexte. L'installation est partagée entre tous les contextes.",
+    "manageInstall": "Gérer les installations",
+    "empty": "Aucun plugin installé sur cette instance.",
+    "installFirst": "En installer un →",
+    "enable": "Activer dans ce contexte",
+    "disable": "Désactiver dans ce contexte",
+    "toggleFailed": "Échec du changement d'état.",
+    "supports": "Compatible avec",
+    "lastSync": "Dernière synchro",
+    "syncNow": "Synchroniser",
+    "syncing": "Synchronisation…"
   }
 }

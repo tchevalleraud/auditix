@@ -152,8 +152,8 @@ export default function Home(): React.JSX.Element {
           })}
           imageTitle="AI Assistant"
           cta={{
-            label: translate({id: 'landing.spot.ai.cta', message: 'Read the AI guide'}),
-            to: '/guide/ai/overview',
+            label: translate({id: 'landing.spot.ai.cta', message: 'Discover the AI assistant'}),
+            to: '/features/ai-assistant',
           }}
         />
 
@@ -175,8 +175,8 @@ export default function Home(): React.JSX.Element {
           })}
           imageTitle="Topology"
           cta={{
-            label: translate({id: 'landing.spot.topology.cta', message: 'Explore the topology guide'}),
-            to: '/guide/topology/overview',
+            label: translate({id: 'landing.spot.topology.cta', message: 'Discover live topology'}),
+            to: '/features/topology',
           }}
         />
 
@@ -198,8 +198,8 @@ export default function Home(): React.JSX.Element {
           })}
           imageTitle="Collections"
           cta={{
-            label: translate({id: 'landing.spot.collection.cta', message: 'See collection rules'}),
-            to: '/guide/collections/commands',
+            label: translate({id: 'landing.spot.collection.cta', message: 'Discover automated collection'}),
+            to: '/features/collection',
           }}
         />
 
@@ -221,8 +221,8 @@ export default function Home(): React.JSX.Element {
           })}
           imageTitle="Compliance"
           cta={{
-            label: translate({id: 'landing.spot.compliance.cta', message: 'Open the compliance guide'}),
-            to: '/guide/compliance/rules',
+            label: translate({id: 'landing.spot.compliance.cta', message: 'Discover the compliance engine'}),
+            to: '/features/compliance',
           }}
         />
 
@@ -244,8 +244,8 @@ export default function Home(): React.JSX.Element {
           })}
           imageTitle="Report"
           cta={{
-            label: translate({id: 'landing.spot.reports.cta', message: 'Read the reports guide'}),
-            to: '/guide/reports/creating',
+            label: translate({id: 'landing.spot.reports.cta', message: 'Discover PDF & mail reports'}),
+            to: '/features/reports',
           }}
         />
 
@@ -264,7 +264,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.monitoring.desc',
                 message: 'An audit means watching the gear. Continuous SNMP / SSH monitoring keeps every device under observation so you catch drift before it becomes an incident.',
               })}
-              to="/guide/monitoring"
+              to="/features/monitoring"
             />
             <FeatureCard
               title={translate({id: 'landing.more.lifecycle.title', message: 'Lifecycle tracking'})}
@@ -272,7 +272,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.lifecycle.desc',
                 message: 'Dynamically pull EoS / EoSM / EoL data from your vendors. Know when hardware retires and plan replacements with a clean budget timeline.',
               })}
-              to="/guide/inventory/lifecycle"
+              to="/features/lifecycle"
             />
             <FeatureCard
               title={translate({id: 'landing.more.scalable.title', message: 'Docker-native & scalable'})}
@@ -280,7 +280,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.scalable.desc',
                 message: 'Container-first architecture that scales horizontally — when the workload spikes, new worker services spin up to meet demand.',
               })}
-              to="/getting-started/architecture"
+              to="/features/scalable"
             />
             <FeatureCard
               title={translate({id: 'landing.more.multitenant.title', message: 'Multi-tenant'})}
@@ -288,7 +288,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.multitenant.desc',
                 message: 'Running audits for several clients? Strict tenant isolation via contexts — one instance, many customers, no data crossover.',
               })}
-              to="/admin/contexts"
+              to="/features/multi-tenant"
             />
             <FeatureCard
               title={translate({id: 'landing.more.labs.title', message: 'Labs for teaching'})}
@@ -296,6 +296,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.labs.desc',
                 message: 'Teaching the solution? Auditix can verify a student has the right configuration on each lab before moving on — saves you time and gives participants full autonomy.',
               })}
+              to="/features/labs"
             />
             <FeatureCard
               title={translate({id: 'landing.more.backup.title', message: 'Backup & import'})}
@@ -303,6 +304,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.backup.desc',
                 message: 'Back up part or all of your instance as modular JSON files — and re-import them just as easily into another environment.',
               })}
+              to="/features/backup"
             />
             <FeatureCard
               title={translate({id: 'landing.more.auth.title', message: 'Auth & SSO'})}
@@ -310,7 +312,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.auth.desc',
                 message: 'Multi-provider OIDC, TOTP 2FA and internal password policy. Plug Auditix into your existing IdP in minutes.',
               })}
-              to="/admin/authentication/oidc"
+              to="/features/auth-sso"
               footer={<ProviderLogos />}
             />
             <FeatureCard
@@ -319,7 +321,7 @@ export default function Home(): React.JSX.Element {
                 id: 'landing.more.api.desc',
                 message: 'A fully open API v1 to drive Auditix from your automation pipelines, ITSM or CI workflows.',
               })}
-              to="/api/overview"
+              to="/features/api"
             />
           </FeatureGrid>
         </section>

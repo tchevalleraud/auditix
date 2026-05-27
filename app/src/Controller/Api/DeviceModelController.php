@@ -33,6 +33,7 @@ class DeviceModelController extends AbstractController
             'connectionScript' => $m->getConnectionScript(),
             'sendCtrlChar' => $m->getSendCtrlChar(),
             'nvdKeyword' => $m->getNvdKeyword(),
+            'managedByPlugin' => $m->getManagedByPlugin(),
             'createdAt' => $m->getCreatedAt()->format('c'),
         ];
     }
@@ -143,6 +144,9 @@ class DeviceModelController extends AbstractController
     public function update(DeviceModel $model, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
+        if ($model->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This device model is managed by the "%s" plugin. Disable the plugin to remove or modify it.', $model->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
         $data = json_decode($request->getContent(), true);
 
         $name = $data['name'] ?? '';
@@ -198,6 +202,9 @@ class DeviceModelController extends AbstractController
     public function delete(DeviceModel $model, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $model);
+        if ($model->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This device model is managed by the "%s" plugin. Disable the plugin to remove it.', $model->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
         $em->remove($model);
         $em->flush();
 

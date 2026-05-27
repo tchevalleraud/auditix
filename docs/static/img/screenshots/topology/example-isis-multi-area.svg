@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="ISIS multi-area placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+    </pattern>
+    <pattern id="zebra" patternUnits="userSpaceOnUse" width="20" height="20" patternTransform="rotate(45)">
+      <rect width="10" height="20" fill="#6366f1"/>
+      <rect x="10" width="10" height="20" fill="#ec4899"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <!-- Area hulls -->
+  <ellipse cx="380" cy="380" rx="260" ry="180" fill="rgba(99,102,241,0.18)" stroke="#6366f1" stroke-width="2" stroke-dasharray="6 4"/>
+  <ellipse cx="900" cy="380" rx="260" ry="180" fill="rgba(236,72,153,0.18)" stroke="#ec4899" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="240" y="240" font-size="22" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="#a5b4fc">Area 1</text>
+  <text x="980" y="240" font-size="22" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="#f9a8d4">Area 2</text>
+  <!-- Intra-area edges (solid) -->
+  <g fill="none" stroke-width="3">
+    <line x1="300" y1="340" x2="460" y2="340" stroke="#6366f1"/>
+    <line x1="300" y1="340" x2="380" y2="460" stroke="#6366f1"/>
+    <line x1="460" y1="340" x2="380" y2="460" stroke="#6366f1"/>
+    <line x1="820" y1="340" x2="980" y2="340" stroke="#ec4899"/>
+    <line x1="820" y1="340" x2="900" y2="460" stroke="#ec4899"/>
+    <line x1="980" y1="340" x2="900" y2="460" stroke="#ec4899"/>
+  </g>
+  <!-- Zebra cross-area L1L2 edges -->
+  <g stroke="url(#zebra)" stroke-width="8" fill="none">
+    <line x1="460" y1="340" x2="820" y2="340"/>
+    <line x1="380" y1="460" x2="900" y2="460"/>
+  </g>
+  <!-- Nodes -->
+  <g fill="#a5b4fc" stroke="white" stroke-width="2">
+    <circle cx="300" cy="340" r="14"/>
+    <circle cx="460" cy="340" r="14"/>
+    <circle cx="380" cy="460" r="14"/>
+  </g>
+  <g fill="#f9a8d4" stroke="white" stroke-width="2">
+    <circle cx="820" cy="340" r="14"/>
+    <circle cx="980" cy="340" r="14"/>
+    <circle cx="900" cy="460" r="14"/>
+  </g>
+  <text x="640" y="650" text-anchor="middle" font-size="40" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="white">ISIS multi-area</text>
+  <text x="640" y="688" text-anchor="middle" font-size="18" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.75)">Replace with example-isis-multi-area.gif</text>
+</svg>

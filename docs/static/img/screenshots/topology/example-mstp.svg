@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="MSTP overlay placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4338ca"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <!-- MSTI picker chip -->
+  <g transform="translate(60 60)">
+    <rect width="220" height="56" rx="12" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.4)"/>
+    <text x="20" y="36" font-size="20" font-family="Inter, system-ui, sans-serif" fill="white" font-weight="600">MSTI 10</text>
+    <text x="180" y="36" font-size="20" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.6)">▾</text>
+  </g>
+  <!-- Tree edges (active) -->
+  <g fill="none" stroke="white" stroke-width="3">
+    <line x1="640" y1="220" x2="380" y2="380"/>
+    <line x1="640" y1="220" x2="900" y2="380"/>
+    <line x1="380" y1="380" x2="260" y2="520"/>
+    <line x1="380" y1="380" x2="500" y2="520"/>
+    <line x1="900" y1="380" x2="780" y2="520"/>
+    <line x1="900" y1="380" x2="1020" y2="520"/>
+  </g>
+  <!-- Alternate / blocked edges -->
+  <g fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="2" stroke-dasharray="8 6">
+    <line x1="500" y1="520" x2="780" y2="520"/>
+    <line x1="260" y1="520" x2="380" y2="380"/>
+  </g>
+  <!-- Blocked port markers -->
+  <g fill="#ef4444" stroke="white" stroke-width="2">
+    <circle cx="640" cy="520" r="9"/>
+  </g>
+  <!-- Root bridge crown -->
+  <g>
+    <circle cx="640" cy="220" r="26" fill="white"/>
+    <text x="640" y="228" text-anchor="middle" font-size="22" font-family="Inter, system-ui, sans-serif" fill="#4338ca" font-weight="700">★</text>
+  </g>
+  <!-- Other nodes -->
+  <g fill="white">
+    <circle cx="380" cy="380" r="18"/>
+    <circle cx="900" cy="380" r="18"/>
+    <circle cx="260" cy="520" r="14"/>
+    <circle cx="500" cy="520" r="14"/>
+    <circle cx="780" cy="520" r="14"/>
+    <circle cx="1020" cy="520" r="14"/>
+  </g>
+  <text x="640" y="650" text-anchor="middle" font-size="40" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="white">MSTP overlay</text>
+  <text x="640" y="688" text-anchor="middle" font-size="18" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.75)">Replace with example-mstp.gif</text>
+</svg>

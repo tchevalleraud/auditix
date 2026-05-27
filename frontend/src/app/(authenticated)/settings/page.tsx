@@ -17,8 +17,11 @@ import {
   Copy,
   Trash2,
   Key,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { NodeColumnsTab } from "@/components/NodeColumnsTab";
+import { PluginConfigureModal, type ConfigurationSchema } from "@/components/PluginConfigureModal";
+import { VendorPluginsContextual } from "@/components/VendorPluginsContextual";
 
 interface ContextUser {
   id: number;
@@ -65,17 +68,17 @@ interface ApiTokenItem {
   expired: boolean;
 }
 
-type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "nodeColumns" | "members" | "lab" | "aiAssistant" | "apiTokens";
+type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "vendorPlugins" | "nodeColumns" | "members" | "lab" | "aiAssistant" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "nodeColumns", "members", "lab", "aiAssistant", "apiTokens"] as const;
+const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "vendorPlugins", "nodeColumns", "members", "lab", "aiAssistant", "apiTokens"] as const;
 const isValidTab = (v: string | null): v is TabKey => !!v && (VALID_TABS as readonly string[]).includes(v);
 
 export default function SettingsPage() {
   const { t } = useI18n();
-  const { current, reload } = useAppContext();
+  const { current, reload, userRoles } = useAppContext();
   const searchParams = useSearchParams();
   // Tab state is driven by ?tab=… so the vertical nav in the layout can deep-link
   // to a section. Falls back to "general" when the param is missing or unknown.
@@ -947,13 +950,22 @@ export default function SettingsPage() {
 
           </div>
 
-          {/* Vendor plugins */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
+          {/* Vendor plugins moved out — link to the dedicated tab */}
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t("settings.pluginsTitle")}</h2>
-            <p className="text-sm text-slate-500 dark:text-slate-400">{t("settings.pluginsHelp")}</p>
-            <PluginManager contextId={current?.id} t={t} plugins={plugins} setPlugins={setPlugins} pluginSyncing={pluginSyncing} setPluginSyncing={setPluginSyncing} />
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("settings.pluginsMovedHelp")}</p>
+            <Link
+              href="/settings?tab=vendorPlugins"
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 dark:text-slate-200 hover:underline"
+            >
+              {t("settings.tabVendorPlugins")} →
+            </Link>
           </div>
         </form>
+      )}
+
+      {tab === "vendorPlugins" && (
+        <VendorPluginsContextual contextId={current?.id} t={t} isAdmin={userRoles.includes("ROLE_ADMIN")} />
       )}
 
       {tab === "nodeColumns" && current && (
@@ -1806,15 +1818,30 @@ function AiModelPicker({
 
 /* ─── Plugin Manager ─── */
 
+interface PluginInfo {
+  identifier: string;
+  version?: string;
+  displayName: string;
+  description?: string;
+  supportedManufacturers?: string[];
+  capabilities?: string[];
+  configurationSchema?: ConfigurationSchema | null;
+  configuration?: Record<string, unknown> | null;
+  enabled: boolean;
+  lastSyncAt?: string | null;
+  lastSyncStatus?: string | null;
+}
+
 function PluginManager({ contextId, t, plugins, setPlugins, pluginSyncing, setPluginSyncing }: {
   contextId: number | undefined;
   t: (k: string, v?: Record<string, string>) => string;
-  plugins: any[];
-  setPlugins: (p: any[]) => void;
+  plugins: PluginInfo[];
+  setPlugins: (p: PluginInfo[]) => void;
   pluginSyncing: string | null;
   setPluginSyncing: (s: string | null) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
+  const [configuring, setConfiguring] = useState<PluginInfo | null>(null);
 
   useEffect(() => {
     if (!contextId || loaded) return;
@@ -1842,37 +1869,90 @@ function PluginManager({ contextId, t, plugins, setPlugins, pluginSyncing, setPl
     setTimeout(() => setPluginSyncing(null), 3000);
   };
 
+  const saveConfiguration = async (identifier: string, configuration: Record<string, unknown>) => {
+    const res = await fetch(`/api/plugins/${identifier}?context=${contextId}`, {
+      method: "PUT", credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configuration }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error((err as { error?: string }).error ?? t("pluginConfig.saveFailed"));
+    }
+    setPlugins(plugins.map((p) => p.identifier === identifier ? { ...p, configuration } : p));
+  };
+
+  const hasConfigSchema = (p: PluginInfo) => {
+    const fields = p.configurationSchema?.fields;
+    return Array.isArray(fields) && fields.length > 0;
+  };
+
   if (!loaded) return <div className="text-sm text-slate-400">...</div>;
   if (plugins.length === 0) return <p className="text-sm text-slate-400">{t("settings.pluginNoPlugins")}</p>;
 
   return (
-    <div className="divide-y divide-slate-100 dark:divide-slate-800">
-      {plugins.map((plugin) => (
-        <div key={plugin.identifier} className="flex items-center justify-between py-3">
-          <div>
-            <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{plugin.displayName}</span>
-            <span className="ml-2 text-xs text-slate-400">{plugin.supportedManufacturers?.join(", ")}</span>
-            {plugin.lastSyncAt && (
-              <p className="text-xs text-slate-400 mt-0.5">
-                {t("settings.pluginLastSync", { date: new Date(plugin.lastSyncAt).toLocaleString() })}
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => togglePlugin(plugin.identifier, !plugin.enabled)}
-              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${plugin.enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}>
-              <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${plugin.enabled ? "translate-x-5" : "translate-x-1"}`} />
-            </button>
-            {plugin.enabled && (
-              <button onClick={() => syncPlugin(plugin.identifier)}
-                disabled={pluginSyncing === plugin.identifier}
-                className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50">
-                {pluginSyncing === plugin.identifier ? t("settings.pluginSyncing") : t("settings.pluginSyncNow")}
+    <>
+      <div className="divide-y divide-slate-100 dark:divide-slate-800">
+        {plugins.map((plugin) => (
+          <div key={plugin.identifier} className="flex items-center justify-between py-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{plugin.displayName}</span>
+                {plugin.version && (
+                  <span className="text-[10px] font-medium text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-200 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-700 rounded-full px-2 py-0.5">
+                    v{plugin.version}
+                  </span>
+                )}
+                {(plugin.capabilities ?? []).map((c) => (
+                  <span key={c} className="text-[10px] font-medium text-slate-500 bg-slate-100 ring-1 ring-inset ring-slate-200 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-700 rounded-full px-2 py-0.5">
+                    {c}
+                  </span>
+                ))}
+              </div>
+              {plugin.supportedManufacturers && plugin.supportedManufacturers.length > 0 && (
+                <p className="text-xs text-slate-400 mt-0.5">{plugin.supportedManufacturers.join(", ")}</p>
+              )}
+              {plugin.lastSyncAt && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {t("settings.pluginLastSync", { date: new Date(plugin.lastSyncAt).toLocaleString() })}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button type="button" onClick={() => togglePlugin(plugin.identifier, !plugin.enabled)}
+                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${plugin.enabled ? "bg-emerald-500" : "bg-slate-300 dark:bg-slate-600"}`}>
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${plugin.enabled ? "translate-x-5" : "translate-x-1"}`} />
               </button>
-            )}
+              {hasConfigSchema(plugin) && (
+                <button onClick={() => setConfiguring(plugin)}
+                  title={t("pluginConfig.title")}
+                  className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 inline-flex items-center gap-1">
+                  <SettingsIcon className="h-3 w-3" />
+                  {t("pluginConfig.button")}
+                </button>
+              )}
+              {plugin.enabled && (
+                <button onClick={() => syncPlugin(plugin.identifier)}
+                  disabled={pluginSyncing === plugin.identifier}
+                  className="text-xs px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50">
+                  {pluginSyncing === plugin.identifier ? t("settings.pluginSyncing") : t("settings.pluginSyncNow")}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
-    </div>
+        ))}
+      </div>
+      <PluginConfigureModal
+        open={configuring !== null}
+        pluginName={configuring?.displayName ?? ""}
+        schema={configuring?.configurationSchema ?? null}
+        value={configuring?.configuration ?? null}
+        onClose={() => setConfiguring(null)}
+        onSave={async (cfg) => {
+          if (configuring) await saveConfiguration(configuring.identifier, cfg);
+        }}
+        t={t}
+      />
+    </>
   );
 }

@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Topology layouts placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <!-- Layout switcher -->
+  <g transform="translate(60 60)">
+    <rect width="380" height="56" rx="12" fill="rgba(255,255,255,0.1)" stroke="rgba(255,255,255,0.3)"/>
+    <rect x="8" y="8" width="92" height="40" rx="8" fill="#6366f1"/>
+    <text x="54" y="34" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="white" font-weight="600">cose</text>
+    <text x="146" y="34" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.7)">dagre</text>
+    <text x="238" y="34" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.7)">concentric</text>
+    <text x="330" y="34" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.7)">manual</text>
+  </g>
+  <!-- Three mini layouts side-by-side -->
+  <!-- cose mesh -->
+  <g transform="translate(140 250)">
+    <text x="120" y="-20" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.6)" font-weight="600">cose</text>
+    <g fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2">
+      <line x1="120" y1="40" x2="50" y2="120"/>
+      <line x1="120" y1="40" x2="190" y2="120"/>
+      <line x1="50" y1="120" x2="120" y2="200"/>
+      <line x1="190" y1="120" x2="120" y2="200"/>
+      <line x1="120" y1="40" x2="120" y2="200"/>
+    </g>
+    <g fill="#a5b4fc" stroke="white" stroke-width="2">
+      <circle cx="120" cy="40" r="11"/>
+      <circle cx="50" cy="120" r="11"/>
+      <circle cx="190" cy="120" r="11"/>
+      <circle cx="120" cy="200" r="11"/>
+    </g>
+  </g>
+  <!-- dagre hierarchy -->
+  <g transform="translate(530 250)">
+    <text x="120" y="-20" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.6)" font-weight="600">dagre</text>
+    <g fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2">
+      <line x1="120" y1="40" x2="60" y2="120"/>
+      <line x1="120" y1="40" x2="180" y2="120"/>
+      <line x1="60" y1="120" x2="30" y2="200"/>
+      <line x1="60" y1="120" x2="90" y2="200"/>
+      <line x1="180" y1="120" x2="150" y2="200"/>
+      <line x1="180" y1="120" x2="210" y2="200"/>
+    </g>
+    <g fill="#c4b5fd" stroke="white" stroke-width="2">
+      <circle cx="120" cy="40" r="11"/>
+      <circle cx="60" cy="120" r="11"/>
+      <circle cx="180" cy="120" r="11"/>
+      <circle cx="30" cy="200" r="9"/>
+      <circle cx="90" cy="200" r="9"/>
+      <circle cx="150" cy="200" r="9"/>
+      <circle cx="210" cy="200" r="9"/>
+    </g>
+  </g>
+  <!-- concentric star -->
+  <g transform="translate(920 250)">
+    <text x="120" y="-20" text-anchor="middle" font-size="16" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.6)" font-weight="600">concentric</text>
+    <g fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2">
+      <line x1="120" y1="120" x2="120" y2="40"/>
+      <line x1="120" y1="120" x2="40" y2="120"/>
+      <line x1="120" y1="120" x2="200" y2="120"/>
+      <line x1="120" y1="120" x2="120" y2="200"/>
+      <line x1="120" y1="120" x2="65" y2="70"/>
+      <line x1="120" y1="120" x2="175" y2="70"/>
+      <line x1="120" y1="120" x2="65" y2="170"/>
+      <line x1="120" y1="120" x2="175" y2="170"/>
+    </g>
+    <g fill="#fbcfe8" stroke="white" stroke-width="2">
+      <circle cx="120" cy="40" r="9"/>
+      <circle cx="40" cy="120" r="9"/>
+      <circle cx="200" cy="120" r="9"/>
+      <circle cx="120" cy="200" r="9"/>
+      <circle cx="65" cy="70" r="9"/>
+      <circle cx="175" cy="70" r="9"/>
+      <circle cx="65" cy="170" r="9"/>
+      <circle cx="175" cy="170" r="9"/>
+    </g>
+    <circle cx="120" cy="120" r="14" fill="#ec4899" stroke="white" stroke-width="2"/>
+  </g>
+  <text x="640" y="640" text-anchor="middle" font-size="40" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="white">Switch layout, save it</text>
+  <text x="640" y="678" text-anchor="middle" font-size="18" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.75)">Replace with example-layouts.gif</text>
+</svg>

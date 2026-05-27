@@ -38,6 +38,9 @@ class CollectionCommand
     #[ORM\ManyToMany(targetEntity: DeviceModel::class, mappedBy: 'manualCommands')]
     private Collection $models;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -62,5 +65,8 @@ class CollectionCommand
     public function setContext(Context $v): static { $this->context = $v; return $this; }
     /** @return Collection<int, DeviceModel> */
     public function getModels(): Collection { return $this->models; }
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

@@ -248,7 +248,7 @@
     "description": "Alt text for the AI spotlight image"
   },
   "landing.spot.ai.cta": {
-    "message": "Lire le guide IA",
+    "message": "Découvrir l'assistant IA",
     "description": "CTA of the AI spotlight"
   },
   "landing.spot.topology.title": {
@@ -264,7 +264,7 @@
     "description": "Alt text for the topology spotlight image"
   },
   "landing.spot.topology.cta": {
-    "message": "Découvrir le guide topologie",
+    "message": "Découvrir la topologie en direct",
     "description": "CTA of the topology spotlight"
   },
   "landing.spot.collection.title": {
@@ -280,7 +280,7 @@
     "description": "Alt text for the collection spotlight image"
   },
   "landing.spot.collection.cta": {
-    "message": "Voir les règles de collecte",
+    "message": "Découvrir la collecte automatisée",
     "description": "CTA of the collection spotlight"
   },
   "landing.spot.compliance.title": {
@@ -296,7 +296,7 @@
     "description": "Alt text for the compliance spotlight image"
   },
   "landing.spot.compliance.cta": {
-    "message": "Ouvrir le guide conformité",
+    "message": "Découvrir le moteur de conformité",
     "description": "CTA of the compliance spotlight"
   },
   "landing.spot.reports.title": {
@@ -312,7 +312,7 @@
     "description": "Alt text for the reports spotlight image"
   },
   "landing.spot.reports.cta": {
-    "message": "Lire le guide rapports",
+    "message": "Découvrir les rapports PDF & mail",
     "description": "CTA of the reports spotlight"
   },
   "landing.more.eyebrow": {
@@ -439,6 +439,58 @@
     "message": "LLM au choix : cloud (OpenAI, Anthropic, OpenRouter) ou on-prem (Ollama, endpoint compatible OpenAI)",
     "description": "AI Assistant bullet 5"
   },
+  "featurePage.ai-assistant.examplesHeading": {
+    "message": "En situation",
+    "description": "AI Assistant examples — section heading"
+  },
+  "featurePage.ai-assistant.example.q-and-a.barTitle": {
+    "message": "Assistant IA · Q&R",
+    "description": "AI Q&A example — frame title"
+  },
+  "featurePage.ai-assistant.example.q-and-a.title": {
+    "message": "Q&R ancrées sur vos données",
+    "description": "AI Q&A example — title"
+  },
+  "featurePage.ai-assistant.example.q-and-a.description": {
+    "message": "Posez la question en langage naturel et obtenez une réponse liée à vos collectes réelles. L'assistant appelle des outils en lecture seule pour rassembler le contexte, puis cite les équipements et lignes utilisés — vous pouvez recouper la source.",
+    "description": "AI Q&A example — description"
+  },
+  "featurePage.ai-assistant.example.q-and-a.image.alt": {
+    "message": "Q&R ancrées sur vos données",
+    "description": "AI Q&A example — image alt"
+  },
+  "featurePage.ai-assistant.example.payload-review.barTitle": {
+    "message": "Assistant IA · revue de payload",
+    "description": "AI payload review example — frame title"
+  },
+  "featurePage.ai-assistant.example.payload-review.title": {
+    "message": "Payloads validés par un humain",
+    "description": "AI payload review example — title"
+  },
+  "featurePage.ai-assistant.example.payload-review.description": {
+    "message": "Chaque appel LLM affiche le payload exact qui va partir — champs, valeurs, redactions. Approuvez, refusez ou ajustez ; rien ne quitte votre environnement sans un feu vert explicite.",
+    "description": "AI payload review example — description"
+  },
+  "featurePage.ai-assistant.example.payload-review.image.alt": {
+    "message": "Payloads validés par un humain",
+    "description": "AI payload review example — image alt"
+  },
+  "featurePage.ai-assistant.example.drafting.barTitle": {
+    "message": "Assistant IA · rédaction",
+    "description": "AI drafting example — frame title"
+  },
+  "featurePage.ai-assistant.example.drafting.title": {
+    "message": "Rédaction de politiques & paragraphes",
+    "description": "AI drafting example — title"
+  },
+  "featurePage.ai-assistant.example.drafting.description": {
+    "message": "Génère descriptions de politiques, structures de règles d'audit et paragraphes PDF depuis une consigne d'une ligne. Affinez sur place, acceptez le diff, le brouillon atterrit directement dans le formulaire que vous étiez en train de remplir.",
+    "description": "AI drafting example — description"
+  },
+  "featurePage.ai-assistant.example.drafting.image.alt": {
+    "message": "Rédaction de politiques & paragraphes",
+    "description": "AI drafting example — image alt"
+  },
   "featurePage.topology.title": {
     "message": "Topologie en direct",
     "description": "Topology feature page — title"
@@ -474,6 +526,58 @@
   "featurePage.topology.bullet.5": {
     "message": "Export topologie vers les rapports PDF et schémas embarquables",
     "description": "Topology bullet 5"
+  },
+  "featurePage.topology.examplesHeading": {
+    "message": "En situation",
+    "description": "Topology examples — section heading"
+  },
+  "featurePage.topology.example.mstp.barTitle": {
+    "message": "Topologie · surcouche MSTP",
+    "description": "Topology MSTP example — frame title"
+  },
+  "featurePage.topology.example.mstp.title": {
+    "message": "MSTP — un arbre par instance",
+    "description": "Topology MSTP example — title"
+  },
+  "featurePage.topology.example.mstp.description": {
+    "message": "Sélectionnez une MSTI dans le sélecteur d'instance et la carte reconstruit l'arbre couvrant élu : pont racine mis en avant, ports bloqués clairement marqués, chemins alternatifs grisés. Changez d'instance pour comparer la répartition de charge.",
+    "description": "Topology MSTP example — description"
+  },
+  "featurePage.topology.example.mstp.image.alt": {
+    "message": "MSTP — un arbre par instance",
+    "description": "Topology MSTP example — image alt"
+  },
+  "featurePage.topology.example.isis-multi-area.barTitle": {
+    "message": "Topologie · ISIS multi-aire",
+    "description": "Topology ISIS example — frame title"
+  },
+  "featurePage.topology.example.isis-multi-area.title": {
+    "message": "ISIS multi-aire — des aires visibles",
+    "description": "Topology ISIS example — title"
+  },
+  "featurePage.topology.example.isis-multi-area.description": {
+    "message": "Chaque aire ISIS devient un halo doux autour de ses routeurs. Les adjacences L1L2 qui traversent une frontière sont tracées en zébré avec les deux couleurs d'aires : la limite saute aux yeux sans surcharger la carte.",
+    "description": "Topology ISIS example — description"
+  },
+  "featurePage.topology.example.isis-multi-area.image.alt": {
+    "message": "ISIS multi-aire — des aires visibles",
+    "description": "Topology ISIS example — image alt"
+  },
+  "featurePage.topology.example.layouts.barTitle": {
+    "message": "Topologie · layouts",
+    "description": "Topology layouts example — frame title"
+  },
+  "featurePage.topology.example.layouts.title": {
+    "message": "Changez de layout, gardez celui qui parle",
+    "description": "Topology layouts example — title"
+  },
+  "featurePage.topology.example.layouts.description": {
+    "message": "Essayez cose pour un maillage générique, dagre pour une hiérarchie cœur-distribution-accès, concentric pour les étoiles — ou positionnez à la main et sauvegardez le layout par contexte. Auditix le restitue pour toute l'équipe du tenant.",
+    "description": "Topology layouts example — description"
+  },
+  "featurePage.topology.example.layouts.image.alt": {
+    "message": "Changez de layout, gardez celui qui parle",
+    "description": "Topology layouts example — image alt"
   },
   "featurePage.collection.title": {
     "message": "Collecte automatisée",
@@ -511,6 +615,58 @@
     "message": "Toutes les sources finissent dans le même jeu de données prêt pour l'audit",
     "description": "Collection bullet 5"
   },
+  "featurePage.collection.examplesHeading": {
+    "message": "En situation",
+    "description": "Collection examples — section heading"
+  },
+  "featurePage.collection.example.ssh-jobs.barTitle": {
+    "message": "Collecte · jobs SSH",
+    "description": "Collection SSH example — frame title"
+  },
+  "featurePage.collection.example.ssh-jobs.title": {
+    "message": "Collecte SSH planifiée",
+    "description": "Collection SSH example — title"
+  },
+  "featurePage.collection.example.ssh-jobs.description": {
+    "message": "Planifiez les jobs, suivez leur exécution et inspectez les lignes structurées produites — par commande, par équipement, par run. Les politiques de retry et de timeout empêchent les liens instables de casser l'audit.",
+    "description": "Collection SSH example — description"
+  },
+  "featurePage.collection.example.ssh-jobs.image.alt": {
+    "message": "Collecte SSH planifiée",
+    "description": "Collection SSH example — image alt"
+  },
+  "featurePage.collection.example.extraction-rules.barTitle": {
+    "message": "Collecte · règles d'extraction",
+    "description": "Collection extraction example — frame title"
+  },
+  "featurePage.collection.example.extraction-rules.title": {
+    "message": "Règles d'extraction réutilisables",
+    "description": "Collection extraction example — title"
+  },
+  "featurePage.collection.example.extraction-rules.description": {
+    "message": "Pointez les colonnes dans la sortie brute, normalisez-les dans le même jeu de données multi-constructeurs. Réutilisez la règle sur tous les équipements du même modèle — écrit une fois, audité partout.",
+    "description": "Collection extraction example — description"
+  },
+  "featurePage.collection.example.extraction-rules.image.alt": {
+    "message": "Règles d'extraction réutilisables",
+    "description": "Collection extraction example — image alt"
+  },
+  "featurePage.collection.example.manual-import.barTitle": {
+    "message": "Collecte · import manuel",
+    "description": "Collection manual import example — frame title"
+  },
+  "featurePage.collection.example.manual-import.title": {
+    "message": "Import manuel pour les sites isolés",
+    "description": "Collection manual import example — title"
+  },
+  "featurePage.collection.example.manual-import.description": {
+    "message": "Déposez un ZIP ou un CSV avec les sorties de commandes des équipements injoignables — sites air-gap, matériel tiers, snapshots de lab. Le pipeline d'extraction prend le relais et l'audit reste cohérent.",
+    "description": "Collection manual import example — description"
+  },
+  "featurePage.collection.example.manual-import.image.alt": {
+    "message": "Import manuel pour les sites isolés",
+    "description": "Collection manual import example — image alt"
+  },
   "featurePage.compliance.title": {
     "message": "Moteur de conformité",
     "description": "Compliance feature page — title"
@@ -546,6 +702,58 @@
   "featurePage.compliance.bullet.5": {
     "message": "Score de conformité par nœud, par politique, en temps réel",
     "description": "Compliance bullet 5"
+  },
+  "featurePage.compliance.examplesHeading": {
+    "message": "En situation",
+    "description": "Compliance examples — section heading"
+  },
+  "featurePage.compliance.example.visual-editor.barTitle": {
+    "message": "Conformité · éditeur de règles",
+    "description": "Compliance visual editor example — frame title"
+  },
+  "featurePage.compliance.example.visual-editor.title": {
+    "message": "Éditeur de règles visuel",
+    "description": "Compliance visual editor example — title"
+  },
+  "featurePage.compliance.example.visual-editor.description": {
+    "message": "Des blocs glisser-déposer composent une règle — conditions, comparaisons, groupes imbriqués. Pas de DSL à apprendre ; l'éditeur explique, en clair, ce que chaque branche évalue.",
+    "description": "Compliance visual editor example — description"
+  },
+  "featurePage.compliance.example.visual-editor.image.alt": {
+    "message": "Éditeur de règles visuel",
+    "description": "Compliance visual editor example — image alt"
+  },
+  "featurePage.compliance.example.policy-matrix.barTitle": {
+    "message": "Conformité · matrice",
+    "description": "Compliance policy matrix example — frame title"
+  },
+  "featurePage.compliance.example.policy-matrix.title": {
+    "message": "Matrice nœuds × politiques",
+    "description": "Compliance policy matrix example — title"
+  },
+  "featurePage.compliance.example.policy-matrix.description": {
+    "message": "Notez chaque nœud sur chaque politique dans une matrice unique, navigable. Cliquez sur une case rouge et vous atterrissez directement sur la règle en échec avec la ligne d'équipement qui l'a causée.",
+    "description": "Compliance policy matrix example — description"
+  },
+  "featurePage.compliance.example.policy-matrix.image.alt": {
+    "message": "Matrice nœuds × politiques",
+    "description": "Compliance policy matrix example — image alt"
+  },
+  "featurePage.compliance.example.exceptions.barTitle": {
+    "message": "Conformité · exceptions",
+    "description": "Compliance exceptions example — frame title"
+  },
+  "featurePage.compliance.example.exceptions.title": {
+    "message": "Gestion des exceptions de premier ordre",
+    "description": "Compliance exceptions example — title"
+  },
+  "featurePage.compliance.example.exceptions.description": {
+    "message": "Marquez un nœud comme exempté d'une règle avec un motif et une date d'expiration. Auditix trace qui a approuvé, quand l'exception se termine et la fait apparaître dans chaque rapport — entièrement auditée.",
+    "description": "Compliance exceptions example — description"
+  },
+  "featurePage.compliance.example.exceptions.image.alt": {
+    "message": "Gestion des exceptions de premier ordre",
+    "description": "Compliance exceptions example — image alt"
   },
   "featurePage.reports.title": {
     "message": "Rapports PDF & mail",
@@ -583,6 +791,58 @@
     "message": "AI Assist pour la rédaction des paragraphes dans n'importe quel bloc",
     "description": "Reports bullet 5"
   },
+  "featurePage.reports.examplesHeading": {
+    "message": "En situation",
+    "description": "Reports examples — section heading"
+  },
+  "featurePage.reports.example.block-editor.barTitle": {
+    "message": "Rapports · éditeur de blocs",
+    "description": "Reports block editor example — frame title"
+  },
+  "featurePage.reports.example.block-editor.title": {
+    "message": "Éditeur basé sur des blocs",
+    "description": "Reports block editor example — title"
+  },
+  "featurePage.reports.example.block-editor.description": {
+    "message": "Assemblez graphes, tables, widgets de lifecycle, snapshots de topologie et schémas personnalisés sur un canevas glisser-déposer. Réorganisez librement ; visualisez le PDF rendu à droite pendant que vous éditez à gauche.",
+    "description": "Reports block editor example — description"
+  },
+  "featurePage.reports.example.block-editor.image.alt": {
+    "message": "Éditeur basé sur des blocs",
+    "description": "Reports block editor example — image alt"
+  },
+  "featurePage.reports.example.themes-per-context.barTitle": {
+    "message": "Rapports · thèmes",
+    "description": "Reports themes example — frame title"
+  },
+  "featurePage.reports.example.themes-per-context.title": {
+    "message": "Un rapport, chaque marque",
+    "description": "Reports themes example — title"
+  },
+  "featurePage.reports.example.themes-per-context.description": {
+    "message": "Le même template s'affiche dans le thème de chaque tenant — logos, couleurs, polices, en-têtes, pieds de page. Vous êtes MSP ? Envoyez le même audit à tous vos clients sans refaire le rapport.",
+    "description": "Reports themes example — description"
+  },
+  "featurePage.reports.example.themes-per-context.image.alt": {
+    "message": "Un rapport, chaque marque",
+    "description": "Reports themes example — image alt"
+  },
+  "featurePage.reports.example.ai-paragraph.barTitle": {
+    "message": "Rapports · AI Assist",
+    "description": "Reports AI Assist example — frame title"
+  },
+  "featurePage.reports.example.ai-paragraph.title": {
+    "message": "AI Assist pour les paragraphes",
+    "description": "Reports AI Assist example — title"
+  },
+  "featurePage.reports.example.ai-paragraph.description": {
+    "message": "Sélectionnez un bloc et demandez à l'assistant de rédiger la prose autour des résultats — synthèse exécutive, recommandations, formulation du risque. Affinez sur place, acceptez le diff.",
+    "description": "Reports AI Assist example — description"
+  },
+  "featurePage.reports.example.ai-paragraph.image.alt": {
+    "message": "AI Assist pour les paragraphes",
+    "description": "Reports AI Assist example — image alt"
+  },
   "featurePage.monitoring.title": {
     "message": "Monitoring des équipements",
     "description": "Monitoring feature page — title"
@@ -618,6 +878,58 @@
   "featurePage.monitoring.bullet.5": {
     "message": "Alimente les dashboards et les blocs de rapport",
     "description": "Monitoring bullet 5"
+  },
+  "featurePage.monitoring.examplesHeading": {
+    "message": "En situation",
+    "description": "Monitoring examples — section heading"
+  },
+  "featurePage.monitoring.example.live-polling.barTitle": {
+    "message": "Monitoring · polling live",
+    "description": "Monitoring live polling example — frame title"
+  },
+  "featurePage.monitoring.example.live-polling.title": {
+    "message": "Polling SNMP & SSH en direct",
+    "description": "Monitoring live polling example — title"
+  },
+  "featurePage.monitoring.example.live-polling.description": {
+    "message": "CPU, mémoire, compteurs d'interface et profondeurs de file se rafraîchissent en continu aux côtés de vos données d'audit. Les graphes par équipement permettent de corréler la dérive de conformité avec la charge sous-jacente.",
+    "description": "Monitoring live polling example — description"
+  },
+  "featurePage.monitoring.example.live-polling.image.alt": {
+    "message": "Polling SNMP & SSH en direct",
+    "description": "Monitoring live polling example — image alt"
+  },
+  "featurePage.monitoring.example.thresholds.barTitle": {
+    "message": "Monitoring · seuils",
+    "description": "Monitoring thresholds example — frame title"
+  },
+  "featurePage.monitoring.example.thresholds.title": {
+    "message": "Alertes basées sur des seuils",
+    "description": "Monitoring thresholds example — title"
+  },
+  "featurePage.monitoring.example.thresholds.description": {
+    "message": "Étiquetez une métrique avec un niveau de gravité et Auditix déclenche un événement à la seconde où le seuil est franchi. Routez les alertes vers mail, webhook ou SIEM — aucun agent supplémentaire à installer.",
+    "description": "Monitoring thresholds example — description"
+  },
+  "featurePage.monitoring.example.thresholds.image.alt": {
+    "message": "Alertes basées sur des seuils",
+    "description": "Monitoring thresholds example — image alt"
+  },
+  "featurePage.monitoring.example.sensor-coverage.barTitle": {
+    "message": "Monitoring · capteurs",
+    "description": "Monitoring sensors example — frame title"
+  },
+  "featurePage.monitoring.example.sensor-coverage.title": {
+    "message": "Capteurs environnementaux",
+    "description": "Monitoring sensors example — title"
+  },
+  "featurePage.monitoring.example.sensor-coverage.description": {
+    "message": "Température, vitesse de ventilateurs et état des alimentations remontés depuis chaque équipement et stockés en time-series. Repérez une panne de ventilateur ou une baie chaude avant qu'elle ne force un remplacement matériel.",
+    "description": "Monitoring sensors example — description"
+  },
+  "featurePage.monitoring.example.sensor-coverage.image.alt": {
+    "message": "Capteurs environnementaux",
+    "description": "Monitoring sensors example — image alt"
   },
   "featurePage.lifecycle.title": {
     "message": "Suivi du cycle de vie",
@@ -655,6 +967,58 @@
     "message": "Branche les blocs de rapport PDF pour la planification budgétaire",
     "description": "Lifecycle bullet 5"
   },
+  "featurePage.lifecycle.examplesHeading": {
+    "message": "En situation",
+    "description": "Lifecycle examples — section heading"
+  },
+  "featurePage.lifecycle.example.freshness-score.barTitle": {
+    "message": "Lifecycle · fraîcheur",
+    "description": "Lifecycle freshness example — frame title"
+  },
+  "featurePage.lifecycle.example.freshness-score.title": {
+    "message": "Score de fraîcheur par équipement",
+    "description": "Lifecycle freshness example — title"
+  },
+  "featurePage.lifecycle.example.freshness-score.description": {
+    "message": "Chaque équipement reçoit un score du vert au rouge selon sa distance aux dates EoS, EoSM et EoL. Triez l'inventaire par score et vous repérez immédiatement les modèles à renouveler.",
+    "description": "Lifecycle freshness example — description"
+  },
+  "featurePage.lifecycle.example.freshness-score.image.alt": {
+    "message": "Score de fraîcheur par équipement",
+    "description": "Lifecycle freshness example — image alt"
+  },
+  "featurePage.lifecycle.example.vendor-coverage.barTitle": {
+    "message": "Lifecycle · couverture constructeur",
+    "description": "Lifecycle vendor coverage example — frame title"
+  },
+  "featurePage.lifecycle.example.vendor-coverage.title": {
+    "message": "Couverture constructeur d'un coup d'œil",
+    "description": "Lifecycle vendor coverage example — title"
+  },
+  "featurePage.lifecycle.example.vendor-coverage.description": {
+    "message": "Des vues agrégées par constructeur, modèle et site révèlent les grappes à risque très tôt — trois sites sur la même gamme de switches EoL, un parc de téléphones qui perd son support firmware au prochain trimestre.",
+    "description": "Lifecycle vendor coverage example — description"
+  },
+  "featurePage.lifecycle.example.vendor-coverage.image.alt": {
+    "message": "Couverture constructeur d'un coup d'œil",
+    "description": "Lifecycle vendor coverage example — image alt"
+  },
+  "featurePage.lifecycle.example.renewal-timeline.barTitle": {
+    "message": "Lifecycle · renouvellements",
+    "description": "Lifecycle renewals example — frame title"
+  },
+  "featurePage.lifecycle.example.renewal-timeline.title": {
+    "message": "Renouvellements anticipés sur des mois",
+    "description": "Lifecycle renewals example — title"
+  },
+  "featurePage.lifecycle.example.renewal-timeline.description": {
+    "message": "Une frise des retraits à venir, groupée par trimestre et par site. Déposez-la dans un bloc PDF et votre conversation budgétaire arrive pré-remplie avec les bons chiffres.",
+    "description": "Lifecycle renewals example — description"
+  },
+  "featurePage.lifecycle.example.renewal-timeline.image.alt": {
+    "message": "Renouvellements anticipés sur des mois",
+    "description": "Lifecycle renewals example — image alt"
+  },
   "featurePage.scalable.title": {
     "message": "Docker-native et scalable",
     "description": "Scalable feature page — title"
@@ -690,6 +1054,58 @@
   "featurePage.scalable.bullet.5": {
     "message": "Même image du homelab au MSP-scale",
     "description": "Scalable bullet 5"
+  },
+  "featurePage.scalable.examplesHeading": {
+    "message": "En situation",
+    "description": "Scalable examples — section heading"
+  },
+  "featurePage.scalable.example.compose-up.barTitle": {
+    "message": "Scalable · compose",
+    "description": "Scalable compose example — frame title"
+  },
+  "featurePage.scalable.example.compose-up.title": {
+    "message": "docker compose up",
+    "description": "Scalable compose example — title"
+  },
+  "featurePage.scalable.example.compose-up.description": {
+    "message": "Un seul fichier compose lance toute la stack — Postgres, Redis, API, UI, workers. Du clone au premier audit en moins de dix minutes ; même image sur un homelab et un rack MSP.",
+    "description": "Scalable compose example — description"
+  },
+  "featurePage.scalable.example.compose-up.image.alt": {
+    "message": "docker compose up",
+    "description": "Scalable compose example — image alt"
+  },
+  "featurePage.scalable.example.worker-pool.barTitle": {
+    "message": "Scalable · pool de workers",
+    "description": "Scalable worker pool example — frame title"
+  },
+  "featurePage.scalable.example.worker-pool.title": {
+    "message": "Workers horizontalement scalables",
+    "description": "Scalable worker pool example — title"
+  },
+  "featurePage.scalable.example.worker-pool.description": {
+    "message": "Ajoutez un réplica worker et le débit suit — pas d'état partagé à gérer. Collectez 5 000 équipements en rafale un dimanche, redescendez à un rythme stable le lundi.",
+    "description": "Scalable worker pool example — description"
+  },
+  "featurePage.scalable.example.worker-pool.image.alt": {
+    "message": "Workers horizontalement scalables",
+    "description": "Scalable worker pool example — image alt"
+  },
+  "featurePage.scalable.example.behind-lb.barTitle": {
+    "message": "Scalable · load balancer",
+    "description": "Scalable LB example — frame title"
+  },
+  "featurePage.scalable.example.behind-lb.title": {
+    "message": "Tiers sans état derrière un LB",
+    "description": "Scalable LB example — title"
+  },
+  "featurePage.scalable.example.behind-lb.description": {
+    "message": "API et UI sont sans état — répliquez-les, routez selon la santé, encaissez les pics. Apportez vos propres Postgres et Redis et la même release tourne d'une seule VM à un déploiement multi-nœuds.",
+    "description": "Scalable LB example — description"
+  },
+  "featurePage.scalable.example.behind-lb.image.alt": {
+    "message": "Tiers sans état derrière un LB",
+    "description": "Scalable LB example — image alt"
   },
   "featurePage.multi-tenant.title": {
     "message": "Multi-tenant",
@@ -727,6 +1143,58 @@
     "message": "Même workflow que vous ayez 2 ou 200 tenants",
     "description": "Multi-tenant bullet 5"
   },
+  "featurePage.multi-tenant.examplesHeading": {
+    "message": "En situation",
+    "description": "Multi-tenant examples — section heading"
+  },
+  "featurePage.multi-tenant.example.context-switcher.barTitle": {
+    "message": "Multi-tenant · sélecteur",
+    "description": "Multi-tenant context switcher example — frame title"
+  },
+  "featurePage.multi-tenant.example.context-switcher.title": {
+    "message": "Sélecteur de contexte en un clic",
+    "description": "Multi-tenant context switcher example — title"
+  },
+  "featurePage.multi-tenant.example.context-switcher.description": {
+    "message": "Changez de tenant en un clic et toute l'UI suit — nœuds, politiques, thèmes, rapports. Pas de risque d'éditer le client A en regardant le client B ; la navigation rend le contexte actif évident.",
+    "description": "Multi-tenant context switcher example — description"
+  },
+  "featurePage.multi-tenant.example.context-switcher.image.alt": {
+    "message": "Sélecteur de contexte en un clic",
+    "description": "Multi-tenant context switcher example — image alt"
+  },
+  "featurePage.multi-tenant.example.white-label.barTitle": {
+    "message": "Multi-tenant · thèmes",
+    "description": "Multi-tenant white-label example — frame title"
+  },
+  "featurePage.multi-tenant.example.white-label.title": {
+    "message": "Thèmes PDF en marque blanche",
+    "description": "Multi-tenant white-label example — title"
+  },
+  "featurePage.multi-tenant.example.white-label.description": {
+    "message": "Chaque contexte possède son thème — logo, palette, polices, pieds de page. Même template de rapport, rendu parfaitement brandé par client. Onboarder un nouveau tenant se résume à uploader un thème, pas à refaire le design.",
+    "description": "Multi-tenant white-label example — description"
+  },
+  "featurePage.multi-tenant.example.white-label.image.alt": {
+    "message": "Thèmes PDF en marque blanche",
+    "description": "Multi-tenant white-label example — image alt"
+  },
+  "featurePage.multi-tenant.example.scoped-tokens.barTitle": {
+    "message": "Multi-tenant · tokens API",
+    "description": "Multi-tenant scoped tokens example — frame title"
+  },
+  "featurePage.multi-tenant.example.scoped-tokens.title": {
+    "message": "Tokens API scopés par contexte",
+    "description": "Multi-tenant scoped tokens example — title"
+  },
+  "featurePage.multi-tenant.example.scoped-tokens.description": {
+    "message": "Les tokens API sont liés à un seul contexte. Un script d'automatisation ne peut pas lire ou écrire par erreur dans le mauvais tenant — token, journal d'audit et isolation des données sont alignés.",
+    "description": "Multi-tenant scoped tokens example — description"
+  },
+  "featurePage.multi-tenant.example.scoped-tokens.image.alt": {
+    "message": "Tokens API scopés par contexte",
+    "description": "Multi-tenant scoped tokens example — image alt"
+  },
   "featurePage.labs.title": {
     "message": "Labs pour l'enseignement",
     "description": "Labs feature page — title"
@@ -762,6 +1230,58 @@
   "featurePage.labs.bullet.5": {
     "message": "Libère les formateurs de la revue manuelle des configurations",
     "description": "Labs bullet 5"
+  },
+  "featurePage.labs.examplesHeading": {
+    "message": "En situation",
+    "description": "Labs examples — section heading"
+  },
+  "featurePage.labs.example.lab-targets.barTitle": {
+    "message": "Labs · cibles",
+    "description": "Labs targets example — frame title"
+  },
+  "featurePage.labs.example.lab-targets.title": {
+    "message": "Cibles de lab en règles de conformité",
+    "description": "Labs targets example — title"
+  },
+  "featurePage.labs.example.lab-targets.description": {
+    "message": "Définissez ce qu'est une configuration « correcte » avec le même éditeur de règles qui pilote les audits. Une aire OSPF fonctionnelle, une ACL propre, un iBGP en pleine maille — exprimée une fois, validée sur chaque étudiant.",
+    "description": "Labs targets example — description"
+  },
+  "featurePage.labs.example.lab-targets.image.alt": {
+    "message": "Cibles de lab en règles de conformité",
+    "description": "Labs targets example — image alt"
+  },
+  "featurePage.labs.example.live-validation.barTitle": {
+    "message": "Labs · validation",
+    "description": "Labs validation example — frame title"
+  },
+  "featurePage.labs.example.live-validation.title": {
+    "message": "Validation par étudiant en temps réel",
+    "description": "Labs validation example — title"
+  },
+  "featurePage.labs.example.live-validation.description": {
+    "message": "L'équipement de chaque étudiant est évalué en continu. Si la règle passe, l'indicateur devient vert ; sinon, la condition en échec est affichée — les étudiants savent exactement quoi corriger sans attendre le formateur.",
+    "description": "Labs validation example — description"
+  },
+  "featurePage.labs.example.live-validation.image.alt": {
+    "message": "Validation par étudiant en temps réel",
+    "description": "Labs validation example — image alt"
+  },
+  "featurePage.labs.example.progression-gating.barTitle": {
+    "message": "Labs · progression",
+    "description": "Labs progression example — frame title"
+  },
+  "featurePage.labs.example.progression-gating.title": {
+    "message": "Progression conditionnée par la validation",
+    "description": "Labs progression example — title"
+  },
+  "featurePage.labs.example.progression-gating.description": {
+    "message": "L'étape 2 se déverrouille à la seconde où l'étape 1 passe. Les étudiants avancent à leur rythme, les formateurs cessent de courir après les captures de configuration et la promo finit à l'heure sans correction tardive.",
+    "description": "Labs progression example — description"
+  },
+  "featurePage.labs.example.progression-gating.image.alt": {
+    "message": "Progression conditionnée par la validation",
+    "description": "Labs progression example — image alt"
   },
   "featurePage.backup.title": {
     "message": "Sauvegarde & import",
@@ -799,6 +1319,58 @@
     "message": "Même format pour amorcer les instances de lab et de démo",
     "description": "Backup bullet 5"
   },
+  "featurePage.backup.examplesHeading": {
+    "message": "En situation",
+    "description": "Backup examples — section heading"
+  },
+  "featurePage.backup.example.json-export.barTitle": {
+    "message": "Backup · export JSON",
+    "description": "Backup JSON export example — frame title"
+  },
+  "featurePage.backup.example.json-export.title": {
+    "message": "Export JSON modulaire",
+    "description": "Backup JSON export example — title"
+  },
+  "featurePage.backup.example.json-export.description": {
+    "message": "Sélectionnez les familles d'objets que vous voulez — nœuds, politiques, thèmes, tokens, schémas — et Auditix produit un tarball propre à ranger sur un object storage, dans un git ou dans votre plan de DR.",
+    "description": "Backup JSON export example — description"
+  },
+  "featurePage.backup.example.json-export.image.alt": {
+    "message": "Export JSON modulaire",
+    "description": "Backup JSON export example — image alt"
+  },
+  "featurePage.backup.example.seed-instance.barTitle": {
+    "message": "Backup · réimport",
+    "description": "Backup seed instance example — frame title"
+  },
+  "featurePage.backup.example.seed-instance.title": {
+    "message": "Amorcer une instance fraîche",
+    "description": "Backup seed instance example — title"
+  },
+  "featurePage.backup.example.seed-instance.description": {
+    "message": "Réimportez le JSON dans n'importe quel environnement — lab, démo, plan de reprise, nouvelle région. Même workflow que vous restauriez un tenant ou que vous dupliquiez toute la plateforme.",
+    "description": "Backup seed instance example — description"
+  },
+  "featurePage.backup.example.seed-instance.image.alt": {
+    "message": "Amorcer une instance fraîche",
+    "description": "Backup seed instance example — image alt"
+  },
+  "featurePage.backup.example.version-safe.barTitle": {
+    "message": "Backup · sécurité de version",
+    "description": "Backup version safety example — frame title"
+  },
+  "featurePage.backup.example.version-safe.title": {
+    "message": "Étiquetés par version pour la sécurité",
+    "description": "Backup version safety example — title"
+  },
+  "featurePage.backup.example.version-safe.description": {
+    "message": "Chaque export porte une version de schéma. Le réimport refuse un payload incompatible plutôt que de le corrompre silencieusement, et Auditix vous indique quelle migration appliquer d'abord.",
+    "description": "Backup version safety example — description"
+  },
+  "featurePage.backup.example.version-safe.image.alt": {
+    "message": "Étiquetés par version pour la sécurité",
+    "description": "Backup version safety example — image alt"
+  },
   "featurePage.auth-sso.title": {
     "message": "Authentification & SSO",
     "description": "Auth SSO feature page — title"
@@ -835,6 +1407,58 @@
     "message": "Piste d'audit sur chaque événement d'authentification",
     "description": "Auth SSO bullet 5"
   },
+  "featurePage.auth-sso.examplesHeading": {
+    "message": "En situation",
+    "description": "Auth SSO examples — section heading"
+  },
+  "featurePage.auth-sso.example.oidc-login.barTitle": {
+    "message": "Auth · OIDC",
+    "description": "Auth OIDC example — frame title"
+  },
+  "featurePage.auth-sso.example.oidc-login.title": {
+    "message": "OIDC contre votre IdP",
+    "description": "Auth OIDC example — title"
+  },
+  "featurePage.auth-sso.example.oidc-login.description": {
+    "message": "Microsoft Entra ID, Google Workspace, Okta, Auth0, Keycloak — n'importe quel provider compatible. Connexion brandée, mapping groupes → rôles, provisioning JIT. Câblé une fois, votre équipe se connecte avec son identité existante.",
+    "description": "Auth OIDC example — description"
+  },
+  "featurePage.auth-sso.example.oidc-login.image.alt": {
+    "message": "OIDC contre votre IdP",
+    "description": "Auth OIDC example — image alt"
+  },
+  "featurePage.auth-sso.example.totp-enrollment.barTitle": {
+    "message": "Auth · TOTP 2FA",
+    "description": "Auth TOTP example — frame title"
+  },
+  "featurePage.auth-sso.example.totp-enrollment.title": {
+    "message": "Enrôlement TOTP 2FA",
+    "description": "Auth TOTP example — title"
+  },
+  "featurePage.auth-sso.example.totp-enrollment.description": {
+    "message": "Les comptes locaux peuvent opter pour le TOTP — scannez le QR avec n'importe quelle app d'authentification, vous êtes protégé. La politique de mot de passe interne impose longueur, complexité et rotation aux identifiants on-prem.",
+    "description": "Auth TOTP example — description"
+  },
+  "featurePage.auth-sso.example.totp-enrollment.image.alt": {
+    "message": "Enrôlement TOTP 2FA",
+    "description": "Auth TOTP example — image alt"
+  },
+  "featurePage.auth-sso.example.token-scoping.barTitle": {
+    "message": "Auth · scoping des tokens",
+    "description": "Auth token scoping example — frame title"
+  },
+  "featurePage.auth-sso.example.token-scoping.title": {
+    "message": "Scoping des tokens par contexte",
+    "description": "Auth token scoping example — title"
+  },
+  "featurePage.auth-sso.example.token-scoping.description": {
+    "message": "Chaque token API est émis pour un seul contexte. Votre pipeline CI reçoit un token qui ne peut toucher que son tenant — pas de débordement, pas d'écriture accidentelle en production depuis un workflow de staging.",
+    "description": "Auth token scoping example — description"
+  },
+  "featurePage.auth-sso.example.token-scoping.image.alt": {
+    "message": "Scoping des tokens par contexte",
+    "description": "Auth token scoping example — image alt"
+  },
   "featurePage.api.title": {
     "message": "API REST ouverte",
     "description": "API feature page — title"
@@ -870,6 +1494,58 @@
   "featurePage.api.bullet.5": {
     "message": "Contrat stable sur toute la ligne 5.x",
     "description": "API bullet 5"
+  },
+  "featurePage.api.examplesHeading": {
+    "message": "En situation",
+    "description": "API examples — section heading"
+  },
+  "featurePage.api.example.swagger-ui.barTitle": {
+    "message": "API · Swagger UI",
+    "description": "API Swagger UI example — frame title"
+  },
+  "featurePage.api.example.swagger-ui.title": {
+    "message": "Swagger UI embarquée",
+    "description": "API Swagger UI example — title"
+  },
+  "featurePage.api.example.swagger-ui.description": {
+    "message": "Chaque instance embarque /api/docs nativement — parcourez les endpoints, les schémas, les paramètres, testez-les en direct avec votre token. Aucune doc externe à synchroniser ; la spec OpenAPI est générée depuis le code en cours d'exécution.",
+    "description": "API Swagger UI example — description"
+  },
+  "featurePage.api.example.swagger-ui.image.alt": {
+    "message": "Swagger UI embarquée",
+    "description": "API Swagger UI example — image alt"
+  },
+  "featurePage.api.example.token-auth.barTitle": {
+    "message": "API · authentification",
+    "description": "API token auth example — frame title"
+  },
+  "featurePage.api.example.token-auth.title": {
+    "message": "Authentification par token",
+    "description": "API token auth example — title"
+  },
+  "featurePage.api.example.token-auth.description": {
+    "message": "Envoyez un bearer token, recevez du JSON. Les tokens sont scopés par contexte, révocables en un clic et audités à chaque appel — une automatisation qui respecte les frontières des tenants par construction.",
+    "description": "API token auth example — description"
+  },
+  "featurePage.api.example.token-auth.image.alt": {
+    "message": "Authentification par token",
+    "description": "API token auth example — image alt"
+  },
+  "featurePage.api.example.ui-mirror.barTitle": {
+    "message": "API · parité UI",
+    "description": "API UI mirror example — frame title"
+  },
+  "featurePage.api.example.ui-mirror.title": {
+    "message": "Miroir UI ↔ API",
+    "description": "API UI mirror example — title"
+  },
+  "featurePage.api.example.ui-mirror.description": {
+    "message": "Tout ce que fait l'UI, un appel API le fait aussi. Zéro action cachée, zéro bouton « UI seulement » — pilotez Auditix depuis l'ITSM, la CI ou un script Python et obtenez exactement le même résultat.",
+    "description": "API UI mirror example — description"
+  },
+  "featurePage.api.example.ui-mirror.image.alt": {
+    "message": "Miroir UI ↔ API",
+    "description": "API UI mirror example — image alt"
   },
   "changelog.meta.title": {
     "message": "Changelog · Auditix",

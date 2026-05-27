@@ -3,8 +3,17 @@
 namespace App\Controller\Api;
 
 use App\Entity\Context;
+use App\Entity\InstalledPlugin;
 use App\Entity\VendorPlugin;
 use App\Message\SyncLifecycleMessage;
+use App\Plugin\Capability\ProvidesCommands;
+use App\Plugin\Capability\ProvidesConfigurationSchema;
+use App\Plugin\Capability\ProvidesDeviceModels;
+use App\Plugin\Capability\ProvidesExtractionRules;
+use App\Plugin\Capability\ProvidesLifecycleData;
+use App\Plugin\Capability\ProvidesManufacturers;
+use App\Plugin\PluginAssetsImporter;
+use App\Plugin\VendorPluginInterface;
 use App\Plugin\VendorPluginRegistry;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -19,6 +28,7 @@ class PluginController extends AbstractController
 {
     public function __construct(
         private readonly VendorPluginRegistry $pluginRegistry,
+        private readonly PluginAssetsImporter $assetsImporter,
     ) {}
 
     #[Route('', methods: ['GET'])]
@@ -29,32 +39,62 @@ class PluginController extends AbstractController
 
         $allPlugins = $this->pluginRegistry->all();
 
-        // Get database records for this context
+        // Activation records for this context
         $dbPlugins = $em->getRepository(VendorPlugin::class)->findBy(['context' => $contextId]);
         $dbMap = [];
         foreach ($dbPlugins as $vp) {
             $dbMap[$vp->getPluginIdentifier()] = $vp;
         }
 
+        // Global install metadata (signature status, etc.) — keyed by identifier
+        $installed = $em->getRepository(InstalledPlugin::class)->findAll();
+        $installedMap = [];
+        foreach ($installed as $ip) {
+            $installedMap[$ip->getIdentifier()] = $ip;
+        }
+
         $result = [];
         foreach ($allPlugins as $plugin) {
             $id = $plugin->getIdentifier();
             $dbRecord = $dbMap[$id] ?? null;
+            $installRecord = $installedMap[$id] ?? null;
 
             $result[] = [
                 'identifier' => $id,
+                'version' => $plugin->getVersion(),
                 'displayName' => $plugin->getDisplayName(),
+                'description' => $plugin->getDescription(),
                 'supportedManufacturers' => $plugin->getSupportedManufacturers(),
-                'configurationSchema' => $plugin->getConfigurationSchema(),
+                'capabilities' => $this->describeCapabilities($plugin),
+                'configurationSchema' => $plugin instanceof ProvidesConfigurationSchema
+                    ? $plugin->getConfigurationSchema()
+                    : [],
                 'enabled' => $dbRecord?->isEnabled() ?? false,
                 'configuration' => $dbRecord?->getConfiguration(),
                 'lastSyncAt' => $dbRecord?->getLastSyncAt()?->format('c'),
                 'lastSyncStatus' => $dbRecord?->getLastSyncStatus(),
                 'dbId' => $dbRecord?->getId(),
+                'signatureStatus' => $installRecord?->getSignatureStatus(),
+                'signatureKeyId' => $installRecord?->getSignatureKeyId(),
             ];
         }
 
         return $this->json($result);
+    }
+
+    /**
+     * @return string[]
+     */
+    private function describeCapabilities(VendorPluginInterface $plugin): array
+    {
+        $caps = [];
+        if ($plugin instanceof ProvidesManufacturers)        $caps[] = 'manufacturers';
+        if ($plugin instanceof ProvidesDeviceModels)         $caps[] = 'models';
+        if ($plugin instanceof ProvidesLifecycleData)        $caps[] = 'lifecycle';
+        if ($plugin instanceof ProvidesCommands)             $caps[] = 'commands';
+        if ($plugin instanceof ProvidesExtractionRules)      $caps[] = 'rules';
+        if ($plugin instanceof ProvidesConfigurationSchema)  $caps[] = 'configuration';
+        return $caps;
     }
 
     #[Route('/{identifier}', methods: ['PUT'])]
@@ -84,6 +124,7 @@ class PluginController extends AbstractController
             $em->persist($vp);
         }
 
+        $wasEnabled = $vp->isEnabled();
         if (array_key_exists('enabled', $data)) {
             $vp->setEnabled((bool) $data['enabled']);
         }
@@ -92,6 +133,13 @@ class PluginController extends AbstractController
         }
 
         $em->flush();
+
+        // Sync plugin assets (commands/rules) with activation state.
+        if (!$wasEnabled && $vp->isEnabled()) {
+            $this->assetsImporter->import($plugin, $context);
+        } elseif ($wasEnabled && !$vp->isEnabled()) {
+            $this->assetsImporter->remove($identifier, $context);
+        }
 
         return $this->json([
             'identifier' => $identifier,

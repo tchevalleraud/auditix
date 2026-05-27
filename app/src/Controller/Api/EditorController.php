@@ -26,6 +26,7 @@ class EditorController extends AbstractController
             'name' => $e->getName(),
             'description' => $e->getDescription(),
             'logo' => $e->getLogo() ? '/api/logos/' . $e->getLogo() : null,
+            'managedByPlugin' => $e->getManagedByPlugin(),
             'createdAt' => $e->getCreatedAt()->format('c'),
         ];
     }
@@ -116,6 +117,9 @@ class EditorController extends AbstractController
         SluggerInterface $slugger,
     ): JsonResponse {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $editor);
+        if ($editor->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This manufacturer is managed by the "%s" plugin. Disable the plugin to remove or modify it.', $editor->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
         $name = $request->request->get('name');
 
         if (empty($name)) {
@@ -167,6 +171,9 @@ class EditorController extends AbstractController
     public function delete(Editor $editor, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $editor);
+        if ($editor->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This manufacturer is managed by the "%s" plugin. Disable the plugin to remove it.', $editor->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
         $this->deleteLogoFile($editor);
 
         $em->remove($editor);

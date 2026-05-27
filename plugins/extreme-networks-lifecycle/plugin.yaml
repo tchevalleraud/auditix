@@ -1,0 +1,24 @@
+manifest_version: 1
+
+identifier: extreme-networks-lifecycle
+version: 1.0.0
+name: "Extreme Networks — Lifecycle"
+description: "Récupère les dates End of Sale / End of Support / End of Life pour les équipements Extreme Networks en scrappant les pages de compatibilité (Switch Engine / EXOS, Fabric Engine / VOSS, ERS) et les bulletins PDF officiels. Alimente le scoring System Updates d'Auditix."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/extreme-networks-lifecycle"
+license: "MIT"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\ExtremeNetworksLifecycle"
+  class: "ExtremeNetworksLifecyclePlugin"
+
+capabilities:
+  - lifecycle
+
+manufacturers:
+  - "Extreme Networks"
+  - "Extreme"

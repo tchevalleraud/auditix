@@ -1,0 +1,27 @@
+manifest_version: 1
+
+identifier: extreme-networks
+version: 1.0.0
+name: "Extreme Networks"
+description: "Catalogue Extreme Networks : manufacturer (logo + nom), modèles d'OS (Fabric Engine, Switch Engine, ERS, ISW), commandes et règles d'extraction d'exemple pour Fabric Engine. Ne récupère PAS les dates de cycle de vie — installer aussi 'extreme-networks-lifecycle' pour ça."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/extreme-networks"
+license: "MIT"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\ExtremeNetworks"
+  class: "ExtremeNetworksPlugin"
+
+capabilities:
+  - manufacturers
+  - models
+  - commands
+  - rules
+  - configuration
+
+manufacturers:
+  - "Extreme Networks"

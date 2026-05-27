@@ -5,8 +5,9 @@ import {translate} from '@docusaurus/Translate';
 import {useBaseUrlUtils} from '@docusaurus/useBaseUrl';
 import ThemedImage from '@theme/ThemedImage';
 import {findFeature} from '@site/src/data/features';
-import {FEATURE_CONTENT} from '@site/src/data/featuresContent';
+import {FEATURE_CONTENT, FeatureExample} from '@site/src/data/featuresContent';
 import FeaturePagePlaceholder from '@site/src/components/FeaturePagePlaceholder';
+import FeatureExamplePlaceholder from '@site/src/components/FeatureExamplePlaceholder';
 
 interface FeaturePageProps {
   slug: string;
@@ -50,6 +51,13 @@ export default function FeaturePage({slug}: FeaturePageProps): React.JSX.Element
   const bullets = content.bullets.map((fallback, idx) =>
     translate({id: `featurePage.${slug}.bullet.${idx + 1}`, message: fallback}),
   );
+
+  const examplesHeading = content.examplesHeading
+    ? translate({
+        id: `featurePage.${slug}.examplesHeading`,
+        message: content.examplesHeading,
+      })
+    : null;
 
   return (
     <Layout
@@ -144,9 +152,101 @@ export default function FeaturePage({slug}: FeaturePageProps): React.JSX.Element
           </ul>
         </section>
 
+        {content.examples && content.examples.length > 0 && examplesHeading && (
+          <FeaturePageExamples
+            slug={slug}
+            icon={meta.icon}
+            heading={examplesHeading}
+            examples={content.examples}
+            resolve={resolve}
+          />
+        )}
+
         <FeaturePageRelated currentSlug={slug} heading={otherFeaturesHeading} />
       </main>
     </Layout>
+  );
+}
+
+interface FeaturePageExamplesProps {
+  slug: string;
+  icon: string;
+  heading: string;
+  examples: FeatureExample[];
+  resolve: (s: string) => string;
+}
+
+function FeaturePageExamples({
+  slug,
+  icon,
+  heading,
+  examples,
+  resolve,
+}: FeaturePageExamplesProps): React.JSX.Element {
+  return (
+    <section className="ax-feature-page__examples">
+      <h2 className="ax-section-title">{heading}</h2>
+      <div className="ax-examples">
+        {examples.map((ex, idx) => {
+          const title = translate({
+            id: `featurePage.${slug}.example.${ex.id}.title`,
+            message: ex.title,
+          });
+          const description = translate({
+            id: `featurePage.${slug}.example.${ex.id}.description`,
+            message: ex.description,
+          });
+          const barTitle = translate({
+            id: `featurePage.${slug}.example.${ex.id}.barTitle`,
+            message: ex.barTitle,
+          });
+          const imageAlt = translate({
+            id: `featurePage.${slug}.example.${ex.id}.image.alt`,
+            message: ex.title,
+          });
+          const reversed = idx % 2 === 1;
+          const rowClass = `ax-example${reversed ? ' ax-example--reversed' : ''}`;
+          return (
+            <article key={ex.id} className={rowClass}>
+              <div className="ax-example__copy">
+                <h3 className="ax-example__title">{title}</h3>
+                <p className="ax-example__description">{description}</p>
+              </div>
+              <div className="ax-example__media">
+                <div className="ax-example__frame">
+                  <div className="ax-example__bar">
+                    <span className="ax-example__dot" />
+                    <span className="ax-example__dot" />
+                    <span className="ax-example__dot" />
+                    <span className="ax-example__bar-title">{barTitle}</span>
+                  </div>
+                  <div className="ax-example__shot">
+                    {ex.mediaSources ? (
+                      <ThemedImage
+                        alt={imageAlt}
+                        sources={{
+                          light: resolve(ex.mediaSources.light),
+                          dark: resolve(ex.mediaSources.dark),
+                        }}
+                      />
+                    ) : ex.media ? (
+                      <img alt={imageAlt} src={resolve(ex.media)} />
+                    ) : (
+                      <FeatureExamplePlaceholder
+                        slug={slug}
+                        icon={icon}
+                        title={title}
+                        exampleId={ex.id}
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
