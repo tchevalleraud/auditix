@@ -715,14 +715,25 @@ class AiAssistantController extends AbstractController
                     'role' => 'assistant',
                     'content' => $m->getContent() ?: '',
                     'tool_calls' => array_map(
-                        fn(array $c) => [
-                            'id' => $c['id'],
-                            'type' => 'function',
-                            'function' => [
-                                'name' => $c['name'],
-                                'arguments' => json_encode($c['arguments'] ?? new \stdClass()),
-                            ],
-                        ],
+                        function (array $c) {
+                            // OpenAI requires `arguments` to be a JSON object
+                            // string. json_decode('{}', true) → [], and
+                            // json_encode([]) → "[]" which the provider
+                            // rejects with a 400 "Provider returned error".
+                            // Force an empty / list-shaped payload to "{}".
+                            $args = $c['arguments'] ?? [];
+                            $argsJson = (is_array($args) && ($args === [] || array_is_list($args)))
+                                ? '{}'
+                                : json_encode($args, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                            return [
+                                'id' => $c['id'],
+                                'type' => 'function',
+                                'function' => [
+                                    'name' => $c['name'],
+                                    'arguments' => $argsJson === false ? '{}' : $argsJson,
+                                ],
+                            ];
+                        },
                         $calls,
                     ),
                 ];

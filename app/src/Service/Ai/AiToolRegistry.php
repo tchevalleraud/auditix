@@ -60,13 +60,13 @@ class AiToolRegistry
                                 'type' => 'boolean',
                                 'description' => 'When true, only nodes currently reachable (ping success) are returned.',
                             ],
-                            'minScore' => [
-                                'type' => 'number',
-                                'description' => 'Filter out nodes whose global score is below this threshold (0-100).',
-                            ],
-                            'maxScore' => [
-                                'type' => 'number',
-                                'description' => 'Filter out nodes whose global score is above this threshold (0-100). Useful to find weak nodes.',
+                            'grades' => [
+                                'type' => 'array',
+                                'description' => 'Only return nodes whose global grade is in this list. Grades are letters from A (best) to F (worst). Example: ["D","E","F"] to surface the weakest nodes.',
+                                'items' => [
+                                    'type' => 'string',
+                                    'enum' => ['A', 'B', 'C', 'D', 'E', 'F'],
+                                ],
                             ],
                         ],
                     ],
@@ -142,22 +142,28 @@ class AiToolRegistry
     {
         $limit = max(1, min(200, (int) ($args['limit'] ?? 50)));
         $reachableOnly = (bool) ($args['reachableOnly'] ?? false);
-        $minScore = isset($args['minScore']) ? (float) $args['minScore'] : null;
-        $maxScore = isset($args['maxScore']) ? (float) $args['maxScore'] : null;
+        $allowed = ['A', 'B', 'C', 'D', 'E', 'F'];
+        $grades = [];
+        if (isset($args['grades']) && is_array($args['grades'])) {
+            foreach ($args['grades'] as $g) {
+                $g = strtoupper((string) $g);
+                if (in_array($g, $allowed, true)) {
+                    $grades[] = $g;
+                }
+            }
+            $grades = array_values(array_unique($grades));
+        }
 
         $qb = $this->nodes->createQueryBuilder('n')
             ->where('n.context = :ctx')
             ->setParameter('ctx', $context)
-            ->orderBy('n.score', 'ASC')
+            ->orderBy('n.score', 'DESC')
             ->setMaxResults($limit);
         if ($reachableOnly) {
             $qb->andWhere('n.isReachable = true');
         }
-        if ($minScore !== null) {
-            $qb->andWhere('CAST(n.score AS DECIMAL) >= :minScore')->setParameter('minScore', $minScore);
-        }
-        if ($maxScore !== null) {
-            $qb->andWhere('CAST(n.score AS DECIMAL) <= :maxScore')->setParameter('maxScore', $maxScore);
+        if ($grades !== []) {
+            $qb->andWhere('n.score IN (:grades)')->setParameter('grades', $grades);
         }
         $nodes = $qb->getQuery()->getResult();
 
