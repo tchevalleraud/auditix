@@ -1,8 +1,10 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {useBaseUrlUtils} from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
 
 export interface CarouselSlide {
-  src: string;
+  src?: string;
+  sources?: {light: string; dark: string};
   alt: string;
   caption?: string;
   title?: string;
@@ -89,11 +91,18 @@ export default function ScreenshotCarousel({
               aria-label={`${i + 1} of ${total}`}
               aria-hidden={i !== index}
             >
-              <img
-                src={resolve(s.src)}
-                alt={s.alt}
-                loading={i === 0 ? 'eager' : 'lazy'}
-              />
+              {s.sources ? (
+                <ThemedImage
+                  alt={s.alt}
+                  sources={{light: resolve(s.sources.light), dark: resolve(s.sources.dark)}}
+                />
+              ) : s.src ? (
+                <img
+                  src={resolve(s.src)}
+                  alt={s.alt}
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                />
+              ) : null}
             </div>
           ))}
         </div>

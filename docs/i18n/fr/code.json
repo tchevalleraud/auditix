@@ -227,6 +227,835 @@
     "message": "API REST v1, authentification par token, Swagger UI livré avec chaque instance.",
     "description": "Description of the API reference card"
   },
+  "landing.spot.ai.eyebrow": {
+    "message": "Nouveau en 5.0",
+    "description": "Eyebrow of the AI spotlight"
+  },
+  "landing.spot.ai.title.start": {
+    "message": "Assistant IA — votre",
+    "description": "First part of the AI spotlight title"
+  },
+  "landing.spot.ai.title.accent": {
+    "message": "copilote réseau",
+    "description": "Gradient-accented end of the AI spotlight title"
+  },
+  "landing.spot.ai.desc": {
+    "message": "Interrogez votre réseau en langage naturel. Les outils sont en lecture seule et les données envoyées au LLM sont contrôlées par un humain, pour éviter toute fuite de données sensibles. L'assistant vous aide aussi à rédiger des documents et à créer vos règles d'audit. Branchez un LLM cloud (OpenAI, Anthropic, OpenRouter…) ou votre propre infrastructure IA on-prem (Ollama, endpoint compatible OpenAI…).",
+    "description": "Description of the AI spotlight"
+  },
+  "landing.spot.ai.alt": {
+    "message": "Panneau latéral de l'assistant IA répondant à une question sur le réseau",
+    "description": "Alt text for the AI spotlight image"
+  },
+  "landing.spot.ai.cta": {
+    "message": "Lire le guide IA",
+    "description": "CTA of the AI spotlight"
+  },
+  "landing.spot.topology.title": {
+    "message": "Topologie en direct",
+    "description": "Title of the topology spotlight"
+  },
+  "landing.spot.topology.desc": {
+    "message": "Une carte Cytoscape de votre infrastructure, construite à partir de vos collectes et des résultats de vos équipements. LLDP, STP, MSTP, OSPF, BGP ou ISIS — quelle que soit votre stack protocolaire, votre topologie est toujours à jour.",
+    "description": "Description of the topology spotlight"
+  },
+  "landing.spot.topology.alt": {
+    "message": "Carte de topologie en direct avec superpositions de protocoles",
+    "description": "Alt text for the topology spotlight image"
+  },
+  "landing.spot.topology.cta": {
+    "message": "Découvrir le guide topologie",
+    "description": "CTA of the topology spotlight"
+  },
+  "landing.spot.collection.title": {
+    "message": "Collecte automatisée",
+    "description": "Title of the collection spotlight"
+  },
+  "landing.spot.collection.desc": {
+    "message": "Récupérez les données nécessaires à l'audit de façon automatique en SSH ou via les API constructeur, extrayez les informations pertinentes et normalisez l'ensemble pour un usage simplifié dans vos audits. Un équipement injoignable, une mission off-site ? Aucun problème : importez les sorties de commandes directement et le pipeline fait le reste.",
+    "description": "Description of the collection spotlight"
+  },
+  "landing.spot.collection.alt": {
+    "message": "Pipeline de collecte planifié couvrant le parc",
+    "description": "Alt text for the collection spotlight image"
+  },
+  "landing.spot.collection.cta": {
+    "message": "Voir les règles de collecte",
+    "description": "CTA of the collection spotlight"
+  },
+  "landing.spot.compliance.title": {
+    "message": "Moteur de conformité",
+    "description": "Title of the compliance spotlight"
+  },
+  "landing.spot.compliance.desc": {
+    "message": "Un éditeur de règles visuel, des politiques qui s'appliquent à la demande, et une gestion des exceptions de premier ordre. RGPD, HIPAA, SOC 2, ISO 27001 — définissez vos exigences et restez conforme à chaque instant.",
+    "description": "Description of the compliance spotlight"
+  },
+  "landing.spot.compliance.alt": {
+    "message": "Matrice de conformité par politique et par nœud",
+    "description": "Alt text for the compliance spotlight image"
+  },
+  "landing.spot.compliance.cta": {
+    "message": "Ouvrir le guide conformité",
+    "description": "CTA of the compliance spotlight"
+  },
+  "landing.spot.reports.title": {
+    "message": "Rapports PDF & mail",
+    "description": "Title of the reports spotlight"
+  },
+  "landing.spot.reports.desc": {
+    "message": "Un éditeur graphique qui respecte votre charte. Les blocs s'adaptent dynamiquement aux résultats lorsque nécessaire — le rapport est toujours à jour, avec l'ensemble des éléments pertinents et des recommandations rédigées par l'IA.",
+    "description": "Description of the reports spotlight"
+  },
+  "landing.spot.reports.alt": {
+    "message": "Rapport PDF avec recommandations rédigées par l'IA",
+    "description": "Alt text for the reports spotlight image"
+  },
+  "landing.spot.reports.cta": {
+    "message": "Lire le guide rapports",
+    "description": "CTA of the reports spotlight"
+  },
+  "landing.more.eyebrow": {
+    "message": "Et bien plus",
+    "description": "Eyebrow of the secondary features section"
+  },
+  "landing.more.title": {
+    "message": "Pensé pour des workflows d'audit réels",
+    "description": "Title of the secondary features section"
+  },
+  "landing.more.monitoring.title": {
+    "message": "Monitoring des équipements",
+    "description": "Title of the monitoring secondary feature"
+  },
+  "landing.more.monitoring.desc": {
+    "message": "Un audit, c'est aussi surveiller le matériel. Auditix collecte en continu en SNMP / SSH pour garder l'œil sur chaque équipement et détecter les dérives avant qu'elles ne deviennent un incident.",
+    "description": "Description of the monitoring secondary feature"
+  },
+  "landing.more.lifecycle.title": {
+    "message": "Suivi du cycle de vie",
+    "description": "Title of the lifecycle secondary feature"
+  },
+  "landing.more.lifecycle.desc": {
+    "message": "Récupérez dynamiquement les informations de vos constructeurs (EoS / EoSM / EoL). Anticipez les fins de vie de votre matériel et planifiez vos investissements en toute sérénité.",
+    "description": "Description of the lifecycle secondary feature"
+  },
+  "landing.more.scalable.title": {
+    "message": "Docker-native et scalable",
+    "description": "Title of the scalable secondary feature"
+  },
+  "landing.more.scalable.desc": {
+    "message": "Une architecture container-first qui passe à l'échelle horizontalement — quand la charge augmente, de nouveaux services worker démarrent pour absorber la demande.",
+    "description": "Description of the scalable secondary feature"
+  },
+  "landing.more.multitenant.title": {
+    "message": "Multi-tenant",
+    "description": "Title of the multitenant secondary feature"
+  },
+  "landing.more.multitenant.desc": {
+    "message": "Vous êtes une société qui réalise des audits pour plusieurs clients ? Cloisonnement strict via les contextes — une seule instance, plusieurs clients, aucun risque de croisement de données.",
+    "description": "Description of the multitenant secondary feature"
+  },
+  "landing.more.labs.title": {
+    "message": "Labs pour l'enseignement",
+    "description": "Title of the labs secondary feature"
+  },
+  "landing.more.labs.desc": {
+    "message": "Vous enseignez ? Auditix vérifie que l'étudiant a la bonne configuration sur chaque lab avant de passer au suivant — gain de temps pour vous et autonomie totale pour les participants.",
+    "description": "Description of the labs secondary feature"
+  },
+  "landing.more.backup.title": {
+    "message": "Backup & import",
+    "description": "Title of the backup secondary feature"
+  },
+  "landing.more.backup.desc": {
+    "message": "Sauvegardez tout ou partie de votre instance sous forme de fichiers JSON modulaires — et réimportez-les aussi simplement dans un autre environnement.",
+    "description": "Description of the backup secondary feature"
+  },
+  "landing.more.auth.title": {
+    "message": "Authentification & SSO",
+    "description": "Title of the auth secondary feature"
+  },
+  "landing.more.auth.desc": {
+    "message": "OIDC multi-fournisseur, 2FA TOTP et politique de mot de passe interne. Branchez Auditix sur votre IdP existant en quelques minutes.",
+    "description": "Description of the auth secondary feature"
+  },
+  "landing.more.api.title": {
+    "message": "API REST ouverte",
+    "description": "Title of the API secondary feature"
+  },
+  "landing.more.api.desc": {
+    "message": "Une API v1 entièrement ouverte pour piloter Auditix depuis vos pipelines d'automatisation, votre ITSM ou vos workflows CI.",
+    "description": "Description of the API secondary feature"
+  },
+  "featurePage.common.eyebrow": {
+    "message": "Fonctionnalité Auditix",
+    "description": "Eyebrow shown above every feature page title"
+  },
+  "featurePage.common.bulletsHeading": {
+    "message": "Ce que vous pouvez faire",
+    "description": "Heading above the bullets block on a feature page"
+  },
+  "featurePage.common.otherFeaturesHeading": {
+    "message": "Autres fonctionnalités",
+    "description": "Heading above the related-features grid at the bottom of a feature page"
+  },
+  "featurePage.common.backHome": {
+    "message": "← Retour à toutes les fonctionnalités",
+    "description": "Secondary CTA back to the landing page"
+  },
+  "featurePage.ai-assistant.title": {
+    "message": "Assistant IA",
+    "description": "AI Assistant feature page — title"
+  },
+  "featurePage.ai-assistant.lead": {
+    "message": "Votre copilote réseau — nativement intégré.",
+    "description": "AI Assistant feature page — lead"
+  },
+  "featurePage.ai-assistant.body": {
+    "message": "Interrogez votre réseau en langage naturel et obtenez des réponses ancrées dans vos vraies données. Auditix expose un outillage strictement en lecture seule au LLM, et un contrôle humain vous permet de relire chaque payload avant qu'il ne quitte votre environnement. Au-delà du Q&A, l'assistant rédige les descriptions de politiques, les règles d'audit et les paragraphes de rapport — votre équipe gagne en vitesse sans rien céder sur ce que voit le modèle.",
+    "description": "AI Assistant feature page — body"
+  },
+  "featurePage.ai-assistant.cta": {
+    "message": "Lire le guide IA",
+    "description": "AI Assistant feature page — CTA"
+  },
+  "featurePage.ai-assistant.bullet.1": {
+    "message": "Q&A en langage naturel ancré sur vos données collectées",
+    "description": "AI Assistant bullet 1"
+  },
+  "featurePage.ai-assistant.bullet.2": {
+    "message": "Outils strictement en lecture seule — jamais d'action en écriture",
+    "description": "AI Assistant bullet 2"
+  },
+  "featurePage.ai-assistant.bullet.3": {
+    "message": "Validation humaine de chaque payload LLM, pas de fuite silencieuse",
+    "description": "AI Assistant bullet 3"
+  },
+  "featurePage.ai-assistant.bullet.4": {
+    "message": "Rédige descriptions de politiques, règles d'audit et paragraphes de rapport",
+    "description": "AI Assistant bullet 4"
+  },
+  "featurePage.ai-assistant.bullet.5": {
+    "message": "LLM au choix : cloud (OpenAI, Anthropic, OpenRouter) ou on-prem (Ollama, endpoint compatible OpenAI)",
+    "description": "AI Assistant bullet 5"
+  },
+  "featurePage.topology.title": {
+    "message": "Topologie en direct",
+    "description": "Topology feature page — title"
+  },
+  "featurePage.topology.lead": {
+    "message": "Votre réseau, cartographié depuis le terrain.",
+    "description": "Topology feature page — lead"
+  },
+  "featurePage.topology.body": {
+    "message": "Auditix construit une carte Cytoscape directement à partir de vos collectes — LLDP, STP, MSTP, OSPF, BGP ou ISIS. Chaque couche est calculée à partir de ce que les équipements remontent réellement, la carte reste donc alignée avec la réalité. Filtrez par protocole, basculez les superpositions, activez ou désactivez les instances MSTI et ajoutez des liens manuels là où la découverte automatique ne va pas.",
+    "description": "Topology feature page — body"
+  },
+  "featurePage.topology.cta": {
+    "message": "Ouvrir le guide topologie",
+    "description": "Topology feature page — CTA"
+  },
+  "featurePage.topology.bullet.1": {
+    "message": "Construite à partir de vos vraies collectes, pas d'un schéma statique",
+    "description": "Topology bullet 1"
+  },
+  "featurePage.topology.bullet.2": {
+    "message": "Multi-protocole : LLDP, STP, MSTP, OSPF, ISIS, BGP",
+    "description": "Topology bullet 2"
+  },
+  "featurePage.topology.bullet.3": {
+    "message": "Surcouches MSTI multi-instance pour la visibilité L2",
+    "description": "Topology bullet 3"
+  },
+  "featurePage.topology.bullet.4": {
+    "message": "Liens manuels pour combler les zones non couvertes",
+    "description": "Topology bullet 4"
+  },
+  "featurePage.topology.bullet.5": {
+    "message": "Export topologie vers les rapports PDF et schémas embarquables",
+    "description": "Topology bullet 5"
+  },
+  "featurePage.collection.title": {
+    "message": "Collecte automatisée",
+    "description": "Collection feature page — title"
+  },
+  "featurePage.collection.lead": {
+    "message": "De vos équipements à un jeu de données propre.",
+    "description": "Collection feature page — lead"
+  },
+  "featurePage.collection.body": {
+    "message": "Auditix récupère ce dont vous avez besoin en SSH ou via les API constructeur, et normalise le résultat en données structurées exploitables pour vos audits. Planifiez des jobs récurrents, construisez des règles d'extraction réutilisables et joignez plusieurs sources dans un même jeu de données. Off-site ou face à un équipement injoignable ? Déposez les sorties de commandes manuellement et le même pipeline prend le relais — l'audit reste cohérent.",
+    "description": "Collection feature page — body"
+  },
+  "featurePage.collection.cta": {
+    "message": "Voir les règles de collecte",
+    "description": "Collection feature page — CTA"
+  },
+  "featurePage.collection.bullet.1": {
+    "message": "Collecteurs SSH et API constructeur prêts à l'emploi",
+    "description": "Collection bullet 1"
+  },
+  "featurePage.collection.bullet.2": {
+    "message": "Règles d'extraction réutilisables avec jointures multi-sources",
+    "description": "Collection bullet 2"
+  },
+  "featurePage.collection.bullet.3": {
+    "message": "Exécutions planifiées avec retry et politiques de timeout",
+    "description": "Collection bullet 3"
+  },
+  "featurePage.collection.bullet.4": {
+    "message": "Import manuel ZIP / CSV pour les équipements off-site ou injoignables",
+    "description": "Collection bullet 4"
+  },
+  "featurePage.collection.bullet.5": {
+    "message": "Toutes les sources finissent dans le même jeu de données prêt pour l'audit",
+    "description": "Collection bullet 5"
+  },
+  "featurePage.compliance.title": {
+    "message": "Moteur de conformité",
+    "description": "Compliance feature page — title"
+  },
+  "featurePage.compliance.lead": {
+    "message": "Vos politiques, appliquées automatiquement.",
+    "description": "Compliance feature page — lead"
+  },
+  "featurePage.compliance.body": {
+    "message": "Rédigez les règles visuellement — pas de DSL à digérer — et regroupez-les en politiques que vous appliquez à la demande. Auditix évalue chaque politique par nœud, expose les échecs avec leur contexte complet, et gère les exceptions en première classe quand la réalité business diverge de la conformité « manuelle ». Que vous vous aligniez sur RGPD, HIPAA, SOC 2 ou ISO 27001, le moteur s'adapte à vos exigences.",
+    "description": "Compliance feature page — body"
+  },
+  "featurePage.compliance.cta": {
+    "message": "Ouvrir le guide conformité",
+    "description": "Compliance feature page — CTA"
+  },
+  "featurePage.compliance.bullet.1": {
+    "message": "Éditeur de règles visuel — aucun DSL à apprendre",
+    "description": "Compliance bullet 1"
+  },
+  "featurePage.compliance.bullet.2": {
+    "message": "Blocs de règles imbriqués avec introspection debug",
+    "description": "Compliance bullet 2"
+  },
+  "featurePage.compliance.bullet.3": {
+    "message": "Auto-affectation des politiques selon tags et règles de collecte",
+    "description": "Compliance bullet 3"
+  },
+  "featurePage.compliance.bullet.4": {
+    "message": "Gestion d'exceptions en première classe avec piste d'audit",
+    "description": "Compliance bullet 4"
+  },
+  "featurePage.compliance.bullet.5": {
+    "message": "Score de conformité par nœud, par politique, en temps réel",
+    "description": "Compliance bullet 5"
+  },
+  "featurePage.reports.title": {
+    "message": "Rapports PDF & mail",
+    "description": "Reports feature page — title"
+  },
+  "featurePage.reports.lead": {
+    "message": "Des livrables d'audit toujours à jour.",
+    "description": "Reports feature page — lead"
+  },
+  "featurePage.reports.body": {
+    "message": "Un éditeur par blocs vous permet d'assembler des rapports PDF et mail qui respectent votre charte. Les blocs récupèrent les données dynamiquement depuis vos collectes et politiques les plus récentes, le rapport envoyé au trimestre prochain montre donc la réalité du trimestre prochain sans réécrire une ligne. Ajoutez des recommandations rédigées par l'IA pour boucler la boucle entre constat et remédiation.",
+    "description": "Reports feature page — body"
+  },
+  "featurePage.reports.cta": {
+    "message": "Lire le guide rapports",
+    "description": "Reports feature page — CTA"
+  },
+  "featurePage.reports.bullet.1": {
+    "message": "Éditeur par blocs : graphiques, cycle de vie, conformité, topologie et schémas personnalisés",
+    "description": "Reports bullet 1"
+  },
+  "featurePage.reports.bullet.2": {
+    "message": "Thème par contexte pour matcher la charte de chaque client",
+    "description": "Reports bullet 2"
+  },
+  "featurePage.reports.bullet.3": {
+    "message": "Contenu dynamique — re-rendez le rapport sur des données fraîches à tout moment",
+    "description": "Reports bullet 3"
+  },
+  "featurePage.reports.bullet.4": {
+    "message": "Blocs « par nœud » répétés pour les sections inventaire",
+    "description": "Reports bullet 4"
+  },
+  "featurePage.reports.bullet.5": {
+    "message": "AI Assist pour la rédaction des paragraphes dans n'importe quel bloc",
+    "description": "Reports bullet 5"
+  },
+  "featurePage.monitoring.title": {
+    "message": "Monitoring des équipements",
+    "description": "Monitoring feature page — title"
+  },
+  "featurePage.monitoring.lead": {
+    "message": "Gardez l'œil sur le matériel pendant que vous l'auditez.",
+    "description": "Monitoring feature page — lead"
+  },
+  "featurePage.monitoring.body": {
+    "message": "La conformité est une cible mouvante. Auditix maintient un monitoring continu SNMP et SSH sur chaque équipement sous contrat — CPU, mémoire, état des interfaces, capteurs environnementaux — ainsi la dérive remonte immédiatement, pas à la prochaine revue trimestrielle. Idéal pour attraper les régressions silencieuses entre deux audits et nourrir vos dashboards de télémétrie fraîche.",
+    "description": "Monitoring feature page — body"
+  },
+  "featurePage.monitoring.cta": {
+    "message": "Lire le guide monitoring",
+    "description": "Monitoring feature page — CTA"
+  },
+  "featurePage.monitoring.bullet.1": {
+    "message": "Polling continu SNMP et SSH",
+    "description": "Monitoring bullet 1"
+  },
+  "featurePage.monitoring.bullet.2": {
+    "message": "Capteurs d'interfaces, environnementaux et de ressources",
+    "description": "Monitoring bullet 2"
+  },
+  "featurePage.monitoring.bullet.3": {
+    "message": "Seuils configurables avec niveaux de sévérité",
+    "description": "Monitoring bullet 3"
+  },
+  "featurePage.monitoring.bullet.4": {
+    "message": "Séries temporelles persistées aux côtés des données d'audit",
+    "description": "Monitoring bullet 4"
+  },
+  "featurePage.monitoring.bullet.5": {
+    "message": "Alimente les dashboards et les blocs de rapport",
+    "description": "Monitoring bullet 5"
+  },
+  "featurePage.lifecycle.title": {
+    "message": "Suivi du cycle de vie",
+    "description": "Lifecycle feature page — title"
+  },
+  "featurePage.lifecycle.lead": {
+    "message": "Anticipez les retraits avant qu'ils ne fassent mal.",
+    "description": "Lifecycle feature page — lead"
+  },
+  "featurePage.lifecycle.body": {
+    "message": "Auditix interroge les API lifecycle des constructeurs pour garder les dates End-of-Sale, End-of-Software-Maintenance et End-of-Life fraîches sur chaque équipement. Un score de fraîcheur configurable vous alerte lorsqu'un modèle s'apprête à sortir du support, vos cycles de renouvellement et budgets de remplacement tombent du bon côté du risque.",
+    "description": "Lifecycle feature page — body"
+  },
+  "featurePage.lifecycle.cta": {
+    "message": "Explorer le suivi du cycle de vie",
+    "description": "Lifecycle feature page — CTA"
+  },
+  "featurePage.lifecycle.bullet.1": {
+    "message": "EoS / EoSM / EoL récupérés dynamiquement depuis les plugins constructeurs",
+    "description": "Lifecycle bullet 1"
+  },
+  "featurePage.lifecycle.bullet.2": {
+    "message": "Score de fraîcheur configurable par équipement",
+    "description": "Lifecycle bullet 2"
+  },
+  "featurePage.lifecycle.bullet.3": {
+    "message": "Vues agrégées par constructeur, par modèle, par site",
+    "description": "Lifecycle bullet 3"
+  },
+  "featurePage.lifecycle.bullet.4": {
+    "message": "Anticipation des retraits plusieurs mois à l'avance",
+    "description": "Lifecycle bullet 4"
+  },
+  "featurePage.lifecycle.bullet.5": {
+    "message": "Branche les blocs de rapport PDF pour la planification budgétaire",
+    "description": "Lifecycle bullet 5"
+  },
+  "featurePage.scalable.title": {
+    "message": "Docker-native et scalable",
+    "description": "Scalable feature page — title"
+  },
+  "featurePage.scalable.lead": {
+    "message": "Container-first, scalable horizontalement.",
+    "description": "Scalable feature page — lead"
+  },
+  "featurePage.scalable.body": {
+    "message": "Auditix tourne sur une stack Docker compose dès l'installation et passe à l'échelle horizontalement quand la charge l'exige. Les workers démarrent pour absorber les bursts de collecte ; les couches API et UI peuvent être répliquées derrière un load balancer. Branchez votre propre Postgres et Redis et la même release tourne du homelab jusqu'au gros MSP.",
+    "description": "Scalable feature page — body"
+  },
+  "featurePage.scalable.cta": {
+    "message": "Lire le guide architecture",
+    "description": "Scalable feature page — CTA"
+  },
+  "featurePage.scalable.bullet.1": {
+    "message": "Déploiement Docker-compose en moins de 10 minutes",
+    "description": "Scalable bullet 1"
+  },
+  "featurePage.scalable.bullet.2": {
+    "message": "Pool de workers horizontal — ajoutez des containers, augmentez le débit",
+    "description": "Scalable bullet 2"
+  },
+  "featurePage.scalable.bullet.3": {
+    "message": "Couches API et UI sans état derrière un load balancer",
+    "description": "Scalable bullet 3"
+  },
+  "featurePage.scalable.bullet.4": {
+    "message": "Postgres et Redis externes au choix",
+    "description": "Scalable bullet 4"
+  },
+  "featurePage.scalable.bullet.5": {
+    "message": "Même image du homelab au MSP-scale",
+    "description": "Scalable bullet 5"
+  },
+  "featurePage.multi-tenant.title": {
+    "message": "Multi-tenant",
+    "description": "Multi-tenant feature page — title"
+  },
+  "featurePage.multi-tenant.lead": {
+    "message": "Une instance, tous vos clients.",
+    "description": "Multi-tenant feature page — lead"
+  },
+  "featurePage.multi-tenant.body": {
+    "message": "Auditix est multi-tenant by design grâce à la primitive « contexte ». Chaque tenant a ses propres nœuds, collectes, politiques, rapports, thèmes et tokens API — et zéro visibilité sur les autres. Parfait si vous menez des audits pour plusieurs clients depuis une seule instance, ou si vous séparez production et lab au sein de la même entreprise.",
+    "description": "Multi-tenant feature page — body"
+  },
+  "featurePage.multi-tenant.cta": {
+    "message": "Lire le guide contextes",
+    "description": "Multi-tenant feature page — CTA"
+  },
+  "featurePage.multi-tenant.bullet.1": {
+    "message": "Isolation stricte des contextes sur chaque primitive de données",
+    "description": "Multi-tenant bullet 1"
+  },
+  "featurePage.multi-tenant.bullet.2": {
+    "message": "Utilisateurs, rôles et tokens API par contexte",
+    "description": "Multi-tenant bullet 2"
+  },
+  "featurePage.multi-tenant.bullet.3": {
+    "message": "Thèmes par contexte pour des rapports en marque blanche",
+    "description": "Multi-tenant bullet 3"
+  },
+  "featurePage.multi-tenant.bullet.4": {
+    "message": "Vue inter-contextes réservée aux super-admins",
+    "description": "Multi-tenant bullet 4"
+  },
+  "featurePage.multi-tenant.bullet.5": {
+    "message": "Même workflow que vous ayez 2 ou 200 tenants",
+    "description": "Multi-tenant bullet 5"
+  },
+  "featurePage.labs.title": {
+    "message": "Labs pour l'enseignement",
+    "description": "Labs feature page — title"
+  },
+  "featurePage.labs.lead": {
+    "message": "Des labs réseau auto-validés.",
+    "description": "Labs feature page — lead"
+  },
+  "featurePage.labs.body": {
+    "message": "Vous enseignez le réseau, la sécurité ou l'automatisation ? Auditix fait aussi office de validateur de lab : définissez à quoi ressemble une configuration « correcte » avec le même moteur de conformité, et Auditix vérifie chaque étudiant avant de le laisser passer à l'étape suivante. Les formateurs gagnent des heures de vérification manuelle, les étudiants gagnent en autonomie.",
+    "description": "Labs feature page — body"
+  },
+  "featurePage.labs.cta": {
+    "message": "Discutons des labs",
+    "description": "Labs feature page — CTA"
+  },
+  "featurePage.labs.bullet.1": {
+    "message": "Réutilisez le moteur de conformité pour exprimer les cibles de lab",
+    "description": "Labs bullet 1"
+  },
+  "featurePage.labs.bullet.2": {
+    "message": "Validation par étudiant, en temps réel",
+    "description": "Labs bullet 2"
+  },
+  "featurePage.labs.bullet.3": {
+    "message": "Progression conditionnée à la réussite de chaque étape",
+    "description": "Labs bullet 3"
+  },
+  "featurePage.labs.bullet.4": {
+    "message": "Retours détaillés pour permettre l'auto-correction",
+    "description": "Labs bullet 4"
+  },
+  "featurePage.labs.bullet.5": {
+    "message": "Libère les formateurs de la revue manuelle des configurations",
+    "description": "Labs bullet 5"
+  },
+  "featurePage.backup.title": {
+    "message": "Sauvegarde & import",
+    "description": "Backup feature page — title"
+  },
+  "featurePage.backup.lead": {
+    "message": "Votre instance, portable en JSON.",
+    "description": "Backup feature page — lead"
+  },
+  "featurePage.backup.body": {
+    "message": "Chaque objet Auditix — nœuds, politiques, thèmes, schémas, règles, tokens API — peut être exporté en fichiers JSON modulaires. Sauvegardez un tenant unique ou toute la plateforme, rejouez-le dans un environnement neuf, ou amorcez une nouvelle instance depuis un template. La même couche JSON alimente les migrations de données entre versions.",
+    "description": "Backup feature page — body"
+  },
+  "featurePage.backup.cta": {
+    "message": "Voir les options de sauvegarde",
+    "description": "Backup feature page — CTA"
+  },
+  "featurePage.backup.bullet.1": {
+    "message": "Export JSON modulaire par famille d'objets",
+    "description": "Backup bullet 1"
+  },
+  "featurePage.backup.bullet.2": {
+    "message": "Sauvegarde complète ou par tenant",
+    "description": "Backup bullet 2"
+  },
+  "featurePage.backup.bullet.3": {
+    "message": "Réimport dans n'importe quel environnement",
+    "description": "Backup bullet 3"
+  },
+  "featurePage.backup.bullet.4": {
+    "message": "Tagué par version pour des migrations sûres",
+    "description": "Backup bullet 4"
+  },
+  "featurePage.backup.bullet.5": {
+    "message": "Même format pour amorcer les instances de lab et de démo",
+    "description": "Backup bullet 5"
+  },
+  "featurePage.auth-sso.title": {
+    "message": "Authentification & SSO",
+    "description": "Auth SSO feature page — title"
+  },
+  "featurePage.auth-sso.lead": {
+    "message": "Branchez Auditix sur votre IdP.",
+    "description": "Auth SSO feature page — lead"
+  },
+  "featurePage.auth-sso.body": {
+    "message": "Auditix supporte OIDC face à n'importe quel fournisseur conforme — Microsoft Entra ID, Google Workspace, Okta, Auth0, Keycloak et d'autres. Combinez le SSO avec un 2FA TOTP et une politique de mot de passe interne pour les comptes qui ont encore besoin d'identifiants locaux. Le scoping par contexte des tokens rend aussi l'accès API propre côté intégration.",
+    "description": "Auth SSO feature page — body"
+  },
+  "featurePage.auth-sso.cta": {
+    "message": "Lire le guide OIDC",
+    "description": "Auth SSO feature page — CTA"
+  },
+  "featurePage.auth-sso.bullet.1": {
+    "message": "OIDC avec n'importe quel fournisseur d'identité conforme",
+    "description": "Auth SSO bullet 1"
+  },
+  "featurePage.auth-sso.bullet.2": {
+    "message": "2FA TOTP pour les comptes locaux",
+    "description": "Auth SSO bullet 2"
+  },
+  "featurePage.auth-sso.bullet.3": {
+    "message": "Politique de mot de passe interne (longueur, complexité, rotation)",
+    "description": "Auth SSO bullet 3"
+  },
+  "featurePage.auth-sso.bullet.4": {
+    "message": "Scoping par contexte des tokens API",
+    "description": "Auth SSO bullet 4"
+  },
+  "featurePage.auth-sso.bullet.5": {
+    "message": "Piste d'audit sur chaque événement d'authentification",
+    "description": "Auth SSO bullet 5"
+  },
+  "featurePage.api.title": {
+    "message": "API REST ouverte",
+    "description": "API feature page — title"
+  },
+  "featurePage.api.lead": {
+    "message": "Pilotez Auditix depuis votre stack d'automatisation.",
+    "description": "API feature page — lead"
+  },
+  "featurePage.api.body": {
+    "message": "Chaque action disponible dans l'UI est aussi exposée via une API REST v1, documentée en OpenAPI et livrée avec Swagger UI dans chaque instance. L'authentification par token scope l'accès à un contexte spécifique, vous pouvez donc câbler Auditix dans des workflows ITSM, des pipelines CI ou vos propres scripts sans ouvrir des tenants non concernés.",
+    "description": "API feature page — body"
+  },
+  "featurePage.api.cta": {
+    "message": "Lire la référence API",
+    "description": "API feature page — CTA"
+  },
+  "featurePage.api.bullet.1": {
+    "message": "API REST v1 complète avec spécification OpenAPI",
+    "description": "API bullet 1"
+  },
+  "featurePage.api.bullet.2": {
+    "message": "Swagger UI embarqué dans chaque instance",
+    "description": "API bullet 2"
+  },
+  "featurePage.api.bullet.3": {
+    "message": "Authentification par token, scopée par contexte",
+    "description": "API bullet 3"
+  },
+  "featurePage.api.bullet.4": {
+    "message": "Mêmes endpoints que ceux qui propulsent l'UI",
+    "description": "API bullet 4"
+  },
+  "featurePage.api.bullet.5": {
+    "message": "Contrat stable sur toute la ligne 5.x",
+    "description": "API bullet 5"
+  },
+  "changelog.meta.title": {
+    "message": "Changelog · Auditix",
+    "description": "Page meta title for /changelog"
+  },
+  "changelog.meta.description": {
+    "message": "Historique des releases Auditix — fonctionnalités, sous-fonctionnalités et corrections de chaque version.",
+    "description": "Page meta description for /changelog"
+  },
+  "changelog.pill": {
+    "message": "Historique des releases",
+    "description": "Hero pill on /changelog"
+  },
+  "changelog.hero.title": {
+    "message": "Changelog",
+    "description": "Hero title on /changelog"
+  },
+  "changelog.hero.lead": {
+    "message": "Toutes les releases Auditix, avec un screenshot pour chaque version majeure, les dates exactes et la liste complète des fonctionnalités et sous-fonctionnalités.",
+    "description": "Hero lead on /changelog"
+  },
+  "changelog.tba": {
+    "message": "À venir",
+    "description": "Label shown when a release has no date yet"
+  },
+  "changelog.kind.major": {
+    "message": "Majeure",
+    "description": "Badge label for major releases"
+  },
+  "changelog.kind.minor": {
+    "message": "Mineure",
+    "description": "Badge label for minor releases"
+  },
+  "changelog.kind.patch": {
+    "message": "Patch",
+    "description": "Badge label for patch releases"
+  },
+  "changelog.5.0.0.tagline": { "message": "Édition IA" },
+  "changelog.5.0.0.summary": {
+    "message": "Auditix 5.0 est la première release avec une couche IA nativement intégrée : un assistant en panneau latéral, des paragraphes de rapport rédigés par l'IA, quatre types de fournisseurs LLM, plus une topologie v2 aboutie (le stack v1 disparaît) et des règles de collecte plus solides."
+  },
+  "changelog.5.0.0.feature.0.title": { "message": "Assistant IA en panneau latéral" },
+  "changelog.5.0.0.feature.0.desc": {
+    "message": "Interrogez votre réseau en langage naturel depuis n'importe où dans l'app. L'usage d'outils, en option, reste strictement en lecture seule et chaque payload est validé par l'utilisateur avant d'atteindre un LLM cloud."
+  },
+  "changelog.5.0.0.feature.0.item.0": { "message": "Q&A en langage naturel ancré sur vos données" },
+  "changelog.5.0.0.feature.0.item.1": { "message": "Outils strictement en lecture seule, aucune écriture" },
+  "changelog.5.0.0.feature.0.item.2": { "message": "Validation humaine sur chaque appel LLM" },
+  "changelog.5.0.0.feature.0.item.3": { "message": "Assistant configurable par contexte" },
+  "changelog.5.0.0.feature.1.title": { "message": "AI Assist dans les paragraphes de rapport" },
+  "changelog.5.0.0.feature.1.desc": {
+    "message": "Rédaction en un clic des paragraphes de remédiation, de synthèse et d'introduction dans les rapports PDF et mail — l'assistant respecte votre ton et insère directement dans l'éditeur."
+  },
+  "changelog.5.0.0.feature.1.item.0": { "message": "Disponible dans chaque bloc paragraphe" },
+  "changelog.5.0.0.feature.1.item.1": { "message": "Conscient du contexte (connaît les données alentour)" },
+  "changelog.5.0.0.feature.1.item.2": { "message": "Sorties éditables avant publication" },
+  "changelog.5.0.0.feature.2.title": { "message": "Quatre types de fournisseurs LLM" },
+  "changelog.5.0.0.feature.2.desc": {
+    "message": "OpenRouter, OpenAI, Anthropic et Ollama (local). Les credentials sont chiffrés au repos et scopés par contexte."
+  },
+  "changelog.5.0.0.feature.2.item.0": { "message": "Cloud ou on-prem — même UX" },
+  "changelog.5.0.0.feature.2.item.1": { "message": "Credentials chiffrés, pas de secrets dans l'UI" },
+  "changelog.5.0.0.feature.2.item.2": { "message": "Fournisseur par défaut par contexte" },
+  "changelog.5.0.0.feature.3.title": { "message": "Schémas personnalisés dans les rapports" },
+  "changelog.5.0.0.feature.3.desc": {
+    "message": "Un canvas façon Excalidraw vous permet de dessiner des schémas dans l'app et de les insérer dans n'importe quel bloc de rapport PDF ou mail."
+  },
+  "changelog.5.0.0.feature.4.title": { "message": "Règles de collecte améliorées" },
+  "changelog.5.0.0.feature.4.desc": {
+    "message": "Match toujours bloquant, keyMode=all, captures nommées et templates de clé de bloc rendent les règles d'extraction bien plus expressives — la sortie debug est aussi plus claire."
+  },
+  "changelog.5.0.0.feature.5.title": { "message": "Suppression de la topologie v1 legacy" },
+  "changelog.5.0.0.feature.5.desc": {
+    "message": "Le stack v1 disparaît. Seule v2 reste — plus légère, plus rapide, plus propre, et c'est la base supportée des futures couches protocolaires."
+  },
+  "changelog.4.1.1.summary": { "message": "Release de maintenance pour la 4.1." },
+  "changelog.4.1.1.bullet.0": { "message": "Corrections de bugs et bumps de dépendances suite au déploiement de la 4.1.0" },
+  "changelog.4.1.0.summary": { "message": "Portabilité des contextes et une piste d'audit intégrée." },
+  "changelog.4.1.0.bullet.0": { "message": "Export et import complet des contextes en archives ZIP" },
+  "changelog.4.1.0.bullet.1": { "message": "Visualiseur de logs d'audit avec forwarding syslog vers collecteurs SIEM" },
+  "changelog.4.1.0.bullet.2": { "message": "Application stricte du scoping par contexte sur les endpoints API" },
+  "changelog.4.1.0.bullet.3": { "message": "Nouvelle cible `make status` avec table de statut synthétique de l'instance" },
+  "changelog.4.0.0.tagline": { "message": "Identité, scalabilité & rapports graphiques" },
+  "changelog.4.0.0.summary": {
+    "message": "Auditix 4.0 apporte l'authentification entreprise, le passage à l'échelle horizontal et un éditeur graphique complet de rapports mail — plus une longue liste d'améliorations UX sur les nœuds, les schedules et le timeline de cycle de vie."
+  },
+  "changelog.4.0.0.feature.0.title": { "message": "OIDC multi-fournisseur + IdP interne" },
+  "changelog.4.0.0.feature.0.desc": {
+    "message": "Branchez Auditix sur n'importe quel fournisseur OIDC conforme (Entra ID, Google, Okta, Auth0, Keycloak) ou restez sur l'IdP interne — maintenant avec une politique de mot de passe configurable et un timeout d'inactivité GUI."
+  },
+  "changelog.4.0.0.feature.1.title": { "message": "Scaling dynamique du pool de workers" },
+  "changelog.4.0.0.feature.1.desc": {
+    "message": "Une gestion deux-niveaux container/process permet au pool de workers de grandir avec la charge de collecte — fini le dimensionnement manuel du nombre de consumers."
+  },
+  "changelog.4.0.0.feature.2.title": { "message": "Rapports mail graphiques" },
+  "changelog.4.0.0.feature.2.desc": {
+    "message": "Un éditeur par blocs pour les rapports mail, l'admin des serveurs SMTP (CRUD + test d'envoi), trois modes d'adressage (TO, BCC, mail merge) et l'automatisation via schedule."
+  },
+  "changelog.4.0.0.feature.3.title": { "message": "Gestion intégrée des serveurs NGINX" },
+  "changelog.4.0.0.feature.3.desc": {
+    "message": "UI d'admin pour les modes HTTP/HTTPS et les certificats SSL — un outil d'ops en moins à maintenir."
+  },
+  "changelog.4.0.0.feature.4.title": { "message": "Blocs de rapport enrichis" },
+  "changelog.4.0.0.feature.4.desc": {
+    "message": "Blocs charts, timeline de cycle de vie, duplication de blocs et tri par colonne sur inventory_table."
+  },
+  "changelog.4.0.0.feature.5.title": { "message": "Expansion de l'API publique" },
+  "changelog.4.0.0.feature.5.desc": {
+    "message": "Endpoints CRUD pour tags, profils, credentials et imports de collectes — l'API REST rattrape l'UI."
+  },
+  "changelog.3.5.0.summary": { "message": "TOTP 2FA et une boîte à outils enrichie pour le reporting de conformité." },
+  "changelog.3.5.0.bullet.0": { "message": "Enrôlement et flux de connexion TOTP 2FA" },
+  "changelog.3.5.0.bullet.1": { "message": "Nouveaux blocs de rapport conformité : matrix, non-compliant list, status table, recommendations" },
+  "changelog.3.5.0.bullet.2": { "message": "Gate de readiness backend et fix des permissions worker (3.5.3)" },
+  "changelog.3.5.0.bullet.3": { "message": "Visibilité, ordering et tri des colonnes catégories inventaire (3.5.5)" },
+  "changelog.3.4.0.summary": { "message": "API REST publique v1 et imports de gros fichiers." },
+  "changelog.3.4.0.bullet.0": { "message": "API REST publique v1 avec Swagger UI et authentification par token API" },
+  "changelog.3.4.0.bullet.1": { "message": "Import CSV de nœuds avec table paginée triable et préférences persistées" },
+  "changelog.3.4.0.bullet.2": { "message": "Import ZIP de collectes et regex de prompt configurable (3.4.5)" },
+  "changelog.3.4.0.bullet.3": { "message": "Limites d'upload relevées à 50 Mo (3.4.7)" },
+  "changelog.3.3.0.summary": { "message": "Liens manuels topologie et éditeur de match rule plus intelligent." },
+  "changelog.3.3.0.bullet.0": { "message": "Liens manuels topologie entre nœuds" },
+  "changelog.3.3.0.bullet.1": { "message": "Menu contextuel sur le canvas topologie" },
+  "changelog.3.3.0.bullet.2": { "message": "Fix du calcul de score de conformité" },
+  "changelog.3.3.0.bullet.3": { "message": "Améliorations de l'éditeur de match rule" },
+  "changelog.3.2.0.summary": { "message": "Introspection debug de la conformité et jointures multi-sources." },
+  "changelog.3.2.0.bullet.0": { "message": "Introspection debug sur les blocs de conformité imbriqués" },
+  "changelog.3.2.0.bullet.1": { "message": "Jointure multi-sources dans les règles de collecte" },
+  "changelog.3.2.0.bullet.2": { "message": "Affichage des source-fields dans l'éditeur de règles" },
+  "changelog.3.1.0.summary": { "message": "Plugins constructeurs et scoring des mises à jour système." },
+  "changelog.3.1.0.bullet.0": { "message": "Système de plugins constructeurs pour l'ingestion de données matériel" },
+  "changelog.3.1.0.bullet.1": { "message": "Scoring des mises à jour système sur la fiche nœud" },
+  "changelog.3.1.0.bullet.2": { "message": "Traductions des règles de collecte" },
+  "changelog.3.0.0.tagline": { "message": "Topologie v1" },
+  "changelog.3.0.0.summary": {
+    "message": "Auditix 3.0 a introduit le premier stack de visualisation topologie — calculé automatiquement depuis vos collectes, avec un éditeur de labels WYSIWYG et des blocs topologie embarquables dans les rapports."
+  },
+  "changelog.3.0.0.feature.0.title": { "message": "Visualisation topologie" },
+  "changelog.3.0.0.feature.0.desc": {
+    "message": "Une première carte interactive de votre réseau, calculée depuis vos données collectées — a posé les bases du stack v2 qui le remplace en 5.0."
+  },
+  "changelog.3.0.0.feature.1.title": { "message": "Éditeur de labels WYSIWYG" },
+  "changelog.3.0.0.feature.1.desc": {
+    "message": "Labelling visuel sur le canvas topologie, prêt pour l'export PDF."
+  },
+  "changelog.3.0.0.feature.2.title": { "message": "Blocs topologie dans les rapports" },
+  "changelog.3.0.0.feature.2.desc": {
+    "message": "Déposez un snapshot topologie en direct dans n'importe quel rapport PDF ou mail."
+  },
+  "changelog.2.1.0.summary": { "message": "Labs, refactor de la conformité et imports manuels." },
+  "changelog.2.1.0.bullet.0": { "message": "Labs — vérifications de configuration auto-validées contre le moteur de conformité" },
+  "changelog.2.1.0.bullet.1": { "message": "Refactor du moteur de conformité" },
+  "changelog.2.1.0.bullet.2": { "message": "Bases des blocs de rapport" },
+  "changelog.2.1.0.bullet.3": { "message": "Import manuel des sorties de commandes" },
+  "changelog.2.0.0.tagline": { "message": "Rapports & scheduling" },
+  "changelog.2.0.0.summary": {
+    "message": "Auditix 2.0 a introduit les rapports par nœud, les variables template et le scheduling automatisé — fondation de toutes les fonctionnalités de reporting ultérieures."
+  },
+  "changelog.2.0.0.feature.0.title": { "message": "Rapports par nœud" },
+  "changelog.2.0.0.feature.0.desc": {
+    "message": "Livrables par nœud first-class, prêts pour le templating et la sortie thémée."
+  },
+  "changelog.2.0.0.feature.1.title": { "message": "Variables template" },
+  "changelog.2.0.0.feature.1.desc": {
+    "message": "Placeholders dynamiques dans les rapports, évalués sur les dernières données collectées."
+  },
+  "changelog.2.0.0.feature.2.title": { "message": "Scheduling automatisé" },
+  "changelog.2.0.0.feature.2.desc": {
+    "message": "Schedules récurrents de collecte + rapport — l'épine dorsale des audits hands-off."
+  },
+  "changelog.1.x.tagline": { "message": "Ligne initiale" },
+  "changelog.1.x.summary": {
+    "message": "La ligne 1.x a posé les fondations — inventaire de nœuds, modèle de collecte de base, premières règles de conformité et premier déploiement Docker compose."
+  },
+  "changelog.1.x.feature.0.title": { "message": "Inventaire de nœuds" },
+  "changelog.1.x.feature.0.desc": {
+    "message": "Premier modèle d'inventaire avec métadonnées vendor / modèle / hostname."
+  },
+  "changelog.1.x.feature.1.title": { "message": "Modèle de collecte de base" },
+  "changelog.1.x.feature.1.desc": {
+    "message": "Runner de commandes SSH et premier format de règle de collecte."
+  },
+  "changelog.1.x.feature.2.title": { "message": "Premières règles de conformité" },
+  "changelog.1.x.feature.2.desc": {
+    "message": "Moteur de conformité primitif qui est devenu la base de tout depuis."
+  },
   "theme.ErrorPageContent.title": {
     "message": "Cette page a planté.",
     "description": "The title of the fallback page when the page crashed"

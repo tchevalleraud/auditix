@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Compliance engine placeholder">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="50%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#bg)"/>
+  <rect width="100%" height="100%" fill="url(#grid)"/>
+  <g fill="none" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 640 180 L 540 220 L 540 320 Q 540 400 640 440 Q 740 400 740 320 L 740 220 Z" stroke-opacity="0.9" fill="rgba(255,255,255,0.1)"/>
+    <path d="M 590 310 L 625 345 L 695 270" stroke-opacity="1" stroke-width="6"/>
+  </g>
+  <text x="640" y="510" text-anchor="middle" font-size="52" font-family="Inter, system-ui, sans-serif" font-weight="700" fill="white">Compliance Engine</text>
+  <text x="640" y="560" text-anchor="middle" font-size="22" font-family="Inter, system-ui, sans-serif" fill="rgba(255,255,255,0.75)">Screenshot coming soon</text>
+</svg>

@@ -1,14 +1,21 @@
 import React from 'react';
 import Layout from '@theme/Layout';
-import Link from '@docusaurus/Link';
 import Translate, {translate} from '@docusaurus/Translate';
 import Hero from '@site/src/components/Hero';
 import FeatureCard from '@site/src/components/FeatureCard';
 import FeatureGrid from '@site/src/components/FeatureGrid';
-import Screenshot from '@site/src/components/Screenshot';
+import FeatureSpotlight from '@site/src/components/FeatureSpotlight';
 import ScreenshotCarousel from '@site/src/components/ScreenshotCarousel';
+import ProviderLogos from '@site/src/components/ProviderLogos';
 
 export default function Home(): React.JSX.Element {
+  React.useEffect(() => {
+    document.body.classList.add('ax-marketing');
+    return () => {
+      document.body.classList.remove('ax-marketing');
+    };
+  }, []);
+
   return (
     <Layout
       title={translate({
@@ -20,18 +27,6 @@ export default function Home(): React.JSX.Element {
         message: 'Auditix 5.0 — collect, evaluate and report on your network with an AI assistant by your side.',
       })}>
       <Hero
-        pill={translate({
-          id: 'landing.hero.pill',
-          message: '✨ Auditix 5.0 · AI Edition',
-        })}
-        title={
-          <>
-            <Translate id="landing.hero.title.start">Network compliance,</Translate>{' '}
-            <span className="ax-ai-accent">
-              <Translate id="landing.hero.title.accent">augmented by AI</Translate>
-            </span>
-          </>
-        }
         subtitle={
           <Translate id="landing.hero.subtitle">
             Collect data from your fleet, evaluate it against your policies, visualise your topology — and ask your network in plain English with the new AI assistant.
@@ -57,7 +52,10 @@ export default function Home(): React.JSX.Element {
             })}
             slides={[
               {
-                src: '/img/screenshots/landing-dashboard.png',
+                sources: {
+                  light: '/img/screenshots/landing-dashboard-light.png',
+                  dark: '/img/screenshots/landing-dashboard-dark.png',
+                },
                 alt: translate({
                   id: 'landing.slide.dashboard.alt',
                   message: 'Customisable dashboard with a compliance overview',
@@ -68,18 +66,10 @@ export default function Home(): React.JSX.Element {
                 }),
               },
               {
-                src: '/img/screenshots/landing-ai-assistant.png',
-                alt: translate({
-                  id: 'landing.slide.ai.alt',
-                  message: 'AI assistant side panel answering a question',
-                }),
-                caption: translate({
-                  id: 'landing.slide.ai.caption',
-                  message: 'Need a hand? The AI assistant has your back',
-                }),
-              },
-              {
-                src: '/img/screenshots/landing-topology.png',
+                sources: {
+                  light: '/img/screenshots/landing-topology-light.png',
+                  dark: '/img/screenshots/landing-topology-dark.png',
+                },
                 alt: translate({
                   id: 'landing.slide.topology.alt',
                   message: 'Live topology map with protocol overlays',
@@ -90,7 +80,10 @@ export default function Home(): React.JSX.Element {
                 }),
               },
               {
-                src: '/img/screenshots/landing-compliance.png',
+                sources: {
+                  light: '/img/screenshots/landing-compliance-light.png',
+                  dark: '/img/screenshots/landing-compliance-dark.png',
+                },
                 alt: translate({
                   id: 'landing.slide.compliance.alt',
                   message: 'Compliance matrix per policy and per node',
@@ -101,7 +94,10 @@ export default function Home(): React.JSX.Element {
                 }),
               },
               {
-                src: '/img/screenshots/landing-pdf-report.png',
+                sources: {
+                  light: '/img/screenshots/landing-pdf-report-light.png',
+                  dark: '/img/screenshots/landing-pdf-report-dark.png',
+                },
                 alt: translate({
                   id: 'landing.slide.report.alt',
                   message: 'PDF report with AI-drafted recommendations',
@@ -115,7 +111,7 @@ export default function Home(): React.JSX.Element {
           />
         </section>
 
-        <section style={{marginTop: '4rem'}}>
+        <section style={{marginTop: '5rem'}}>
           <span className="ax-eyebrow">
             <Translate id="landing.features.eyebrow">Features</Translate>
           </span>
@@ -127,134 +123,208 @@ export default function Home(): React.JSX.Element {
               A single platform that goes from raw device output to a signed PDF report — with an AI layer that helps you write, search and recommend.
             </Translate>
           </p>
+        </section>
 
-          <FeatureGrid>
+        <FeatureSpotlight
+          variant="ai"
+          imageSide="right"
+          eyebrow={<Translate id="landing.spot.ai.eyebrow">New in 5.0</Translate>}
+          title={
+            <>
+              <Translate id="landing.spot.ai.title.start">AI Assistant — your</Translate>{' '}
+              <span className="ax-ai-accent">
+                <Translate id="landing.spot.ai.title.accent">network co-pilot</Translate>
+              </span>
+            </>
+          }
+          description={
+            <Translate id="landing.spot.ai.desc">
+              Query your network in plain language. Tools are read-only and the data sent to the LLM is human-controlled, preventing any sensitive data leak. The assistant also helps draft documents and author audit rules. Use a cloud LLM (OpenAI, Anthropic, OpenRouter…) or your own on-prem AI stack (Ollama, custom OpenAI-compatible endpoint).
+            </Translate>
+          }
+          imageSources={{
+            light: '/img/screenshots/landing-ai-assistant-light.png',
+            dark: '/img/screenshots/landing-ai-assistant-dark.png',
+          }}
+          imageAlt={translate({
+            id: 'landing.spot.ai.alt',
+            message: 'AI assistant side panel answering a question about the network',
+          })}
+          imageTitle="AI Assistant"
+          cta={{
+            label: translate({id: 'landing.spot.ai.cta', message: 'Read the AI guide'}),
+            to: '/guide/ai/overview',
+          }}
+        />
+
+        <FeatureSpotlight
+          imageSide="left"
+          title={<Translate id="landing.spot.topology.title">Live topology</Translate>}
+          description={
+            <Translate id="landing.spot.topology.desc">
+              A Cytoscape map of your infrastructure, built from your collections and device results. LLDP, STP, MSTP, OSPF, BGP or ISIS — whatever protocol stack you run, your topology is always up to date.
+            </Translate>
+          }
+          imageSources={{
+            light: '/img/screenshots/landing-topology-placeholder.svg',
+            dark: '/img/screenshots/landing-topology-placeholder.svg',
+          }}
+          imageAlt={translate({
+            id: 'landing.spot.topology.alt',
+            message: 'Live topology map with protocol overlays',
+          })}
+          imageTitle="Topology"
+          cta={{
+            label: translate({id: 'landing.spot.topology.cta', message: 'Explore the topology guide'}),
+            to: '/guide/topology/overview',
+          }}
+        />
+
+        <FeatureSpotlight
+          imageSide="right"
+          title={<Translate id="landing.spot.collection.title">Automated collection</Translate>}
+          description={
+            <Translate id="landing.spot.collection.desc">
+              Pull the data you need over SSH or vendor APIs, extract the relevant bits and normalise everything for downstream audits. Device unreachable, off-site engagement? No problem — drop command outputs in manually and the same pipeline handles them.
+            </Translate>
+          }
+          imageSources={{
+            light: '/img/screenshots/landing-collection-placeholder.svg',
+            dark: '/img/screenshots/landing-collection-placeholder.svg',
+          }}
+          imageAlt={translate({
+            id: 'landing.spot.collection.alt',
+            message: 'Scheduled collection pipeline running across the fleet',
+          })}
+          imageTitle="Collections"
+          cta={{
+            label: translate({id: 'landing.spot.collection.cta', message: 'See collection rules'}),
+            to: '/guide/collections/commands',
+          }}
+        />
+
+        <FeatureSpotlight
+          imageSide="left"
+          title={<Translate id="landing.spot.compliance.title">Compliance engine</Translate>}
+          description={
+            <Translate id="landing.spot.compliance.desc">
+              A visual rule editor, on-demand policies and first-class exception handling. GDPR, HIPAA, SOC 2, ISO 27001 — define your own requirements and stay compliant at every audit moment.
+            </Translate>
+          }
+          imageSources={{
+            light: '/img/screenshots/landing-compliance-placeholder.svg',
+            dark: '/img/screenshots/landing-compliance-placeholder.svg',
+          }}
+          imageAlt={translate({
+            id: 'landing.spot.compliance.alt',
+            message: 'Compliance matrix per policy and per node',
+          })}
+          imageTitle="Compliance"
+          cta={{
+            label: translate({id: 'landing.spot.compliance.cta', message: 'Open the compliance guide'}),
+            to: '/guide/compliance/rules',
+          }}
+        />
+
+        <FeatureSpotlight
+          imageSide="right"
+          title={<Translate id="landing.spot.reports.title">PDF & mail reports</Translate>}
+          description={
+            <Translate id="landing.spot.reports.desc">
+              A graphical editor that follows your brand guidelines. Blocks adapt dynamically to fresh results when needed — so the report is always up to date, with every relevant element and AI-drafted recommendations included.
+            </Translate>
+          }
+          imageSources={{
+            light: '/img/screenshots/landing-pdf-report-placeholder.svg',
+            dark: '/img/screenshots/landing-pdf-report-placeholder.svg',
+          }}
+          imageAlt={translate({
+            id: 'landing.spot.reports.alt',
+            message: 'PDF report with AI-drafted recommendations',
+          })}
+          imageTitle="Report"
+          cta={{
+            label: translate({id: 'landing.spot.reports.cta', message: 'Read the reports guide'}),
+            to: '/guide/reports/creating',
+          }}
+        />
+
+        <section style={{marginTop: '5rem'}}>
+          <span className="ax-eyebrow">
+            <Translate id="landing.more.eyebrow">And much more</Translate>
+          </span>
+          <h2 className="ax-section-title">
+            <Translate id="landing.more.title">Built for real-world audit workflows</Translate>
+          </h2>
+
+          <FeatureGrid cols={2}>
             <FeatureCard
-              icon="🧠"
-              title={translate({id: 'landing.feature.aiAssistants.title', message: 'AI Assistants'})}
+              title={translate({id: 'landing.more.monitoring.title', message: 'Device monitoring'})}
               description={translate({
-                id: 'landing.feature.aiAssistants.desc',
-                message: 'Ask your network in natural language. Tools are read-only and outputs are anonymised before reaching cloud LLMs.',
+                id: 'landing.more.monitoring.desc',
+                message: 'An audit means watching the gear. Continuous SNMP / SSH monitoring keeps every device under observation so you catch drift before it becomes an incident.',
               })}
-              to="/guide/ai/overview"
-              ai
+              to="/guide/monitoring"
             />
             <FeatureCard
-              icon="✍️"
-              title={translate({id: 'landing.feature.aiAssist.title', message: 'AI Assist in reports'})}
+              title={translate({id: 'landing.more.lifecycle.title', message: 'Lifecycle tracking'})}
               description={translate({
-                id: 'landing.feature.aiAssist.desc',
-                message: 'One-click paragraph drafting in PDF and mail reports — keeps your prose consistent and your audits faster.',
-              })}
-              to="/guide/ai/ai-assist-blocks"
-              ai
-            />
-            <FeatureCard
-              icon="🛰"
-              title={translate({id: 'landing.feature.collection.title', message: 'Automated collection'})}
-              description={translate({
-                id: 'landing.feature.collection.desc',
-                message: 'Scheduled SSH and SNMP collections with reusable rules, multi-source joins and ZIP / CSV bulk imports.',
-              })}
-              to="/guide/collections/commands"
-            />
-            <FeatureCard
-              icon="🛡"
-              title={translate({id: 'landing.feature.compliance.title', message: 'Compliance engine'})}
-              description={translate({
-                id: 'landing.feature.compliance.desc',
-                message: 'Visual rule editor, per-policy auto-assignment, debug introspection on nested rule blocks.',
-              })}
-              to="/guide/compliance/rules"
-            />
-            <FeatureCard
-              icon="🗺"
-              title={translate({id: 'landing.feature.topology.title', message: 'Live topology'})}
-              description={translate({
-                id: 'landing.feature.topology.desc',
-                message: 'Cytoscape map with LLDP / OSPF / ISIS / BGP / STP filters, manual links, MSTI multi-instance overlays.',
-              })}
-              to="/guide/topology/overview"
-            />
-            <FeatureCard
-              icon="📄"
-              title={translate({id: 'landing.feature.reports.title', message: 'PDF & mail reports'})}
-              description={translate({
-                id: 'landing.feature.reports.desc',
-                message: 'Block-based editor with chart, lifecycle, compliance, topology and custom schemas. Theme per context.',
-              })}
-              to="/guide/reports/creating"
-            />
-            <FeatureCard
-              icon="📦"
-              title={translate({id: 'landing.feature.lifecycle.title', message: 'Lifecycle tracking'})}
-              description={translate({
-                id: 'landing.feature.lifecycle.desc',
-                message: 'EoS / EoSM / EoL timelines with a configurable freshness score, refreshed by vendor plugins.',
+                id: 'landing.more.lifecycle.desc',
+                message: 'Dynamically pull EoS / EoSM / EoL data from your vendors. Know when hardware retires and plan replacements with a clean budget timeline.',
               })}
               to="/guide/inventory/lifecycle"
             />
             <FeatureCard
-              icon="🔐"
-              title={translate({id: 'landing.feature.auth.title', message: 'Auth & SSO'})}
+              title={translate({id: 'landing.more.scalable.title', message: 'Docker-native & scalable'})}
               description={translate({
-                id: 'landing.feature.auth.desc',
-                message: 'Multi-provider OIDC, TOTP 2FA, internal password policy and a public REST API v1 with per-token context scoping.',
+                id: 'landing.more.scalable.desc',
+                message: 'Container-first architecture that scales horizontally — when the workload spikes, new worker services spin up to meet demand.',
               })}
-              to="/admin/authentication/oidc"
+              to="/getting-started/architecture"
             />
             <FeatureCard
-              icon="📡"
-              title={translate({id: 'landing.feature.audit.title', message: 'Audit & syslog'})}
+              title={translate({id: 'landing.more.multitenant.title', message: 'Multi-tenant'})}
               description={translate({
-                id: 'landing.feature.audit.desc',
-                message: 'Every security event recorded, browsable, exportable — and pushable to one or several SIEM collectors.',
+                id: 'landing.more.multitenant.desc',
+                message: 'Running audits for several clients? Strict tenant isolation via contexts — one instance, many customers, no data crossover.',
               })}
-              to="/admin/audit/audit-log"
+              to="/admin/contexts"
+            />
+            <FeatureCard
+              title={translate({id: 'landing.more.labs.title', message: 'Labs for teaching'})}
+              description={translate({
+                id: 'landing.more.labs.desc',
+                message: 'Teaching the solution? Auditix can verify a student has the right configuration on each lab before moving on — saves you time and gives participants full autonomy.',
+              })}
+            />
+            <FeatureCard
+              title={translate({id: 'landing.more.backup.title', message: 'Backup & import'})}
+              description={translate({
+                id: 'landing.more.backup.desc',
+                message: 'Back up part or all of your instance as modular JSON files — and re-import them just as easily into another environment.',
+              })}
+            />
+            <FeatureCard
+              title={translate({id: 'landing.more.auth.title', message: 'Auth & SSO'})}
+              description={translate({
+                id: 'landing.more.auth.desc',
+                message: 'Multi-provider OIDC, TOTP 2FA and internal password policy. Plug Auditix into your existing IdP in minutes.',
+              })}
+              to="/admin/authentication/oidc"
+              footer={<ProviderLogos />}
+            />
+            <FeatureCard
+              title={translate({id: 'landing.more.api.title', message: 'Open REST API'})}
+              description={translate({
+                id: 'landing.more.api.desc',
+                message: 'A fully open API v1 to drive Auditix from your automation pipelines, ITSM or CI workflows.',
+              })}
+              to="/api/overview"
             />
           </FeatureGrid>
         </section>
 
-        <section className="ax-ai-section">
-          <div style={{display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: '2.5rem', alignItems: 'center'}}>
-            <div>
-              <span className="ax-eyebrow">
-                <Translate id="landing.ai.eyebrow">New in 5.0</Translate>
-              </span>
-              <h2 className="ax-section-title">
-                <Translate id="landing.ai.title.start">Meet your</Translate>{' '}
-                <span className="ax-ai-accent">
-                  <Translate id="landing.ai.title.accent">network co-pilot</Translate>
-                </span>
-              </h2>
-              <p className="ax-section-lead">
-                <Translate id="landing.ai.lead">
-                  Configure one or several LLM providers (OpenRouter, OpenAI, Anthropic, or your local Ollama). Define context-scoped assistants with their own system prompt. Toggle tool-use to let them safely query your own data — hostnames are stripped before any cloud call.
-                </Translate>
-              </p>
-              <div style={{display: 'flex', gap: '0.75rem', flexWrap: 'wrap'}}>
-                <Link to="/guide/ai/overview" className="ax-btn ax-btn--primary">
-                  <Translate id="landing.ai.cta.primary">Read the AI guide</Translate>
-                </Link>
-                <Link to="/usecase/ai-assisted-recommendations" className="ax-btn ax-btn--secondary">
-                  <Translate id="landing.ai.cta.secondary">See a use case</Translate>
-                </Link>
-              </div>
-            </div>
-            <div>
-              <Screenshot
-                src="/img/screenshots/landing-ai-tool-trace.png"
-                alt={translate({
-                  id: 'landing.ai.screenshot.alt',
-                  message: 'AI assistant panel showing tool calls and anonymised results',
-                })}
-                title="AI Assistant"
-              />
-            </div>
-          </div>
-        </section>
-
-        <section style={{marginTop: '4rem', marginBottom: '5rem'}}>
+        <section style={{marginTop: '5rem', marginBottom: '5rem'}}>
           <span className="ax-eyebrow">
             <Translate id="landing.start.eyebrow">Where to start</Translate>
           </span>
@@ -262,7 +332,7 @@ export default function Home(): React.JSX.Element {
             <Translate id="landing.start.title">Pick the path that fits</Translate>
           </h2>
 
-          <FeatureGrid>
+          <FeatureGrid cols={2}>
             <FeatureCard
               icon="🚀"
               title={translate({id: 'landing.start.install.title', message: 'Install Auditix'})}

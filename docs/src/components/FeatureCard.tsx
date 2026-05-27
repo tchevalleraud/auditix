@@ -4,18 +4,20 @@ import Link from '@docusaurus/Link';
 interface FeatureCardProps {
   icon?: React.ReactNode;
   title: string;
-  description: string;
+  description: React.ReactNode;
   to?: string;
   ai?: boolean;
+  footer?: React.ReactNode;
 }
 
-export default function FeatureCard({icon, title, description, to, ai}: FeatureCardProps): React.JSX.Element {
+export default function FeatureCard({icon, title, description, to, ai, footer}: FeatureCardProps): React.JSX.Element {
   const className = `ax-card${ai ? ' ax-card--ai' : ''}`;
   const inner = (
     <>
       {icon && <span className="ax-card__icon">{icon}</span>}
       <h3 className="ax-card__title">{title}</h3>
       <p className="ax-card__body">{description}</p>
+      {footer && <div className="ax-card__footer">{footer}</div>}
     </>
   );
 

@@ -7,12 +7,76 @@
     "message": "Auditix Logo",
     "description": "The alt text of navbar logo"
   },
+  "item.label.Home": {
+    "message": "Accueil",
+    "description": "Navbar item with label Home"
+  },
+  "item.label.Features": {
+    "message": "Fonctionnalités",
+    "description": "Navbar item with label Features"
+  },
   "item.label.Documentation": {
     "message": "Documentation",
     "description": "Navbar item with label Documentation"
   },
+  "item.label.Changelog": {
+    "message": "Changelog",
+    "description": "Navbar item with label Changelog"
+  },
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
+  },
+  "item.label.AI Assistant": {
+    "message": "Assistant IA",
+    "description": "Navbar dropdown item AI Assistant"
+  },
+  "item.label.Live topology": {
+    "message": "Topologie en direct",
+    "description": "Navbar dropdown item Live topology"
+  },
+  "item.label.Automated collection": {
+    "message": "Collecte automatisée",
+    "description": "Navbar dropdown item Automated collection"
+  },
+  "item.label.Compliance engine": {
+    "message": "Moteur de conformité",
+    "description": "Navbar dropdown item Compliance engine"
+  },
+  "item.label.PDF & mail reports": {
+    "message": "Rapports PDF & mail",
+    "description": "Navbar dropdown item PDF & mail reports"
+  },
+  "item.label.Device monitoring": {
+    "message": "Monitoring des équipements",
+    "description": "Navbar dropdown item Device monitoring"
+  },
+  "item.label.Lifecycle tracking": {
+    "message": "Suivi du cycle de vie",
+    "description": "Navbar dropdown item Lifecycle tracking"
+  },
+  "item.label.Docker-native & scalable": {
+    "message": "Docker-native et scalable",
+    "description": "Navbar dropdown item Docker-native & scalable"
+  },
+  "item.label.Multi-tenant": {
+    "message": "Multi-tenant",
+    "description": "Navbar dropdown item Multi-tenant"
+  },
+  "item.label.Labs for teaching": {
+    "message": "Labs pour l'enseignement",
+    "description": "Navbar dropdown item Labs for teaching"
+  },
+  "item.label.Backup & import": {
+    "message": "Sauvegarde & import",
+    "description": "Navbar dropdown item Backup & import"
+  },
+  "item.label.Auth & SSO": {
+    "message": "Authentification & SSO",
+    "description": "Navbar dropdown item Auth & SSO"
+  },
+  "item.label.Open REST API": {
+    "message": "API REST ouverte",
+    "description": "Navbar dropdown item Open REST API"
   }
 }

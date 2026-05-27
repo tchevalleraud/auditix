@@ -3,14 +3,14 @@ import Link from '@docusaurus/Link';
 
 interface HeroProps {
   pill?: string;
-  title: React.ReactNode;
+  title?: React.ReactNode;
   subtitle: React.ReactNode;
   primaryCta?: {label: string; to: string};
   secondaryCta?: {label: string; to: string};
 }
 
 export default function Hero({
-  pill = '✨ Auditix 5.0 · AI Edition',
+  pill,
   title,
   subtitle,
   primaryCta,
@@ -18,8 +18,8 @@ export default function Hero({
 }: HeroProps): React.JSX.Element {
   return (
     <section className="ax-hero">
-      <div className="ax-hero__pill">{pill}</div>
-      <h1 className="ax-hero__title">{title}</h1>
+      {pill && <div className="ax-hero__pill">{pill}</div>}
+      {title && <h1 className="ax-hero__title">{title}</h1>}
       <p className="ax-hero__subtitle">{subtitle}</p>
       <div className="ax-hero__ctas">
         {primaryCta && (

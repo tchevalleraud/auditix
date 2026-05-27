@@ -1,17 +1,18 @@
 import React from 'react';
-import useBaseUrl from '@docusaurus/useBaseUrl';
+import {useBaseUrlUtils} from '@docusaurus/useBaseUrl';
+import ThemedImage from '@theme/ThemedImage';
 
 interface ScreenshotProps {
-  src: string;
+  src?: string;
+  sources?: {light: string; dark: string};
   alt: string;
   title?: string;
   caption?: string;
 }
 
-export default function Screenshot({src, alt, title, caption}: ScreenshotProps): React.JSX.Element {
-  const isExternal = /^https?:\/\//.test(src);
-  const resolvedSrc = useBaseUrl(isExternal ? '' : src);
-  const finalSrc = isExternal ? src : resolvedSrc;
+export default function Screenshot({src, sources, alt, title, caption}: ScreenshotProps): React.JSX.Element {
+  const {withBaseUrl} = useBaseUrlUtils();
+  const resolve = (s: string): string => /^https?:\/\//.test(s) ? s : withBaseUrl(s);
 
   return (
     <figure className="ax-screenshot">
@@ -21,7 +22,14 @@ export default function Screenshot({src, alt, title, caption}: ScreenshotProps):
         <span className="ax-screenshot__dot" />
         {title && <span className="ax-screenshot__title">{title}</span>}
       </div>
-      <img src={finalSrc} alt={alt} loading="lazy" />
+      {sources ? (
+        <ThemedImage
+          alt={alt}
+          sources={{light: resolve(sources.light), dark: resolve(sources.dark)}}
+        />
+      ) : src ? (
+        <img src={resolve(src)} alt={alt} loading="lazy" />
+      ) : null}
       {caption && <figcaption className="ax-screenshot__caption">{caption}</figcaption>}
     </figure>
   );

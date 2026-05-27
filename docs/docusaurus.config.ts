@@ -67,7 +67,7 @@ const config: Config = {
   themeConfig: {
     colorMode: {
       defaultMode: 'light',
-      respectPrefersColorScheme: true,
+      respectPrefersColorScheme: false,
     },
     image: 'img/banner.svg',
     navbar: {
@@ -79,19 +79,40 @@ const config: Config = {
       },
       items: [
         {
+          to: '/',
+          label: 'Home',
+          position: 'left',
+          activeBaseRegex: '^/$',
+        },
+        {
+          type: 'dropdown',
+          label: 'Features',
+          position: 'left',
+          items: [
+            { label: 'AI Assistant', to: '/features/ai-assistant' },
+            { label: 'Live topology', to: '/features/topology' },
+            { label: 'Automated collection', to: '/features/collection' },
+            { label: 'Compliance engine', to: '/features/compliance' },
+            { label: 'PDF & mail reports', to: '/features/reports' },
+            { label: 'Device monitoring', to: '/features/monitoring' },
+            { label: 'Lifecycle tracking', to: '/features/lifecycle' },
+            { label: 'Docker-native & scalable', to: '/features/scalable' },
+            { label: 'Multi-tenant', to: '/features/multi-tenant' },
+            { label: 'Labs for teaching', to: '/features/labs' },
+            { label: 'Backup & import', to: '/features/backup' },
+            { label: 'Auth & SSO', to: '/features/auth-sso' },
+            { label: 'Open REST API', to: '/features/api' },
+          ],
+        },
+        {
           type: 'docSidebar',
           sidebarId: 'docsSidebar',
           position: 'left',
           label: 'Documentation',
         },
         {
-          to: '/usecase/intro',
-          label: 'Use cases',
-          position: 'left',
-        },
-        {
-          to: '/whats-new-5.0',
-          label: "What's new",
+          to: '/changelog',
+          label: 'Changelog',
           position: 'left',
         },
         {
