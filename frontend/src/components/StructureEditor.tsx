@@ -162,6 +162,8 @@ export interface InventoryTableColumn {
   /** list aggregation: 'all' = AND, 'any' = OR (default 'all'). */
   listFiltersMatch?: "all" | "any";
   sort?: "asc" | "desc";
+  /** Fixed column width as a percentage of the table width (1-100). Undefined = auto. */
+  width?: number;
 }
 
 export interface InventoryCountColumn {
@@ -172,6 +174,8 @@ export interface InventoryCountColumn {
   headerLabel?: string;
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
+  /** Fixed column width as a percentage of the table width (1-100). Undefined = auto. */
+  width?: number;
 }
 
 export interface InventoryStyleRule {
@@ -246,6 +250,14 @@ export interface InventoryTableBlock {
   hostnameAlign?: "left" | "center" | "right";
   hostnameVAlign?: "top" | "middle" | "bottom";
   fontSize?: number;
+  /** Maximum table width as a percentage of the page content area (1-100). Undefined = auto (fill content area). */
+  maxTableWidth?: number;
+  /** multi_node_columns + count-mode: fixed width (% of table) for the leading hostname column. */
+  hostnameWidth?: number;
+  /** single_node_full standard: fixed width (% of table) for the leading key column. */
+  keyColumnWidth?: number;
+  /** single_node_full standard: per-colLabel fixed widths (% of table). */
+  columnWidths?: Record<string, number>;
   styleRules?: InventoryStyleRule[];
   /** single_node_full: colLabels to hide (kept in data, omitted at render). */
   hiddenColumns?: string[];
@@ -3476,6 +3488,43 @@ interface InvTagItem { id: number; name: string; color: string; }
 interface InvManufacturerItem { id: number; name: string; }
 interface InvModelItem { id: number; name: string; manufacturer?: { id: number; name: string } | null; }
 
+function ColumnWidthInput({
+  value,
+  onChange,
+  t,
+}: {
+  value: number | undefined;
+  onChange: (v: number | undefined) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  return (
+    <div className="flex items-center gap-0.5 shrink-0" title={t("structure.inventoryColumnWidthTitle")}>
+      <input
+        type="number"
+        min={1}
+        max={100}
+        step={1}
+        value={value ?? ""}
+        placeholder={t("structure.inventoryColumnWidthAuto")}
+        onChange={(e) => {
+          const raw = e.target.value;
+          if (raw === "") {
+            onChange(undefined);
+            return;
+          }
+          const n = Number(raw);
+          if (!Number.isFinite(n)) return;
+          const clamped = Math.max(1, Math.min(100, Math.round(n)));
+          onChange(clamped);
+        }}
+        className="w-12 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-0.5 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+        aria-label={t("structure.inventoryColumnWidthTitle")}
+      />
+      <span className="text-[10px] text-slate-400">%</span>
+    </div>
+  );
+}
+
 function InventoryTableProperties({
   block,
   updateBlock,
@@ -4049,6 +4098,12 @@ function InventoryTableProperties({
                 <button type="button" onClick={() => updateBlock(block.id, { hostnameVAlign: "middle" })} className={alignBtnClass((block.hostnameVAlign ?? "middle") === "middle")} title={t("structure.alignMiddle")}><VAlignIcon type="middle" /></button>
                 <button type="button" onClick={() => updateBlock(block.id, { hostnameVAlign: "bottom" })} className={alignBtnClass(block.hostnameVAlign === "bottom")} title={t("structure.alignBottom")}><VAlignIcon type="bottom" /></button>
               </div>
+              <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+              <ColumnWidthInput
+                value={block.hostnameWidth}
+                onChange={(v) => updateBlock(block.id, { hostnameWidth: v })}
+                t={t}
+              />
             </div>
           </div>
 
@@ -4235,6 +4290,12 @@ function InventoryTableProperties({
                   <button type="button" onClick={() => setColumnSort(col.id, "asc")} className={alignBtnClass(col.sort === "asc")} title={t("structure.inventorySortAsc")}><ArrowUpAZ className="h-3 w-3" /></button>
                   <button type="button" onClick={() => setColumnSort(col.id, "desc")} className={alignBtnClass(col.sort === "desc")} title={t("structure.inventorySortDesc")}><ArrowDownAZ className="h-3 w-3" /></button>
                 </div>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 shrink-0" />
+                <ColumnWidthInput
+                  value={col.width}
+                  onChange={(v) => updateColumnProp(col.id, { width: v })}
+                  t={t}
+                />
               </div>
             </div>
             );
@@ -4571,6 +4632,18 @@ function InventoryTableProperties({
 
             {block.countMode && (
               <div className="space-y-2 pt-1">
+                {/* Hostname column width (count-mode reuses hostnameWidth) */}
+                <div className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1.5">
+                  <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wide shrink-0">{t("structure.invHostnameColumn")}</span>
+                  <span className="flex-1 text-xs text-slate-700 dark:text-slate-300 truncate">
+                    {block.hostnameHeaderLabel || "Hostname"}
+                  </span>
+                  <ColumnWidthInput
+                    value={block.hostnameWidth}
+                    onChange={(v) => updateBlock(block.id, { hostnameWidth: v })}
+                    t={t}
+                  />
+                </div>
                 {countColumns.length === 0 && (
                   <p className="text-[11px] text-slate-400 italic">{t("structure.invSingleCountEmpty")}</p>
                 )}
@@ -4620,14 +4693,21 @@ function InventoryTableProperties({
                         className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
                       />
                     </div>
-                    <input
-                      type="text"
-                      value={cc.headerLabel ?? ""}
-                      onChange={(e) => updateCountSingle(cc.id, { headerLabel: e.target.value })}
-                      placeholder={cc.matchValue || t("structure.inventoryHeaderLabel")}
-                      className="w-full bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
-                      title={t("structure.inventoryHeaderLabel")}
-                    />
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={cc.headerLabel ?? ""}
+                        onChange={(e) => updateCountSingle(cc.id, { headerLabel: e.target.value })}
+                        placeholder={cc.matchValue || t("structure.inventoryHeaderLabel")}
+                        className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
+                        title={t("structure.inventoryHeaderLabel")}
+                      />
+                      <ColumnWidthInput
+                        value={cc.width}
+                        onChange={(v) => updateCountSingle(cc.id, { width: v })}
+                        t={t}
+                      />
+                    </div>
                   </div>
                 ))}
                 <button
@@ -4661,24 +4741,50 @@ function InventoryTableProperties({
                 <label className={labelClass}>{t("structure.invDisplayColumnsTitle")}</label>
                 <p className="text-[10px] text-slate-400">{t("structure.invDisplayColumnsHint")}</p>
               </div>
+              {/* Key column width (the leading "Cle"/hostname column in single_node_full) */}
+              <div className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
+                <span className="text-[10px] font-bold text-violet-600 dark:text-violet-400 uppercase tracking-wide shrink-0">{t("structure.invKeyColumn")}</span>
+                <span className="flex-1 text-xs text-slate-700 dark:text-slate-300 truncate">
+                  {block.hostnameHeaderLabel || t("structure.invKeyColumn")}
+                </span>
+                <ColumnWidthInput
+                  value={block.keyColumnWidth}
+                  onChange={(v) => updateBlock(block.id, { keyColumnWidth: v })}
+                  t={t}
+                />
+              </div>
               {singleCategoryColLabels.length === 0 ? (
                 <p className="text-[11px] text-slate-400 italic">{t("structure.inventoryNoData")}</p>
               ) : (
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="space-y-1.5">
                   {singleCategoryColLabels.map((cl) => {
                     const hidden = hiddenColumns.includes(cl);
+                    const colWidths = block.columnWidths ?? {};
                     return (
-                      <label key={cl} className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 cursor-pointer">
+                      <div key={cl} className="flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5">
                         <input
                           type="checkbox"
                           checked={!hidden}
                           onChange={(e) => toggleHiddenColumn(cl, !e.target.checked)}
                           className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-400"
                         />
-                        <span className={`text-xs truncate ${hidden ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-300"}`}>
+                        <span className={`flex-1 text-xs truncate ${hidden ? "text-slate-400 line-through" : "text-slate-700 dark:text-slate-300"}`}>
                           {cl}
                         </span>
-                      </label>
+                        <ColumnWidthInput
+                          value={colWidths[cl]}
+                          onChange={(v) => {
+                            const next = { ...(block.columnWidths ?? {}) };
+                            if (v === undefined) {
+                              delete next[cl];
+                            } else {
+                              next[cl] = v;
+                            }
+                            updateBlock(block.id, { columnWidths: Object.keys(next).length > 0 ? next : undefined });
+                          }}
+                          t={t}
+                        />
+                      </div>
                     );
                   })}
                 </div>
@@ -5073,6 +5179,44 @@ function InventoryTableProperties({
               )}
             </div>
             <p className="text-[10px] text-slate-400">{t("structure.inventoryFontSizeHint")}</p>
+          </div>
+
+          {/* Max table width */}
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.inventoryMaxTableWidth")}</label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={1}
+                max={100}
+                step={1}
+                value={block.maxTableWidth ?? ""}
+                placeholder={t("structure.inventoryMaxTableWidthAuto")}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    updateBlock(block.id, { maxTableWidth: undefined });
+                    return;
+                  }
+                  const n = Number(raw);
+                  if (!Number.isFinite(n)) return;
+                  const clamped = Math.max(1, Math.min(100, Math.round(n)));
+                  updateBlock(block.id, { maxTableWidth: clamped });
+                }}
+                className={`${inputClass} w-28`}
+              />
+              <span className="text-xs text-slate-400">%</span>
+              {block.maxTableWidth != null && (
+                <button
+                  type="button"
+                  onClick={() => updateBlock(block.id, { maxTableWidth: undefined })}
+                  className="text-xs text-slate-400 hover:text-slate-600 underline"
+                >
+                  {t("structure.inventoryMaxTableWidthReset")}
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-400">{t("structure.inventoryMaxTableWidthHint")}</p>
           </div>
 
           {/* Style rules */}

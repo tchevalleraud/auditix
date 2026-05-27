@@ -1333,6 +1333,7 @@ class GenerateReportMessageHandler
                         $values = [$hostname];
                         $colAligns = [$hostnameAlign];
                         $colVAligns = [$hostnameVAlign];
+                        $explicitWidthPcts = [isset($block['hostnameWidth']) && $block['hostnameWidth'] > 0 ? (float) $block['hostnameWidth'] : null];
                         foreach ($countCols as $cc) {
                             $colLabel = (string) ($cc['colLabel'] ?? '');
                             $matchValue = (string) ($cc['matchValue'] ?? '');
@@ -1341,6 +1342,7 @@ class GenerateReportMessageHandler
                             $hLabel = (string) ($cc['headerLabel'] ?? '');
                             if ($hLabel === '') $hLabel = $matchValue !== '' ? $matchValue : $colLabel;
                             $headers[] = $hLabel;
+                            $explicitWidthPcts[] = isset($cc['width']) && $cc['width'] > 0 ? (float) $cc['width'] : null;
 
                             $cnt = 0;
                             if ($colLabel !== '') {
@@ -1371,6 +1373,7 @@ class GenerateReportMessageHandler
 
                         $pageW = $pdf->getPageWidth();
                         $contentW = $pageW - $mLeft - $mRight;
+                        $tableW = $this->resolveInventoryTableWidth($block, $contentW);
                         $minLineH = $invFontSize * 0.3528 + 3;
                         $cellPadding = 4;
                         $colCountInv = count($headers);
@@ -1384,12 +1387,7 @@ class GenerateReportMessageHandler
                         foreach ($values as $vi => $v) {
                             $maxWidths[$vi] = max($maxWidths[$vi], $pdf->GetStringWidth($v) + $cellPadding);
                         }
-                        $totalNatural = array_sum($maxWidths);
-                        $colWidthsInv = [];
-                        $scale = $totalNatural > 0 ? ($contentW / $totalNatural) : 1;
-                        foreach ($maxWidths as $w) {
-                            $colWidthsInv[] = $w * $scale;
-                        }
+                        $colWidthsInv = $this->distributeInventoryColumnWidths($maxWidths, $explicitWidthPcts, $tableW);
 
                         $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
                         $pdf->SetLineWidth(0.2);
@@ -1499,6 +1497,7 @@ class GenerateReportMessageHandler
 
                     $pageW = $pdf->getPageWidth();
                     $contentW = $pageW - $mLeft - $mRight;
+                    $tableW = $this->resolveInventoryTableWidth($block, $contentW);
                     $minLineH = $invFontSize * 0.3528 + 3;
                     $cellPadding = 4;
 
@@ -1519,12 +1518,15 @@ class GenerateReportMessageHandler
                             $maxWidths[$ci + 1] = max($maxWidths[$ci + 1], $pdf->GetStringWidth($v) + $cellPadding);
                         }
                     }
-                    $totalNatural = array_sum($maxWidths);
-                    $colWidthsInv = [];
-                    $scale = $totalNatural > 0 ? ($contentW / $totalNatural) : 1;
-                    foreach ($maxWidths as $w) {
-                        $colWidthsInv[] = $w * $scale;
+                    $columnWidthsMap = is_array($block['columnWidths'] ?? null) ? $block['columnWidths'] : [];
+                    $explicitWidthPcts = [
+                        isset($block['keyColumnWidth']) && $block['keyColumnWidth'] > 0 ? (float) $block['keyColumnWidth'] : null,
+                    ];
+                    foreach ($colLabels as $cl) {
+                        $w = $columnWidthsMap[$cl] ?? null;
+                        $explicitWidthPcts[] = ($w !== null && $w > 0) ? (float) $w : null;
                     }
+                    $colWidthsInv = $this->distributeInventoryColumnWidths($maxWidths, $explicitWidthPcts, $tableW);
 
                     $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
                     $pdf->SetLineWidth(0.2);
@@ -1627,6 +1629,7 @@ class GenerateReportMessageHandler
 
                 $pageW = $pdf->getPageWidth();
                 $contentW = $pageW - $mLeft - $mRight;
+                $tableW = $this->resolveInventoryTableWidth($block, $contentW);
                 $colCount = 1 + count($columns); // hostname + defined columns
                 $minLineH = $invFontSize * 0.3528 + 3;
 
@@ -1826,22 +1829,15 @@ class GenerateReportMessageHandler
                     }
                 }
 
-                // Scale widths to fit contentW
-                $totalNatural = array_sum($maxWidths);
-                $colWidthsInv = [];
-                if ($totalNatural <= $contentW) {
-                    // Content fits: scale up proportionally to fill available space
-                    $scale = $contentW / max($totalNatural, 1);
-                    foreach ($maxWidths as $w) {
-                        $colWidthsInv[] = $w * $scale;
-                    }
-                } else {
-                    // Content overflows: scale down proportionally
-                    $scale = $contentW / $totalNatural;
-                    foreach ($maxWidths as $w) {
-                        $colWidthsInv[] = $w * $scale;
-                    }
+                // Build explicit width %s: index 0 = hostname, 1..N = columns
+                $explicitWidthPcts = [
+                    isset($block['hostnameWidth']) && $block['hostnameWidth'] > 0 ? (float) $block['hostnameWidth'] : null,
+                ];
+                foreach ($columns as $colDef) {
+                    $w = $colDef['width'] ?? null;
+                    $explicitWidthPcts[] = ($w !== null && $w > 0) ? (float) $w : null;
                 }
+                $colWidthsInv = $this->distributeInventoryColumnWidths($maxWidths, $explicitWidthPcts, $tableW);
 
                 $pdf->SetDrawColor($borderColor[0], $borderColor[1], $borderColor[2]);
                 $pdf->SetLineWidth(0.2);
@@ -7503,6 +7499,89 @@ class GenerateReportMessageHandler
             }
         }
         return $match === 'any' ? in_array(true, $results, true) : !in_array(false, $results, true);
+    }
+
+    /**
+     * Resolve the rendering width of an inventory table from its maxTableWidth (%) option.
+     * Valid range is (0, 100]; outside the range or unset means "auto" (full content width).
+     */
+    private function resolveInventoryTableWidth(array $block, float $contentW): float
+    {
+        $pct = $block['maxTableWidth'] ?? null;
+        if ($pct === null || $pct === '') {
+            return $contentW;
+        }
+        $pct = (float) $pct;
+        if ($pct <= 0 || $pct > 100) {
+            return $contentW;
+        }
+        return $contentW * ($pct / 100);
+    }
+
+    /**
+     * Distribute column widths for an inventory table.
+     *
+     * - $naturalWidths : measured widths per column (used as fallback ratio for auto cols).
+     * - $explicitPcts  : same length; entry is a percentage (1-100) of $tableW, or null = auto.
+     * - $tableW        : total table width to fill.
+     *
+     * Columns with an explicit percentage get that fraction of $tableW. The remainder
+     * is distributed across auto columns proportionally to their natural widths.
+     * If explicit percentages sum to more than 100, they are scaled down and no
+     * space is left for auto columns (each gets a tiny minimum width to avoid 0).
+     */
+    private function distributeInventoryColumnWidths(array $naturalWidths, array $explicitPcts, float $tableW): array
+    {
+        $n = count($naturalWidths);
+        if ($n === 0) return [];
+
+        $totalFixedPct = 0.0;
+        $autoIdx = [];
+        for ($i = 0; $i < $n; $i++) {
+            $p = $explicitPcts[$i] ?? null;
+            if ($p !== null && $p > 0) {
+                $totalFixedPct += (float) $p;
+            } else {
+                $autoIdx[] = $i;
+            }
+        }
+
+        $widths = array_fill(0, $n, 0.0);
+
+        if ($totalFixedPct >= 100) {
+            $scale = $totalFixedPct > 0 ? (100.0 / $totalFixedPct) : 0;
+            for ($i = 0; $i < $n; $i++) {
+                $p = $explicitPcts[$i] ?? null;
+                if ($p !== null && $p > 0) {
+                    $widths[$i] = $tableW * (((float) $p) * $scale) / 100.0;
+                } else {
+                    $widths[$i] = 0.5; // minimal fallback, prevents 0-width cells
+                }
+            }
+            return $widths;
+        }
+
+        for ($i = 0; $i < $n; $i++) {
+            $p = $explicitPcts[$i] ?? null;
+            if ($p !== null && $p > 0) {
+                $widths[$i] = $tableW * ((float) $p) / 100.0;
+            }
+        }
+
+        $remainingW = $tableW * (100.0 - $totalFixedPct) / 100.0;
+        if (!empty($autoIdx)) {
+            $autoNaturalSum = 0.0;
+            foreach ($autoIdx as $i) $autoNaturalSum += (float) $naturalWidths[$i];
+            if ($autoNaturalSum <= 0) {
+                $each = $remainingW / count($autoIdx);
+                foreach ($autoIdx as $i) $widths[$i] = $each;
+            } else {
+                $scale = $remainingW / $autoNaturalSum;
+                foreach ($autoIdx as $i) $widths[$i] = (float) $naturalWidths[$i] * $scale;
+            }
+        }
+
+        return $widths;
     }
 
     private function hexToRgb(string $hex): array
