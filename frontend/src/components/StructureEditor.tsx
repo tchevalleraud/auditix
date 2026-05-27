@@ -126,6 +126,21 @@ export interface TableBlock {
 
 export type InventoryCountOperator = "eq" | "neq" | "contains" | "not_contains";
 
+export type InventoryListFilterOperator =
+  | "eq"
+  | "neq"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+export interface InventoryListFilter {
+  id: string;
+  field: "key" | "value";
+  operator: InventoryListFilterOperator;
+  value: string;
+}
+
 export interface InventoryTableColumn {
   id: string;
   category: string;
@@ -135,9 +150,17 @@ export interface InventoryTableColumn {
   headerLabel?: string;
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
-  aggregation?: "value" | "count";
+  aggregation?: "value" | "count" | "list";
   matchValue?: string;
   matchOperator?: InventoryCountOperator;
+  /** list aggregation: source of items (keys = entryKey, values = value). */
+  listSource?: "keys" | "values";
+  /** list aggregation: separator inserted between items (default ", "). */
+  listSeparator?: string;
+  /** list aggregation: optional filters on key or value. */
+  listFilters?: InventoryListFilter[];
+  /** list aggregation: 'all' = AND, 'any' = OR (default 'all'). */
+  listFiltersMatch?: "all" | "any";
   sort?: "asc" | "desc";
 }
 
@@ -3509,10 +3532,11 @@ function InventoryTableProperties({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerCat, setPickerCat] = useState<string | null>(null);
   const [pickerKey, setPickerKey] = useState<string | null>(null);
-  const [pickerMode, setPickerMode] = useState<"value" | "count">("value");
+  const [pickerMode, setPickerMode] = useState<"value" | "count" | "list">("value");
   const [pickerCountCol, setPickerCountCol] = useState<string | null>(null);
   const [pickerMatchValue, setPickerMatchValue] = useState("");
   const [pickerMatchOp, setPickerMatchOp] = useState<InventoryCountOperator>("eq");
+  const [pickerListCol, setPickerListCol] = useState<string | null>(null);
 
   // Load inventory structure
   useEffect(() => {
@@ -3585,6 +3609,7 @@ function InventoryTableProperties({
     setPickerCountCol(null);
     setPickerMatchValue("");
     setPickerMatchOp("eq");
+    setPickerListCol(null);
   };
 
   const addColumn = (category: string, entryKey: string, colLabel: string) => {
@@ -3601,18 +3626,67 @@ function InventoryTableProperties({
   };
 
   const addCountColumn = (category: string, colLabel: string, matchValue: string, matchOperator: InventoryCountOperator) => {
+    const labelSuffix = matchValue === "" ? "(*)" : `= ${matchValue}`;
     const col: InventoryTableColumn = {
       id: uid(),
       category,
       entryKey: "",
       colLabel,
-      label: `${category} > ${colLabel} = ${matchValue}`,
+      label: `${category} > ${colLabel} ${labelSuffix}`,
       aggregation: "count",
       matchValue,
       matchOperator,
     };
     updateBlock(block.id, { columns: [...block.columns, col] });
     resetPicker();
+  };
+
+  const addListColumn = (category: string, colLabel: string) => {
+    const col: InventoryTableColumn = {
+      id: uid(),
+      category,
+      entryKey: "",
+      colLabel,
+      label: `${category} > ${colLabel} (list)`,
+      aggregation: "list",
+      listSource: "keys",
+      listSeparator: ", ",
+      listFilters: [],
+      listFiltersMatch: "all",
+    };
+    updateBlock(block.id, { columns: [...block.columns, col] });
+    resetPicker();
+  };
+
+  const addListFilter = (colId: string) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => {
+        if (c.id !== colId) return c;
+        const filters = c.listFilters ?? [];
+        const f: InventoryListFilter = { id: uid(), field: "value", operator: "eq", value: "" };
+        return { ...c, listFilters: [...filters, f] };
+      }),
+    });
+  };
+
+  const updateListFilter = (colId: string, filterId: string, patch: Partial<InventoryListFilter>) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => {
+        if (c.id !== colId) return c;
+        const filters = (c.listFilters ?? []).map((f) => (f.id === filterId ? { ...f, ...patch } : f));
+        return { ...c, listFilters: filters };
+      }),
+    });
+  };
+
+  const removeListFilter = (colId: string, filterId: string) => {
+    updateBlock(block.id, {
+      columns: block.columns.map((c) => {
+        if (c.id !== colId) return c;
+        const filters = (c.listFilters ?? []).filter((f) => f.id !== filterId);
+        return { ...c, listFilters: filters };
+      }),
+    });
   };
 
   const removeColumn = (colId: string) => {
@@ -3981,9 +4055,12 @@ function InventoryTableProperties({
           {/* Defined columns */}
           {block.columns.map((col, idx) => {
             const isCount = col.aggregation === "count";
+            const isList = col.aggregation === "list";
             const colTitle = isCount
               ? `${col.category} > ${col.colLabel} (count)`
-              : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
+              : isList
+                ? `${col.category} > ${col.colLabel} (list)`
+                : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
             return (
             <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
               <div className="flex items-center gap-2">
@@ -3993,8 +4070,13 @@ function InventoryTableProperties({
                     {t("structure.invCountBadge")}
                   </span>
                 )}
+                {isList && (
+                  <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-500/20 rounded px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                    {t("structure.invListBadge")}
+                  </span>
+                )}
                 <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={colTitle}>
-                  {isCount ? (
+                  {isCount || isList ? (
                     <>{col.category} &gt; {col.colLabel}</>
                   ) : (
                     <>{col.category} &gt; {col.entryKey} &gt; {col.colLabel}</>
@@ -4029,9 +4111,103 @@ function InventoryTableProperties({
                     type="text"
                     value={col.matchValue ?? ""}
                     onChange={(e) => updateColumnProp(col.id, { matchValue: e.target.value })}
-                    placeholder={t("structure.invCountMatchValue")}
+                    placeholder={t("structure.invCountMatchValueOptional")}
+                    title={t("structure.invCountMatchValueOptionalHint")}
                     className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
                   />
+                </div>
+              )}
+              {isList && (
+                <div className="space-y-1.5 rounded-md border border-emerald-200 dark:border-emerald-700/50 bg-emerald-50/40 dark:bg-emerald-900/10 p-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0">{t("structure.invListSource")}</span>
+                    <select
+                      value={col.listSource ?? "keys"}
+                      onChange={(e) => updateColumnProp(col.id, { listSource: e.target.value as "keys" | "values" })}
+                      className="shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-emerald-400"
+                    >
+                      <option value="keys">{t("structure.invListSourceKeys")}</option>
+                      <option value="values">{t("structure.invListSourceValues")}</option>
+                    </select>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0 ml-1">{t("structure.invListSeparator")}</span>
+                    <input
+                      type="text"
+                      value={col.listSeparator ?? ", "}
+                      onChange={(e) => updateColumnProp(col.id, { listSeparator: e.target.value })}
+                      placeholder=", "
+                      className="w-16 shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-emerald-400 font-mono"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">{t("structure.invListFiltersTitle")}</span>
+                    {(col.listFilters ?? []).length > 1 && (
+                      <div className="inline-flex rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => updateColumnProp(col.id, { listFiltersMatch: "all" })}
+                          className={`px-2 py-0.5 text-[10px] font-medium ${(col.listFiltersMatch ?? "all") === "all" ? "bg-emerald-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}
+                        >
+                          {t("structure.invDisplayMatchAll")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => updateColumnProp(col.id, { listFiltersMatch: "any" })}
+                          className={`px-2 py-0.5 text-[10px] font-medium ${col.listFiltersMatch === "any" ? "bg-emerald-500 text-white" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"}`}
+                        >
+                          {t("structure.invDisplayMatchAny")}
+                        </button>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => addListFilter(col.id)}
+                      className="flex items-center gap-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                    >
+                      <Plus className="h-2.5 w-2.5" />
+                      {t("structure.invListFiltersAdd")}
+                    </button>
+                  </div>
+                  {(col.listFilters ?? []).length === 0 && (
+                    <p className="text-[10px] text-slate-400 italic">{t("structure.invListFiltersEmpty")}</p>
+                  )}
+                  {(col.listFilters ?? []).map((f) => (
+                    <div key={f.id} className="flex items-center gap-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1">
+                      <select
+                        value={f.field}
+                        onChange={(e) => updateListFilter(col.id, f.id, { field: e.target.value as "key" | "value" })}
+                        className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-0.5 focus:outline-none focus:border-emerald-400"
+                      >
+                        <option value="key">{t("structure.invListFilterKey")}</option>
+                        <option value="value">{t("structure.invListFilterValue")}</option>
+                      </select>
+                      <select
+                        value={f.operator}
+                        onChange={(e) => updateListFilter(col.id, f.id, { operator: e.target.value as InventoryListFilterOperator })}
+                        className="shrink-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-0.5 focus:outline-none focus:border-emerald-400"
+                      >
+                        <option value="eq">=</option>
+                        <option value="neq">!=</option>
+                        <option value="contains">{t("structure.ruleContains")}</option>
+                        <option value="not_contains">{t("structure.ruleNotContains")}</option>
+                        <option value="starts_with">{t("structure.invRuleStartsWith")}</option>
+                        <option value="ends_with">{t("structure.invRuleEndsWith")}</option>
+                      </select>
+                      <input
+                        type="text"
+                        value={f.value}
+                        onChange={(e) => updateListFilter(col.id, f.id, { value: e.target.value })}
+                        placeholder={t("structure.invCountMatchValue")}
+                        className="flex-1 min-w-0 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-0.5 focus:outline-none focus:border-emerald-400 placeholder:text-slate-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeListFilter(col.id, f.id)}
+                        className="shrink-0 p-0.5 text-slate-400 hover:text-red-500"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
               <div className="flex items-center gap-1.5">
@@ -4082,9 +4258,11 @@ function InventoryTableProperties({
                     ? t("structure.inventoryPickCategory")
                     : pickerMode === "count"
                       ? (!pickerCountCol ? t("structure.invCountPickColumn") : t("structure.invCountConfigure"))
-                      : !pickerKey
-                        ? t("structure.inventoryPickKey")
-                        : t("structure.inventoryPickValue")}
+                      : pickerMode === "list"
+                        ? (!pickerListCol ? t("structure.invListPickColumn") : t("structure.invListConfigure"))
+                        : !pickerKey
+                          ? t("structure.inventoryPickKey")
+                          : t("structure.inventoryPickValue")}
                 </span>
                 <button
                   onClick={resetPicker}
@@ -4098,7 +4276,7 @@ function InventoryTableProperties({
               <div className="flex items-center gap-1 rounded-md bg-white dark:bg-slate-800 p-0.5 border border-violet-200 dark:border-violet-700">
                 <button
                   type="button"
-                  onClick={() => { setPickerMode("value"); setPickerKey(null); setPickerCountCol(null); }}
+                  onClick={() => { setPickerMode("value"); setPickerKey(null); setPickerCountCol(null); setPickerListCol(null); }}
                   className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                     pickerMode === "value"
                       ? "bg-violet-500 text-white"
@@ -4109,7 +4287,7 @@ function InventoryTableProperties({
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setPickerMode("count"); setPickerKey(null); setPickerCountCol(null); }}
+                  onClick={() => { setPickerMode("count"); setPickerKey(null); setPickerCountCol(null); setPickerListCol(null); }}
                   className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
                     pickerMode === "count"
                       ? "bg-violet-500 text-white"
@@ -4118,12 +4296,23 @@ function InventoryTableProperties({
                 >
                   {t("structure.invModeCount")}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setPickerMode("list"); setPickerKey(null); setPickerCountCol(null); setPickerListCol(null); }}
+                  className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                    pickerMode === "list"
+                      ? "bg-emerald-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t("structure.invModeList")}
+                </button>
               </div>
 
               {/* Breadcrumb */}
               {pickerCat && (
                 <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                  <button onClick={() => { setPickerCat(null); setPickerKey(null); setPickerCountCol(null); }} className="hover:text-violet-600 underline">
+                  <button onClick={() => { setPickerCat(null); setPickerKey(null); setPickerCountCol(null); setPickerListCol(null); }} className="hover:text-violet-600 underline">
                     {t("structure.inventoryCategories")}
                   </button>
                   <ChevronRight className="h-3 w-3" />
@@ -4136,6 +4325,16 @@ function InventoryTableProperties({
                       </>
                     ) : (
                       <span className="text-violet-600 dark:text-violet-400 font-medium">{pickerCat}</span>
+                    )
+                  ) : pickerMode === "list" ? (
+                    pickerListCol ? (
+                      <>
+                        <button onClick={() => setPickerListCol(null)} className="hover:text-emerald-600 underline">{pickerCat}</button>
+                        <ChevronRight className="h-3 w-3" />
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">{pickerListCol}</span>
+                      </>
+                    ) : (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-medium">{pickerCat}</span>
                     )
                   ) : pickerKey ? (
                     <>
@@ -4196,6 +4395,7 @@ function InventoryTableProperties({
               {pickerMode === "count" && pickerCat && pickerCountCol && (
                 <div className="space-y-2 rounded-md bg-white dark:bg-slate-800 p-2 border border-slate-200 dark:border-slate-700">
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invCountHint")}</p>
+                  <p className="text-[10px] text-slate-400 italic">{t("structure.invCountMatchValueOptionalHint")}</p>
                   <div className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-500 dark:text-slate-400 shrink-0">{pickerCountCol}</span>
                     <select
@@ -4212,19 +4412,57 @@ function InventoryTableProperties({
                       type="text"
                       value={pickerMatchValue}
                       onChange={(e) => setPickerMatchValue(e.target.value)}
-                      placeholder={t("structure.invCountMatchValue")}
+                      placeholder={t("structure.invCountMatchValueOptional")}
                       autoFocus
                       className="flex-1 bg-slate-50 dark:bg-slate-700 rounded border border-slate-200 dark:border-slate-600 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-violet-400 placeholder:text-slate-400"
                     />
                   </div>
                   <button
                     type="button"
-                    disabled={pickerMatchValue.length === 0}
                     onClick={() => addCountColumn(pickerCat, pickerCountCol, pickerMatchValue, pickerMatchOp)}
-                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-violet-500 text-white px-3 py-1.5 text-xs font-medium hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-violet-500 text-white px-3 py-1.5 text-xs font-medium hover:bg-violet-600 transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     {t("structure.invCountAdd")}
+                  </button>
+                </div>
+              )}
+
+              {/* LIST MODE — Level 2: pick colLabel */}
+              {pickerMode === "list" && pickerCat && !pickerListCol && pickerCatData && (
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {(() => {
+                    const labels = new Set<string>();
+                    pickerCatData.entries.forEach((e) => e.columns.forEach((c) => labels.add(c)));
+                    const arr = Array.from(labels);
+                    if (arr.length === 0) {
+                      return <p className="text-xs text-slate-400 italic py-2">{t("structure.inventoryNoData")}</p>;
+                    }
+                    return arr.map((cl) => (
+                      <button
+                        key={cl}
+                        onClick={() => setPickerListCol(cl)}
+                        className="w-full flex items-center justify-between rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-emerald-100 dark:hover:bg-emerald-800/30 transition-colors"
+                      >
+                        {cl}
+                        <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                      </button>
+                    ));
+                  })()}
+                </div>
+              )}
+
+              {/* LIST MODE — Level 3: confirm + add */}
+              {pickerMode === "list" && pickerCat && pickerListCol && (
+                <div className="space-y-2 rounded-md bg-white dark:bg-slate-800 p-2 border border-slate-200 dark:border-slate-700">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invListHint")}</p>
+                  <button
+                    type="button"
+                    onClick={() => addListColumn(pickerCat, pickerListCol)}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-emerald-500 text-white px-3 py-1.5 text-xs font-medium hover:bg-emerald-600 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("structure.invListAdd")}
                   </button>
                 </div>
               )}

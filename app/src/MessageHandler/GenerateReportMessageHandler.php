@@ -1669,6 +1669,8 @@ class GenerateReportMessageHandler
                         if ($colId === '') continue;
                         $matchValue = (string) ($colDef['matchValue'] ?? '');
                         $matchOp = $colDef['matchOperator'] ?? 'eq';
+                        // No matchValue and operator is eq/neq => count all entries (no value filter).
+                        $countAll = ($matchValue === '' && ($matchOp === 'eq' || $matchOp === 'neq'));
 
                         // Always initialize to "0" so cells show 0 even if no entries exist
                         foreach ($nodeIds as $nid) {
@@ -1690,6 +1692,10 @@ class GenerateReportMessageHandler
                         $counts = [];
                         foreach ($entries as $entry) {
                             $nid = $entry->getNode()->getId();
+                            if ($countAll) {
+                                $counts[$nid] = ($counts[$nid] ?? 0) + 1;
+                                continue;
+                            }
                             $val = (string) ($entry->getValue() ?? '');
                             if ($this->matchCountValue($val, $matchValue, $matchOp)) {
                                 $counts[$nid] = ($counts[$nid] ?? 0) + 1;
@@ -1697,6 +1703,44 @@ class GenerateReportMessageHandler
                         }
                         foreach ($counts as $nid => $cnt) {
                             $invData[$nid][$colId] = (string) $cnt;
+                        }
+                    } elseif ($aggregation === 'list') {
+                        if ($colId === '') continue;
+                        $listSource = ($colDef['listSource'] ?? 'keys') === 'values' ? 'values' : 'keys';
+                        $listSeparator = (string) ($colDef['listSeparator'] ?? ', ');
+                        $listFilters = is_array($colDef['listFilters'] ?? null) ? $colDef['listFilters'] : [];
+                        $listFiltersMatch = ($colDef['listFiltersMatch'] ?? 'all') === 'any' ? 'any' : 'all';
+
+                        foreach ($nodeIds as $nid) {
+                            $invData[$nid][$colId] = '';
+                        }
+
+                        if ($cat === '' || $col === '') continue;
+
+                        $entries = $invRepo->createQueryBuilder('e')
+                            ->where('e.node IN (:nodes)')
+                            ->andWhere('e.categoryName = :cat')
+                            ->andWhere('e.colLabel = :col')
+                            ->setParameter('nodes', $nodeIds)
+                            ->setParameter('cat', $cat)
+                            ->setParameter('col', $col)
+                            ->getQuery()
+                            ->getResult();
+
+                        $buckets = [];
+                        foreach ($entries as $entry) {
+                            $nid = $entry->getNode()->getId();
+                            $key = (string) ($entry->getEntryKey() ?? '');
+                            $val = (string) ($entry->getValue() ?? '');
+                            if (!$this->matchListFilters($key, $val, $listFilters, $listFiltersMatch)) continue;
+                            $item = ($listSource === 'values') ? $val : $key;
+                            if ($item === '') continue;
+                            $buckets[$nid][] = $item;
+                        }
+                        foreach ($buckets as $nid => $items) {
+                            $items = array_values(array_unique($items));
+                            usort($items, 'strnatcasecmp');
+                            $invData[$nid][$colId] = implode($listSeparator, $items);
                         }
                     } else {
                         $key = $colDef['entryKey'] ?? '';
@@ -1721,7 +1765,8 @@ class GenerateReportMessageHandler
                     }
                 }
 
-                // --- Sort node ids by configured sort column (single column, asc/desc) ---
+                // --- Sort node ids by configured sort column (single column, asc/desc).
+                //     If no column sort is set, default to hostname ASC (natural-case). ---
                 $sortColId = null;
                 $sortDir = 'asc';
                 foreach ($columns as $colDef) {
@@ -1740,6 +1785,14 @@ class GenerateReportMessageHandler
                             ? ((float) $va <=> (float) $vb)
                             : strnatcasecmp($va, $vb);
                         return $sortDir === 'desc' ? -$cmp : $cmp;
+                    });
+                } else {
+                    usort($nodeIds, function ($a, $b) use ($nodeMap) {
+                        $na = $nodeMap[$a] ?? null;
+                        $nb = $nodeMap[$b] ?? null;
+                        $ha = $na ? ($na->getHostname() ?? $na->getName() ?? $na->getIpAddress() ?? '') : '';
+                        $hb = $nb ? ($nb->getHostname() ?? $nb->getName() ?? $nb->getIpAddress() ?? '') : '';
+                        return strnatcasecmp((string) $ha, (string) $hb);
                     });
                 }
 
@@ -7409,6 +7462,47 @@ class GenerateReportMessageHandler
             default:
                 return $cellVal === $matchVal;
         }
+    }
+
+    /**
+     * Evaluate inventory list-mode filters against an entry's key and value.
+     * Each filter: { field: 'key'|'value', operator, value }.
+     * Match mode 'all' = AND (default), 'any' = OR.
+     */
+    private function matchListFilters(string $entryKey, string $entryValue, array $filters, string $match): bool
+    {
+        if (empty($filters)) return true;
+        $results = [];
+        foreach ($filters as $f) {
+            $field = ($f['field'] ?? 'value') === 'key' ? 'key' : 'value';
+            $op = (string) ($f['operator'] ?? 'eq');
+            $needle = (string) ($f['value'] ?? '');
+            $haystack = $field === 'key' ? $entryKey : $entryValue;
+            $hl = mb_strtolower($haystack);
+            $nl = mb_strtolower($needle);
+            switch ($op) {
+                case 'neq':
+                    $results[] = $haystack !== $needle;
+                    break;
+                case 'contains':
+                    $results[] = $needle !== '' && str_contains($hl, $nl);
+                    break;
+                case 'not_contains':
+                    $results[] = $needle === '' || !str_contains($hl, $nl);
+                    break;
+                case 'starts_with':
+                    $results[] = $needle !== '' && str_starts_with($hl, $nl);
+                    break;
+                case 'ends_with':
+                    $results[] = $needle !== '' && str_ends_with($hl, $nl);
+                    break;
+                case 'eq':
+                default:
+                    $results[] = $haystack === $needle;
+                    break;
+            }
+        }
+        return $match === 'any' ? in_array(true, $results, true) : !in_array(false, $results, true);
     }
 
     private function hexToRgb(string $hex): array
