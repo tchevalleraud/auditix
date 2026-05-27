@@ -20,7 +20,7 @@ export default function OidcProvidersPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/settings/global/oidc/providers");
+    const res = await fetch("/api/admin/oidc/providers");
     setProviders(res.ok ? await res.json() : []);
     setLoading(false);
   }, []);
@@ -29,7 +29,7 @@ export default function OidcProvidersPage() {
 
   const remove = async (p: OidcProvider) => {
     if (!confirm(t("admin_oidc.confirmDelete", { name: p.name }))) return;
-    await fetch(`/api/settings/global/oidc/providers/${p.id}`, { method: "DELETE" });
+    await fetch(`/api/admin/oidc/providers/${p.id}`, { method: "DELETE" });
     await load();
   };
 

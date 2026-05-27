@@ -101,9 +101,9 @@ export default function EditProviderPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     const [p, r, cm, ctx] = await Promise.all([
-      fetch(`/api/settings/global/oidc/providers/${providerId}`).then((res) => (res.ok ? res.json() : null)),
-      fetch(`/api/settings/global/oidc/providers/${providerId}/role-mappings`).then((res) => (res.ok ? res.json() : [])),
-      fetch(`/api/settings/global/oidc/providers/${providerId}/context-mappings`).then((res) => (res.ok ? res.json() : [])),
+      fetch(`/api/admin/oidc/providers/${providerId}`).then((res) => (res.ok ? res.json() : null)),
+      fetch(`/api/admin/oidc/providers/${providerId}/role-mappings`).then((res) => (res.ok ? res.json() : [])),
+      fetch(`/api/admin/oidc/providers/${providerId}/context-mappings`).then((res) => (res.ok ? res.json() : [])),
       fetch("/api/contexts").then((res) => (res.ok ? res.json() : [])),
     ]);
     setProvider(p);
@@ -141,7 +141,7 @@ export default function EditProviderPage() {
     };
     if (secretInput !== null) payload.clientSecret = secretInput;
 
-    const res = await fetch(`/api/settings/global/oidc/providers/${providerId}`, {
+    const res = await fetch(`/api/admin/oidc/providers/${providerId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -432,7 +432,7 @@ function RolesTab({ providerId, mappings, reload }: { providerId: string; mappin
 
   const add = async () => {
     setError(null);
-    const res = await fetch(`/api/settings/global/oidc/providers/${providerId}/role-mappings`, {
+    const res = await fetch(`/api/admin/oidc/providers/${providerId}/role-mappings`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ claimValue: claim.trim(), grantedRole: role.trim(), priority }),
     });
@@ -440,7 +440,7 @@ function RolesTab({ providerId, mappings, reload }: { providerId: string; mappin
     setClaim(""); await reload();
   };
   const remove = async (id: number) => {
-    await fetch(`/api/settings/global/oidc/role-mappings/${id}`, { method: "DELETE" });
+    await fetch(`/api/admin/oidc/role-mappings/${id}`, { method: "DELETE" });
     await reload();
   };
 
@@ -501,7 +501,7 @@ function ContextsTab({ providerId, mappings, options, reload }: { providerId: st
 
   const add = async () => {
     setError(null);
-    const res = await fetch(`/api/settings/global/oidc/providers/${providerId}/context-mappings`, {
+    const res = await fetch(`/api/admin/oidc/providers/${providerId}/context-mappings`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ claimValue: claim.trim(), contextId }),
     });
@@ -509,7 +509,7 @@ function ContextsTab({ providerId, mappings, options, reload }: { providerId: st
     setClaim(""); await reload();
   };
   const remove = async (id: number) => {
-    await fetch(`/api/settings/global/oidc/context-mappings/${id}`, { method: "DELETE" });
+    await fetch(`/api/admin/oidc/context-mappings/${id}`, { method: "DELETE" });
     await reload();
   };
 
@@ -567,7 +567,7 @@ function TestTab({ providerId, discoveryUrl }: { providerId: string; discoveryUr
 
   const run = async () => {
     setLoading(true); setResult(null);
-    const res = await fetch(`/api/settings/global/oidc/providers/${providerId}/test`, {
+    const res = await fetch(`/api/admin/oidc/providers/${providerId}/test`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ discoveryUrl: url.trim() }),
     });

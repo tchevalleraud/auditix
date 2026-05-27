@@ -21,7 +21,7 @@ export default function NewMailServerPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await fetch("/api/settings/global/mail/servers", {
+    const res = await fetch("/api/admin/mail/servers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: name.trim(), host: host.trim(), fromEmail: fromEmail.trim() }),

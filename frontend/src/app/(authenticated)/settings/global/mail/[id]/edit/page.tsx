@@ -45,7 +45,7 @@ export default function EditMailServerPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/settings/global/mail/servers/${serverId}`);
+    const res = await fetch(`/api/admin/mail/servers/${serverId}`);
     if (!res.ok) {
       router.push("/settings/global/mail");
       return;
@@ -79,7 +79,7 @@ export default function EditMailServerPage() {
     if (passwordInput !== null) {
       body.password = passwordInput;
     }
-    const res = await fetch(`/api/settings/global/mail/servers/${server.id}`, {
+    const res = await fetch(`/api/admin/mail/servers/${server.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -100,7 +100,7 @@ export default function EditMailServerPage() {
   const remove = async () => {
     if (!server) return;
     if (!confirm(t("admin_mail.confirmDelete", { name: server.name }))) return;
-    await fetch(`/api/settings/global/mail/servers/${server.id}`, { method: "DELETE" });
+    await fetch(`/api/admin/mail/servers/${server.id}`, { method: "DELETE" });
     router.push("/settings/global/mail");
   };
 
@@ -108,7 +108,7 @@ export default function EditMailServerPage() {
     if (!server) return;
     setTesting(true);
     setTestResult(null);
-    const res = await fetch(`/api/settings/global/mail/servers/${server.id}/test`, {
+    const res = await fetch(`/api/admin/mail/servers/${server.id}/test`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ recipient: testRecipient.trim() }),

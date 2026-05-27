@@ -18,7 +18,7 @@ export default function NewProviderPage() {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    const res = await fetch("/api/settings/global/oidc/providers", {
+    const res = await fetch("/api/admin/oidc/providers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: name.trim(), slug: slug.trim() }),

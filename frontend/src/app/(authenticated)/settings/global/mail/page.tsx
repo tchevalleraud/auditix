@@ -22,7 +22,7 @@ export default function MailServersPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/settings/global/mail/servers");
+    const res = await fetch("/api/admin/mail/servers");
     setServers(res.ok ? await res.json() : []);
     setLoading(false);
   }, []);
@@ -31,7 +31,7 @@ export default function MailServersPage() {
 
   const remove = async (s: MailServer) => {
     if (!confirm(t("admin_mail.confirmDelete", { name: s.name }))) return;
-    await fetch(`/api/settings/global/mail/servers/${s.id}`, { method: "DELETE" });
+    await fetch(`/api/admin/mail/servers/${s.id}`, { method: "DELETE" });
     await load();
   };
 

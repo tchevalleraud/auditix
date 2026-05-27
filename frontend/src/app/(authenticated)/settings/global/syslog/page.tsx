@@ -24,7 +24,7 @@ export default function SyslogServersPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/settings/global/syslog/servers");
+    const res = await fetch("/api/admin/syslog/servers");
     setServers(res.ok ? await res.json() : []);
     setLoading(false);
   }, []);
@@ -33,7 +33,7 @@ export default function SyslogServersPage() {
 
   const remove = async (s: SyslogServer) => {
     if (!confirm(t("admin_syslog.confirmDelete", { name: s.name }))) return;
-    await fetch(`/api/settings/global/syslog/servers/${s.id}`, { method: "DELETE" });
+    await fetch(`/api/admin/syslog/servers/${s.id}`, { method: "DELETE" });
     await load();
   };
 

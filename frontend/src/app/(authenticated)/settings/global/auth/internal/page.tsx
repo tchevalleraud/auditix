@@ -26,7 +26,7 @@ export default function InternalAuthPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/settings/global/auth/settings");
+    const res = await fetch("/api/admin/auth/settings");
     setSettings(res.ok ? await res.json() : null);
     setLoading(false);
   }, []);
@@ -37,7 +37,7 @@ export default function InternalAuthPage() {
     if (!settings) return;
     setSaving(true);
     setSaved(false);
-    const res = await fetch("/api/settings/global/auth/settings", {
+    const res = await fetch("/api/admin/auth/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),

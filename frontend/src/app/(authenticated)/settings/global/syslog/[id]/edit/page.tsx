@@ -53,7 +53,7 @@ export default function EditSyslogServerPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/settings/global/syslog/servers/${serverId}`);
+    const res = await fetch(`/api/admin/syslog/servers/${serverId}`);
     if (!res.ok) {
       router.push("/settings/global/syslog");
       return;
@@ -73,7 +73,7 @@ export default function EditSyslogServerPage() {
     if (!server) return;
     setSaving(true);
     setError(null);
-    const res = await fetch(`/api/settings/global/syslog/servers/${server.id}`, {
+    const res = await fetch(`/api/admin/syslog/servers/${server.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -102,7 +102,7 @@ export default function EditSyslogServerPage() {
   const remove = async () => {
     if (!server) return;
     if (!confirm(t("admin_syslog.confirmDelete", { name: server.name }))) return;
-    await fetch(`/api/settings/global/syslog/servers/${server.id}`, { method: "DELETE" });
+    await fetch(`/api/admin/syslog/servers/${server.id}`, { method: "DELETE" });
     router.push("/settings/global/syslog");
   };
 
@@ -110,7 +110,7 @@ export default function EditSyslogServerPage() {
     if (!server) return;
     setTesting(true);
     setTestResult(null);
-    const res = await fetch(`/api/settings/global/syslog/servers/${server.id}/test`, {
+    const res = await fetch(`/api/admin/syslog/servers/${server.id}/test`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
