@@ -3050,6 +3050,8 @@
     "invListSourceKeys": "Cles",
     "invListSourceValues": "Valeurs",
     "invListSeparator": "Sep",
+    "invListCompact": "Plages",
+    "invListCompactHint": "Regroupe les cles consecutives de type interface (numeriques separees par / ou :) en plages, par exemple \"1/1, 1/2, 1/3\" devient \"1/1-1/3\".",
     "invListFiltersTitle": "Filtres",
     "invListFiltersAdd": "Ajouter",
     "invListFiltersEmpty": "Aucun filtre. Toutes les entrees sont incluses.",

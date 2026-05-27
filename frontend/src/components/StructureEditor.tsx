@@ -161,6 +161,8 @@ export interface InventoryTableColumn {
   listFilters?: InventoryListFilter[];
   /** list aggregation: 'all' = AND, 'any' = OR (default 'all'). */
   listFiltersMatch?: "all" | "any";
+  /** list aggregation: collapse consecutive numeric interface-like keys into ranges (e.g. "1/1, 1/2, 1/3" → "1/1-1/3"). */
+  listCompact?: boolean;
   sort?: "asc" | "desc";
   /** Fixed column width as a percentage of the table width (1-100). Undefined = auto. */
   width?: number;
@@ -4192,6 +4194,22 @@ function InventoryTableProperties({
                       placeholder=", "
                       className="w-16 shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-xs text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-emerald-400 font-mono"
                     />
+                    <label
+                      className="flex items-center gap-1.5 shrink-0 ml-1 cursor-pointer"
+                      title={t("structure.invListCompactHint")}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => updateColumnProp(col.id, { listCompact: !col.listCompact })}
+                      >
+                        {col.listCompact ? (
+                          <ToggleRight className="h-5 w-5 text-emerald-500" />
+                        ) : (
+                          <ToggleLeft className="h-5 w-5 text-slate-400" />
+                        )}
+                      </button>
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invListCompact")}</span>
+                    </label>
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">{t("structure.invListFiltersTitle")}</span>
