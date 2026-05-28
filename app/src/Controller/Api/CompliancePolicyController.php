@@ -33,6 +33,7 @@ class CompliancePolicyController extends AbstractController
             'description' => $p->getDescription(),
             'enabled' => $p->isEnabled(),
             'matchRules' => $p->getMatchRules(),
+            'managedByPlugin' => $p->getManagedByPlugin(),
             'createdAt' => $p->getCreatedAt()->format('c'),
         ];
     }
@@ -109,6 +110,11 @@ class CompliancePolicyController extends AbstractController
         MessageBusInterface $bus,
     ): JsonResponse {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
+
+        if ($policy->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This policy is managed by the "%s" plugin. Disable the plugin to modify it.', $policy->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -539,6 +545,11 @@ class CompliancePolicyController extends AbstractController
     public function delete(CompliancePolicy $policy, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
+
+        if ($policy->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This policy is managed by the "%s" plugin. Disable the plugin to remove it.', $policy->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $em->remove($policy);
         $em->flush();
 

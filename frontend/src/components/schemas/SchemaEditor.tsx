@@ -44,6 +44,7 @@ import {
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -360,6 +361,7 @@ interface SchemaPayload {
   id: number;
   name: string;
   description: string | null;
+  managedByPlugin: string | null;
   viewport: { pan?: { x: number; y: number }; zoom?: number } | null;
   canvasSize: { width: number; height: number } | null;
   gridSize: number;
@@ -823,7 +825,7 @@ export default function SchemaEditor({ schemaId }: Props) {
   // Save (debounced)
   // ---------------------------------------------------------------------------
   const scheduleSave = useCallback((nextElements: SchemaElement[], nextPan?: { x: number; y: number }, nextZoom?: number) => {
-    if (!data) return;
+    if (!data || data.managedByPlugin) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaving(true);
     saveTimer.current = setTimeout(async () => {
@@ -845,7 +847,12 @@ export default function SchemaEditor({ schemaId }: Props) {
   // Update schema-level metadata (name, description) with the same debounce as element saves.
   const metaSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const updateSchemaMeta = useCallback((patch: { name?: string; description?: string | null }) => {
-    setData((cur) => cur ? { ...cur, ...patch } : cur);
+    let blocked = false;
+    setData((cur) => {
+      if (!cur || cur.managedByPlugin) { blocked = true; return cur; }
+      return { ...cur, ...patch };
+    });
+    if (blocked) return;
     if (metaSaveTimer.current) clearTimeout(metaSaveTimer.current);
     setSaving(true);
     metaSaveTimer.current = setTimeout(async () => {
@@ -2108,8 +2115,15 @@ export default function SchemaEditor({ schemaId }: Props) {
     );
   }
 
+  const readOnly = !!data.managedByPlugin;
+
   return (
     <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
+      {readOnly && (
+        <div className="px-4 pt-3">
+          <PluginManagedBanner pluginId={data.managedByPlugin!} />
+        </div>
+      )}
       {/* Top bar */}
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2">
         <div className="flex items-center gap-3">
@@ -2165,8 +2179,9 @@ export default function SchemaEditor({ schemaId }: Props) {
                 <button
                   key={tl.kind}
                   onClick={() => setTool(tl.kind)}
+                  disabled={readOnly && tl.kind !== "select"}
                   title={t(tl.labelKey)}
-                  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     tool === tl.kind
                       ? "bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300"
                       : "text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
@@ -2284,6 +2299,7 @@ export default function SchemaEditor({ schemaId }: Props) {
               data={data}
               elementsCount={elements.length}
               onChangeMeta={updateSchemaMeta}
+              readOnly={readOnly}
             />
           )}
         </div>
@@ -2425,10 +2441,12 @@ function SchemaInfoPanel({
   data,
   elementsCount,
   onChangeMeta,
+  readOnly = false,
 }: {
   data: SchemaPayload;
   elementsCount: number;
   onChangeMeta: (patch: { name?: string; description?: string | null }) => void;
+  readOnly?: boolean;
 }) {
   const { t, locale } = useI18n();
   const dateLocale =
@@ -2447,7 +2465,8 @@ function SchemaInfoPanel({
           type="text"
           value={data.name}
           onChange={(e) => onChangeMeta({ name: e.target.value })}
-          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm"
+          disabled={readOnly}
+          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </Section>
 
@@ -2457,7 +2476,8 @@ function SchemaInfoPanel({
           onChange={(e) => onChangeMeta({ description: e.target.value || null })}
           rows={4}
           placeholder="Décrivez ce schéma…"
-          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs resize-y"
+          disabled={readOnly}
+          className="w-full rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1.5 text-xs resize-y disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </Section>
 

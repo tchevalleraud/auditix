@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import FolderPicker from "@/components/FolderPicker";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 import {
   Loader2,
   ArrowLeft,
@@ -152,6 +153,7 @@ interface RuleDetail {
   extracts: ExtractItem[];
   translations: TranslationEntry[] | null;
   conditionTree: ConditionTree | null;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -357,8 +359,25 @@ export default function CollectionRuleEditPage() {
     if (res.ok) setNodeTags(await res.json());
   }, [current]);
 
+  const readOnly = !!rule?.managedByPlugin;
+
+  // The `enabled` flag stays editable even for plugin-managed rules (backend
+  // allows it). For managed rules the full-form Save is disabled, so persist
+  // the toggle on its own via an enabled-only PUT.
+  const toggleEnabled = async () => {
+    const next = !enabled;
+    setEnabled(next);
+    if (!readOnly) return;
+    const res = await fetch(`/api/collection-rules/${ruleId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (res.ok) setRule(await res.json());
+  };
+
   const saveEdit = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || readOnly) return;
     setSaving(true);
     try {
       const body = { name, description: description || null, enabled, folderId };
@@ -377,6 +396,7 @@ export default function CollectionRuleEditPage() {
   };
 
   const saveCollect = async () => {
+    if (readOnly) return;
     setSavingCollect(true);
     try {
       const body = {
@@ -434,7 +454,7 @@ export default function CollectionRuleEditPage() {
   };
 
   const saveExtract = async () => {
-    if (!extractName.trim() || !extractRegex.trim()) return;
+    if (!extractName.trim() || !extractRegex.trim() || readOnly) return;
     setSavingExtract(true);
     // Build keyGroup and valueMap from extractGroups
     const keyIdx = extractGroups.findIndex((g) => g.isKey);
@@ -515,6 +535,7 @@ export default function CollectionRuleEditPage() {
   };
 
   const duplicateExtract = async (ext: ExtractItem) => {
+    if (readOnly) return;
     const payload = {
       name: `${ext.name} (copie)`,
       regex: ext.regex,
@@ -546,6 +567,7 @@ export default function CollectionRuleEditPage() {
   };
 
   const deleteExtract = async (id: number) => {
+    if (readOnly) return;
     const res = await fetch(`/api/collection-rules/${ruleId}/extracts/${id}`, { method: "DELETE" });
     if (res.ok) {
       setExtracts((prev) => prev.filter((e) => e.id !== id));
@@ -581,6 +603,7 @@ export default function CollectionRuleEditPage() {
   };
 
   const handleExtractDrop = async (targetId: number) => {
+    if (readOnly) { setDraggedExtractId(null); setDragOverExtractId(null); return; }
     if (draggedExtractId === null || draggedExtractId === targetId) {
       setDraggedExtractId(null);
       setDragOverExtractId(null);
@@ -1151,6 +1174,8 @@ export default function CollectionRuleEditPage() {
         )}
       </div>
 
+      {readOnly && <PluginManagedBanner pluginId={rule.managedByPlugin!} />}
+
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-800 shrink-0">
         <nav className="flex gap-1">
@@ -1183,8 +1208,9 @@ export default function CollectionRuleEditPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                disabled={readOnly}
                 placeholder={t("collection_rules.namePlaceholder")}
-                className={inputCls}
+                className={`${inputCls} disabled:opacity-60 disabled:cursor-not-allowed`}
               />
             </div>
             <div className="space-y-1.5">
@@ -1193,19 +1219,21 @@ export default function CollectionRuleEditPage() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
+                disabled={readOnly}
                 placeholder={t("collection_rules.descriptionPlaceholder")}
-                className={`${inputCls} resize-none`}
+                className={`${inputCls} resize-none disabled:opacity-60 disabled:cursor-not-allowed`}
               />
             </div>
+            {/* The enabled toggle stays active even for plugin-managed rules. */}
             <label className="flex items-center gap-3 cursor-pointer">
-              <button type="button" onClick={() => setEnabled(!enabled)}>
+              <button type="button" onClick={toggleEnabled}>
                 {enabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
               </button>
               <span className="text-sm text-slate-700 dark:text-slate-300">
                 {enabled ? t("collection_rules.enabled") : t("collection_rules.disabled")}
               </span>
             </label>
-            <div className="space-y-1.5">
+            <div className={`space-y-1.5 ${readOnly ? "opacity-60 pointer-events-none" : ""}`}>
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.folder")}</label>
               <FolderPicker folders={ruleFolderTree} value={folderId} onChange={setFolderId} rootLabel={t("collection_rules.noFolder")} />
             </div>
@@ -1213,7 +1241,7 @@ export default function CollectionRuleEditPage() {
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
             <button
               onClick={saveEdit}
-              disabled={saving || !name.trim()}
+              disabled={saving || !name.trim() || readOnly}
               className={btnPrimaryCls}
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1234,7 +1262,8 @@ export default function CollectionRuleEditPage() {
                 <button
                   type="button"
                   onClick={() => setSource("local")}
-                  className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all flex-1 ${
+                  disabled={readOnly}
+                  className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all flex-1 disabled:opacity-60 disabled:cursor-not-allowed ${
                     source === "local"
                       ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                       : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
@@ -1249,7 +1278,8 @@ export default function CollectionRuleEditPage() {
                 <button
                   type="button"
                   onClick={() => setSource("ssh")}
-                  className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all flex-1 ${
+                  disabled={readOnly}
+                  className={`flex items-center gap-2.5 rounded-lg border-2 px-4 py-3 text-sm font-medium transition-all flex-1 disabled:opacity-60 disabled:cursor-not-allowed ${
                     source === "ssh"
                       ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white"
                       : "border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
@@ -1266,11 +1296,11 @@ export default function CollectionRuleEditPage() {
             <div className="space-y-1.5">
               <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("collection_rules.commandLabel")}</label>
               <p className="text-xs text-slate-400 dark:text-slate-500">{t("collection_rules.commandHelp")}</p>
-              <input type="text" value={command} onChange={(e) => setCommand(e.target.value)} placeholder={t("collection_rules.commandPlaceholder")} className={inputCls} />
+              <input type="text" value={command} onChange={(e) => setCommand(e.target.value)} disabled={readOnly} placeholder={t("collection_rules.commandPlaceholder")} className={`${inputCls} disabled:opacity-60 disabled:cursor-not-allowed`} />
             </div>
           </div>
           <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
-            <button onClick={saveCollect} disabled={savingCollect} className={btnPrimaryCls}>
+            <button onClick={saveCollect} disabled={savingCollect || readOnly} className={btnPrimaryCls}>
               {savingCollect ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               {t("common.save")}
             </button>
@@ -1287,12 +1317,13 @@ export default function CollectionRuleEditPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={openAssistedExtract}
-                  className="flex items-center gap-2 rounded-lg border border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-colors"
+                  disabled={readOnly}
+                  className="flex items-center gap-2 rounded-lg border border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10 px-4 py-2.5 text-sm font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   <Wand2 className="h-4 w-4" />
                   {t("collection_rules.assistedAddExtract")}
                 </button>
-                <button onClick={openNewExtract} className={btnPrimaryCls}>
+                <button onClick={openNewExtract} disabled={readOnly} className={btnPrimaryCls}>
                   <Plus className="h-4 w-4" />
                   {t("collection_rules.addExtract")}
                 </button>
@@ -1327,12 +1358,14 @@ export default function CollectionRuleEditPage() {
                           return (
                             <div
                               key={ext.id}
-                              draggable
+                              draggable={!readOnly}
                               onDragStart={(e) => {
+                                if (readOnly) { e.preventDefault(); return; }
                                 setDraggedExtractId(ext.id);
                                 e.dataTransfer.effectAllowed = "move";
                               }}
                               onDragOver={(e) => {
+                                if (readOnly) return;
                                 e.preventDefault();
                                 e.dataTransfer.dropEffect = "move";
                                 setDragOverExtractId(ext.id);
@@ -1356,11 +1389,11 @@ export default function CollectionRuleEditPage() {
                                   : ""
                               }`}
                             >
-                              <div className="cursor-grab active:cursor-grabbing text-slate-300 dark:text-slate-600 hover:text-slate-400 dark:hover:text-slate-500">
+                              <div className={`text-slate-300 dark:text-slate-600 ${readOnly ? "opacity-40 cursor-not-allowed" : "cursor-grab active:cursor-grabbing hover:text-slate-400 dark:hover:text-slate-500"}`}>
                                 <GripVertical className="h-4 w-4" />
                               </div>
                               <div className={`w-2 h-2 rounded-full flex-shrink-0 ${HIGHLIGHT_COLORS[globalIdx % HIGHLIGHT_COLORS.length].bg}`} />
-                              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => openEditExtract(ext)}>
+                              <div className={`flex-1 min-w-0 ${readOnly ? "" : "cursor-pointer"}`} onClick={() => { if (!readOnly) openEditExtract(ext); }}>
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-medium text-slate-900 dark:text-slate-100">{ext.name}</span>
                                   {ext.multiline && (
@@ -1369,26 +1402,28 @@ export default function CollectionRuleEditPage() {
                                 </div>
                                 <code className="text-xs text-slate-500 dark:text-slate-400 font-mono">{ext.regex}</code>
                               </div>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button
-                                  onClick={() => openEditExtract(ext)}
-                                  className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => duplicateExtract(ext)}
-                                  className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                                >
-                                  <Copy className="h-3.5 w-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => { if (confirm(t("collection_rules.deleteExtract"))) deleteExtract(ext.id); }}
-                                  className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </div>
+                              {!readOnly && (
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <button
+                                    onClick={() => openEditExtract(ext)}
+                                    className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => duplicateExtract(ext)}
+                                    className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                                  >
+                                    <Copy className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => { if (confirm(t("collection_rules.deleteExtract"))) deleteExtract(ext.id); }}
+                                    className="p-1.5 rounded-md text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           );
                         })}
@@ -1942,7 +1977,7 @@ export default function CollectionRuleEditPage() {
                   </button>
                   <button
                     onClick={saveExtract}
-                    disabled={savingExtract || !extractName.trim() || !extractRegex.trim()}
+                    disabled={savingExtract || !extractName.trim() || !extractRegex.trim() || readOnly}
                     className={btnPrimaryCls}
                   >
                     {savingExtract ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1959,6 +1994,7 @@ export default function CollectionRuleEditPage() {
       {activeTab === "translations" && rule && (
         <TranslationsTab
           rule={rule}
+          readOnly={readOnly}
           onSave={async (translations) => {
             await fetch(`/api/collection-rules/${ruleId}`, {
               method: "PUT",
@@ -1976,6 +2012,7 @@ export default function CollectionRuleEditPage() {
       {activeTab === "conditions" && rule && (
         <ConditionsTab
           rule={rule}
+          readOnly={readOnly}
           categories={categories}
           tags={nodeTags}
           inventoryStructure={inventoryStructure}
@@ -2461,8 +2498,9 @@ const OPERATORS = [
   { key: "is_not_empty", label: "is not empty", noValue: true },
 ];
 
-function TranslationsTab({ rule, onSave, t }: {
+function TranslationsTab({ rule, readOnly, onSave, t }: {
   rule: RuleDetail;
+  readOnly: boolean;
   onSave: (translations: TranslationEntry[]) => Promise<void>;
   t: (k: string) => string;
 }) {
@@ -2476,6 +2514,7 @@ function TranslationsTab({ rule, onSave, t }: {
   const availableExtracts = extracts.filter((e) => !usedExtractIds.includes(e.id));
 
   const handleSave = async () => {
+    if (readOnly) return;
     setSaving(true);
     await onSave(translations);
     setSaving(false);
@@ -2514,11 +2553,11 @@ function TranslationsTab({ rule, onSave, t }: {
     <div className="space-y-6">
       {/* Add translation */}
       <div className="flex items-center gap-3">
-        <select value={addingExtractId} onChange={(e) => setAddingExtractId(e.target.value)} className={inputCls + " max-w-xs"}>
+        <select value={addingExtractId} onChange={(e) => setAddingExtractId(e.target.value)} disabled={readOnly} className={inputCls + " max-w-xs disabled:opacity-60 disabled:cursor-not-allowed"}>
           <option value="">{t("collection_rules.translationSelectExtract")}</option>
           {availableExtracts.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
         </select>
-        <button onClick={addTranslation} disabled={!addingExtractId}
+        <button onClick={addTranslation} disabled={!addingExtractId || readOnly}
           className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 disabled:opacity-50">
           <Plus className="h-4 w-4" /> {t("collection_rules.translationAdd")}
         </button>
@@ -2535,11 +2574,11 @@ function TranslationsTab({ rule, onSave, t }: {
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{tr.extractName}</span>
               <span className="text-xs text-slate-400 ml-2">({t("collection_rules.translationExtract")})</span>
             </div>
-            <button onClick={() => removeTranslation(idx)} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+            <button onClick={() => removeTranslation(idx)} disabled={readOnly} className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-60 disabled:cursor-not-allowed">
               <Trash2 className="h-4 w-4 text-red-400" />
             </button>
           </div>
-          <div className="p-6">
+          <div className={`p-6 ${readOnly ? "opacity-60 pointer-events-none" : ""}`}>
             <TranslationBlockEditor
               blocks={tr.conditionTree.blocks}
               onChange={(blocks) => updateTranslation(idx, { ...tr, conditionTree: { blocks } })}
@@ -2551,7 +2590,7 @@ function TranslationsTab({ rule, onSave, t }: {
 
       {translations.length > 0 && (
         <div className="flex items-center gap-3">
-          <button onClick={handleSave} disabled={saving} className={btnPrimaryCls}>
+          <button onClick={handleSave} disabled={saving || readOnly} className={btnPrimaryCls}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
             {saved ? t("common.save") : t("common.save")}
           </button>
@@ -2941,8 +2980,9 @@ const normalizeBlock = (b: ConditionBlock): ConditionBlock => ({
   children: b.children?.map(normalizeBlock),
 });
 
-function ConditionsTab({ rule, categories, tags, inventoryStructure, onSave, t }: {
+function ConditionsTab({ rule, readOnly, categories, tags, inventoryStructure, onSave, t }: {
   rule: RuleDetail;
+  readOnly: boolean;
   categories: InventoryCategory[];
   tags: NodeTagItem[];
   inventoryStructure: InventoryStructureCategory[];
@@ -2963,6 +3003,7 @@ function ConditionsTab({ rule, categories, tags, inventoryStructure, onSave, t }
   const [saved, setSaved] = useState(false);
 
   const handleSave = async () => {
+    if (readOnly) return;
     setSaving(true);
     try {
       await onSave(blocks.length === 0 ? null : { blocks });
@@ -2979,18 +3020,20 @@ function ConditionsTab({ rule, categories, tags, inventoryStructure, onSave, t }
         <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
           {t("collection_rules.conditionsHelp")}
         </p>
-        <ConditionBlockEditor
-          blocks={blocks}
-          onChange={setBlocks}
-          categories={categories}
-          tags={tags}
-          inventoryStructure={inventoryStructure}
-          t={t}
-        />
+        <div className={readOnly ? "opacity-60 pointer-events-none" : ""}>
+          <ConditionBlockEditor
+            blocks={blocks}
+            onChange={setBlocks}
+            categories={categories}
+            tags={tags}
+            inventoryStructure={inventoryStructure}
+            t={t}
+          />
+        </div>
       </div>
 
       <div className="flex items-center gap-3">
-        <button onClick={handleSave} disabled={saving} className={btnPrimaryCls}>
+        <button onClick={handleSave} disabled={saving || readOnly} className={btnPrimaryCls}>
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : saved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
           {t("common.save")}
         </button>

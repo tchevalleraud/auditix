@@ -46,6 +46,9 @@ class ComplianceRule
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private Context $context;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -53,6 +56,10 @@ class ComplianceRule
     {
         $this->createdAt = new \DateTimeImmutable();
     }
+
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
 
     public function getId(): ?int { return $this->id; }
     public function getIdentifier(): ?string { return $this->identifier; }

@@ -19,6 +19,7 @@ interface SchemaSummary {
   id: number;
   name: string;
   description: string | null;
+  managedByPlugin: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -194,9 +195,19 @@ export default function ReportSchemasListPage() {
               {items.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                   <td className="px-4 py-3">
-                    <Link href={`/reports/schemas/${item.id}`} className="text-sm font-medium text-slate-900 dark:text-white hover:underline">
-                      {item.name}
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <Link href={`/reports/schemas/${item.id}`} className="text-sm font-medium text-slate-900 dark:text-white hover:underline">
+                        {item.name}
+                      </Link>
+                      {item.managedByPlugin && (
+                        <span
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-violet-700 bg-violet-100 ring-1 ring-inset ring-violet-200 dark:text-violet-300 dark:bg-violet-900/40 dark:ring-violet-700/50"
+                          title={`Managed by plugin "${item.managedByPlugin}" — read-only`}
+                        >
+                          {item.managedByPlugin}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 max-w-md truncate">
                     {item.description ?? "—"}
@@ -221,14 +232,16 @@ export default function ReportSchemasListPage() {
                       >
                         <Download className="h-4 w-4" />
                       </a>
-                      <button
-                        onClick={() => handleDelete(item.id, item.name)}
-                        disabled={busyId === item.id}
-                        className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors disabled:opacity-50"
-                        title={t("schemas.delete")}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {!item.managedByPlugin && (
+                        <button
+                          onClick={() => handleDelete(item.id, item.name)}
+                          disabled={busyId === item.id}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                          title={t("schemas.delete")}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

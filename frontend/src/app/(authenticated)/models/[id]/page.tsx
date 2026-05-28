@@ -5,6 +5,7 @@ import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 import { ArrowLeft, Loader2, Pencil, TerminalSquare, Terminal, FileSearch, ToggleLeft, ToggleRight, FileText, Plus, X, Search, LinkIcon, Info, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Activity, Cpu, MemoryStick, HardDrive, Thermometer, Clock, ArrowDownToLine, ArrowUpFromLine, ShieldAlert } from "lucide-react";
 
 interface ManufacturerOption {
@@ -21,6 +22,7 @@ interface ModelDetail {
   sendCtrlChar: string | null;
   nvdKeyword: string | null;
   manufacturer: ManufacturerOption;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -211,7 +213,7 @@ export default function ModelDetailPage() {
 
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !manufacturerId) return;
+    if (!name.trim() || !manufacturerId || model?.managedByPlugin) return;
     setSaving(true);
     setSaved(false);
 
@@ -239,7 +241,7 @@ export default function ModelDetailPage() {
 
   const handleSaveScript = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!model) return;
+    if (!model || model.managedByPlugin) return;
     setSavingScript(true);
     setSavedScript(false);
 
@@ -269,6 +271,7 @@ export default function ModelDetailPage() {
 
   const handleSaveMonitoring = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (model?.managedByPlugin) return;
     setSavingMonitoring(true);
     setSavedMonitoring(false);
     try {
@@ -399,7 +402,9 @@ export default function ModelDetailPage() {
 
   if (!model) return null;
 
-  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+  const readOnly = !!model.managedByPlugin;
+
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "edit", label: t("models.tabEdit"), icon: <Pencil className="h-4 w-4" /> },
@@ -435,6 +440,8 @@ export default function ModelDetailPage() {
         </div>
       </div>
 
+      {readOnly && <PluginManagedBanner pluginId={model.managedByPlugin!} />}
+
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-800">
         <nav className="flex gap-1">
@@ -468,6 +475,7 @@ export default function ModelDetailPage() {
                   value={manufacturerId}
                   onChange={(e) => setManufacturerId(e.target.value ? Number(e.target.value) : "")}
                   required
+                  disabled={readOnly}
                   className={inputCls}
                 >
                   <option value="">{t("models.selectManufacturer")}</option>
@@ -487,6 +495,7 @@ export default function ModelDetailPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  disabled={readOnly}
                   className={inputCls}
                   placeholder={t("models.namePlaceholder")}
                 />
@@ -499,6 +508,7 @@ export default function ModelDetailPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   rows={2}
+                  disabled={readOnly}
                   className={`${inputCls} resize-none`}
                   placeholder={t("models.descriptionPlaceholder")}
                 />
@@ -508,7 +518,7 @@ export default function ModelDetailPage() {
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
-                disabled={saving || !name.trim() || !manufacturerId}
+                disabled={saving || !name.trim() || !manufacturerId || readOnly}
                 className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -536,6 +546,7 @@ export default function ModelDetailPage() {
               <select
                 value={sendCtrlChar}
                 onChange={(e) => setSendCtrlChar(e.target.value)}
+                disabled={readOnly}
                 className={inputCls}
               >
                 <option value="">{t("models.sendCtrlCharNone")}</option>
@@ -558,6 +569,7 @@ export default function ModelDetailPage() {
                 value={connectionScript}
                 onChange={(e) => setConnectionScript(e.target.value)}
                 rows={10}
+                disabled={readOnly}
                 className={`${inputCls} font-mono`}
                 placeholder={t("models.connectionScriptPlaceholder")}
               />
@@ -566,7 +578,7 @@ export default function ModelDetailPage() {
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
-                disabled={savingScript}
+                disabled={savingScript || readOnly}
                 className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -594,6 +606,7 @@ export default function ModelDetailPage() {
                 type="text"
                 value={nvdKeyword}
                 onChange={(e) => setNvdKeyword(e.target.value)}
+                disabled={readOnly}
                 className={inputCls}
                 placeholder={t("models.nvdKeywordPlaceholder")}
               />
@@ -601,7 +614,7 @@ export default function ModelDetailPage() {
             <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="submit"
-                disabled={savingScript}
+                disabled={savingScript || readOnly}
                 className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {savingScript && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -620,13 +633,15 @@ export default function ModelDetailPage() {
           {/* Action bar */}
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-500 dark:text-slate-400">{t("models.collectionSubtitle")}</p>
-            <button
-              onClick={openAssociateModal}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              {t("models.associateCommand")}
-            </button>
+            {!readOnly && (
+              <button
+                onClick={openAssociateModal}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                {t("models.associateCommand")}
+              </button>
+            )}
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
@@ -663,7 +678,7 @@ export default function ModelDetailPage() {
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-slate-800">
                       {manualCmds.map((cmd) => (
-                        <CmdRow key={cmd.id} cmd={cmd} t={t} onDissociate={() => handleDissociate(cmd.id)} />
+                        <CmdRow key={cmd.id} cmd={cmd} t={t} onDissociate={readOnly ? undefined : () => handleDissociate(cmd.id)} />
                       ))}
                     </div>
                   </div>
@@ -704,13 +719,15 @@ export default function ModelDetailPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-slate-500 dark:text-slate-400">{t("models.rulesSubtitle")}</p>
-            <button
-              onClick={openAssociateRuleModal}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              {t("models.associateRule")}
-            </button>
+            {!readOnly && (
+              <button
+                onClick={openAssociateRuleModal}
+                className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+              >
+                <Plus className="h-4 w-4" />
+                {t("models.associateRule")}
+              </button>
+            )}
           </div>
 
           <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
@@ -745,7 +762,7 @@ export default function ModelDetailPage() {
                     </div>
                     <div className="divide-y divide-slate-100 dark:divide-slate-800">
                       {manualRules.map((rule) => (
-                        <RuleRow key={rule.id} rule={rule} t={t} onDissociate={() => handleDissociateRule(rule.id)} />
+                        <RuleRow key={rule.id} rule={rule} t={t} onDissociate={readOnly ? undefined : () => handleDissociateRule(rule.id)} />
                       ))}
                     </div>
                   </div>
@@ -820,7 +837,8 @@ export default function ModelDetailPage() {
                           value={item.oid}
                           onChange={(e) => updateMonitoringOid(cat.key, "oid", e.target.value)}
                           placeholder={t("models.monitoringOidPlaceholder")}
-                          className={`w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors ${
+                          disabled={readOnly}
+                          className={`w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm font-mono text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${
                             !item.enabled ? "opacity-50" : ""
                           }`}
                         />
@@ -828,7 +846,8 @@ export default function ModelDetailPage() {
                       <button
                         type="button"
                         onClick={() => updateMonitoringOid(cat.key, "enabled", !item.enabled)}
-                        className="shrink-0"
+                        disabled={readOnly}
+                        className="shrink-0 disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {item.enabled ? (
                           <ToggleRight className="h-6 w-6 text-emerald-500" />
@@ -844,7 +863,7 @@ export default function ModelDetailPage() {
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="submit"
-                  disabled={savingMonitoring}
+                  disabled={savingMonitoring || readOnly}
                   className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-5 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
                 >
                   {savingMonitoring && <Loader2 className="h-4 w-4 animate-spin" />}

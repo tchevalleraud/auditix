@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import FolderPicker from "@/components/FolderPicker";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 import {
   Loader2,
   Terminal,
@@ -161,7 +162,7 @@ export default function CollectionCommandsPage() {
   };
 
   const saveCmd = async () => {
-    if (!cmdName.trim() || !cmdCommands.trim()) return;
+    if (!cmdName.trim() || !cmdCommands.trim() || editingCmd?.managedByPlugin) return;
     setSaving(true);
     try {
       const body = { name: cmdName, description: cmdDesc || null, commands: cmdCommands, enabled: cmdEnabled, folderId: cmdFolderId };
@@ -360,15 +361,16 @@ export default function CollectionCommandsPage() {
       {/* Command Modal */}
       {cmdModal && (
         <Modal title={editingCmd ? t("collection_commands.editCommand") : t("collection_commands.newCommand")} onClose={() => setCmdModal(false)}>
+          {editingCmd?.managedByPlugin && <PluginManagedBanner pluginId={editingCmd.managedByPlugin} />}
           <div className="space-y-4">
             <Field label={t("collection_commands.name")}>
-              <input type="text" value={cmdName} onChange={(e) => setCmdName(e.target.value)} placeholder={t("collection_commands.namePlaceholder")} className={inputCls} />
+              <input type="text" value={cmdName} onChange={(e) => setCmdName(e.target.value)} disabled={!!editingCmd?.managedByPlugin} placeholder={t("collection_commands.namePlaceholder")} className={`${inputCls} disabled:opacity-60 disabled:cursor-not-allowed`} />
             </Field>
             <Field label={t("collection_commands.description")}>
-              <input type="text" value={cmdDesc} onChange={(e) => setCmdDesc(e.target.value)} placeholder={t("collection_commands.descriptionPlaceholder")} className={inputCls} />
+              <input type="text" value={cmdDesc} onChange={(e) => setCmdDesc(e.target.value)} disabled={!!editingCmd?.managedByPlugin} placeholder={t("collection_commands.descriptionPlaceholder")} className={`${inputCls} disabled:opacity-60 disabled:cursor-not-allowed`} />
             </Field>
             <Field label={t("collection_commands.commandsLabel")} help={t("collection_commands.commandsHelp")}>
-              <textarea value={cmdCommands} onChange={(e) => setCmdCommands(e.target.value)} rows={5} placeholder={t("collection_commands.commandsPlaceholder")} className={`${inputCls} font-mono resize-none`} />
+              <textarea value={cmdCommands} onChange={(e) => setCmdCommands(e.target.value)} rows={5} disabled={!!editingCmd?.managedByPlugin} placeholder={t("collection_commands.commandsPlaceholder")} className={`${inputCls} font-mono resize-none disabled:opacity-60 disabled:cursor-not-allowed`} />
             </Field>
             <Field label={t("collection_commands.folder")}>
               <FolderPicker folders={tree.folders} value={cmdFolderId} onChange={setCmdFolderId} rootLabel={t("collection_commands.noFolder")} />
@@ -380,7 +382,7 @@ export default function CollectionCommandsPage() {
               <span className="text-sm text-slate-700 dark:text-slate-300">{t("collection_commands.enabled")}</span>
             </label>
           </div>
-          <ModalFooter t={t} saving={saving} disabled={!cmdName.trim() || !cmdCommands.trim()} onCancel={() => setCmdModal(false)} onSave={saveCmd} />
+          <ModalFooter t={t} saving={saving} disabled={!cmdName.trim() || !cmdCommands.trim() || !!editingCmd?.managedByPlugin} onCancel={() => setCmdModal(false)} onSave={saveCmd} />
         </Modal>
       )}
 

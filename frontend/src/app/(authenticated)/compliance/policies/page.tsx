@@ -20,6 +20,7 @@ import {
   AlertTriangle,
   ClipboardCheck,
   Tag,
+  Lock,
 } from "lucide-react";
 
 interface PolicyItem {
@@ -27,6 +28,7 @@ interface PolicyItem {
   name: string;
   description: string | null;
   enabled: boolean;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -112,6 +114,7 @@ export default function CompliancePoliciesPage() {
   };
 
   const handleDelete = async (policy: PolicyItem) => {
+    if (policy.managedByPlugin) { setDeleteConfirm(null); return; }
     await fetch(`/api/compliance-policies/${policy.id}`, { method: "DELETE" });
     setDeleteConfirm(null);
     loadPolicies();
@@ -323,12 +326,18 @@ export default function CompliancePoliciesPage() {
                         >
                           <Pencil className="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
                         </button>
-                        <button
-                          onClick={() => setDeleteConfirm(policy)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
-                        </button>
+                        {policy.managedByPlugin ? (
+                          <span title={policy.managedByPlugin} className="inline-flex p-1.5 text-slate-300 dark:text-slate-600">
+                            <Lock className="h-4 w-4" />
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setDeleteConfirm(policy)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

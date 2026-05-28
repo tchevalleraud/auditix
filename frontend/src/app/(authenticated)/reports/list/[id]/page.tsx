@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 
 import StructureEditor, { type ReportBlock } from "@/components/StructureEditor";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 interface Author {
   id: string;
@@ -77,6 +78,7 @@ interface ReportDetail {
   blocks: ReportBlock[];
   nodes: ReportNodeRef[];
   theme: { id: number; name: string } | null;
+  managedByPlugin: string | null;
   generatingStatus: string | null;
   generatedAt: string | null;
   generatedFile: string | null;
@@ -272,6 +274,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveGeneral = async () => {
+    if (report?.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -298,6 +301,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveAuthors = async (newAuthors: Author[]) => {
+    if (report?.managedByPlugin) return;
     setAuthors(newAuthors);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -316,6 +320,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveRecipients = async (newRecipients: Author[]) => {
+    if (report?.managedByPlugin) return;
     setRecipients(newRecipients);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -334,6 +339,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveRevisions = async (newRevisions: Revision[]) => {
+    if (report?.managedByPlugin) return;
     setRevisions(newRevisions);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -352,6 +358,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveSettings = async () => {
+    if (report?.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -377,6 +384,7 @@ export default function ReportDetailPage() {
   };
 
   const handleSaveBlocks = async (newBlocks: ReportBlock[]) => {
+    if (report?.managedByPlugin) return;
     setBlocks(newBlocks);
     try {
       const res = await fetch(`/api/reports/${reportId}`, {
@@ -395,6 +403,7 @@ export default function ReportDetailPage() {
   };
 
   const handleDelete = async () => {
+    if (report?.managedByPlugin) return;
     await fetch(`/api/reports/${reportId}`, { method: "DELETE" });
     router.push("/reports/list");
   };
@@ -422,6 +431,9 @@ export default function ReportDetailPage() {
       </div>
     );
   }
+
+  const readOnly = !!report.managedByPlugin;
+  const roInput = readOnly ? `${inputClass} opacity-60 cursor-not-allowed` : inputClass;
 
   const leftTabs = [
     { key: "general" as TabKey, label: t("reports.tabGeneral"), icon: <BookOpen className="h-4 w-4" /> },
@@ -472,6 +484,8 @@ export default function ReportDetailPage() {
           {isGenerating ? t("reports.generating") : t("reports.generate")}
         </button>
       </div>
+
+      {readOnly && <PluginManagedBanner pluginId={report.managedByPlugin!} />}
 
       {/* Tabs + Content */}
       <div className="flex gap-6 flex-1 min-h-0">
@@ -526,7 +540,8 @@ export default function ReportDetailPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     placeholder={t("reports.titlePlaceholder")}
-                    className={inputClass}
+                    disabled={readOnly}
+                    className={roInput}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -536,7 +551,8 @@ export default function ReportDetailPage() {
                     value={subtitle}
                     onChange={(e) => setSubtitle(e.target.value)}
                     placeholder={t("reports.subtitlePlaceholder")}
-                    className={inputClass}
+                    disabled={readOnly}
+                    className={roInput}
                   />
                 </div>
               </div>
@@ -547,7 +563,8 @@ export default function ReportDetailPage() {
                 <select
                   value={selectedThemeId ?? ""}
                   onChange={(e) => setSelectedThemeId(e.target.value ? Number(e.target.value) : null)}
-                  className={inputClass}
+                  disabled={readOnly}
+                  className={roInput}
                 >
                   <option value="">{t("reports.noTheme")}</option>
                   {themes.map((th) => (
@@ -568,8 +585,8 @@ export default function ReportDetailPage() {
                     { key: "revision", label: t("reports.optionRevision"), value: showRevision, set: setShowRevision },
                     { key: "illustrations", label: t("reports.optionIllustrations"), value: showIllustrations, set: setShowIllustrations },
                   ].map((opt) => (
-                    <label key={opt.key} className="flex items-center gap-3 cursor-pointer">
-                      <button type="button" onClick={() => opt.set(!opt.value)}>
+                    <label key={opt.key} className={`flex items-center gap-3 ${readOnly ? "cursor-not-allowed" : "cursor-pointer"}`}>
+                      <button type="button" onClick={() => opt.set(!opt.value)} disabled={readOnly} className="disabled:cursor-not-allowed">
                         {opt.value ? (
                           <ToggleRight className="h-6 w-6 text-emerald-500" />
                         ) : (
@@ -586,7 +603,7 @@ export default function ReportDetailPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSaveGeneral}
-                  disabled={saving}
+                  disabled={saving || readOnly}
                   className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -609,7 +626,8 @@ export default function ReportDetailPage() {
                       handleSaveAuthors(newAuthors);
                       setExpandedAuthors((prev) => new Set([...prev, newId]));
                     }}
-                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    disabled={readOnly}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                     {t("reports.addAuthor")}
@@ -734,7 +752,8 @@ export default function ReportDetailPage() {
                       handleSaveRecipients(newRecipients);
                       setExpandedRecipients((prev) => new Set([...prev, newId]));
                     }}
-                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    disabled={readOnly}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                     {t("reports.addRecipient")}
@@ -866,7 +885,8 @@ export default function ReportDetailPage() {
                       handleSaveRevisions(newRevisions);
                       setExpandedRevisions((prev) => new Set([...prev, newId]));
                     }}
-                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+                    disabled={readOnly}
+                    className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                     {t("reports.addRevision")}
@@ -948,7 +968,7 @@ export default function ReportDetailPage() {
 
           {activeTab === "structure" && (
             <div className="flex-1 min-h-0 flex flex-col">
-              <div className="flex-1 min-h-0">
+              <div className={`flex-1 min-h-0 ${readOnly ? "pointer-events-none opacity-60" : ""}`}>
                 <StructureEditor
                   blocks={blocks}
                   onChange={handleSaveBlocks}
@@ -1083,7 +1103,8 @@ export default function ReportDetailPage() {
                     value={reportName}
                     onChange={(e) => setReportName(e.target.value)}
                     placeholder={t("reports.namePlaceholder")}
-                    className={inputClass}
+                    disabled={readOnly}
+                    className={roInput}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -1093,7 +1114,8 @@ export default function ReportDetailPage() {
                     onChange={(e) => setReportDescription(e.target.value)}
                     rows={3}
                     placeholder={t("reports.descriptionPlaceholder")}
-                    className={`${inputClass} resize-none`}
+                    disabled={readOnly}
+                    className={`${roInput} resize-none`}
                   />
                 </div>
               </div>
@@ -1105,7 +1127,8 @@ export default function ReportDetailPage() {
                   <button
                     type="button"
                     onClick={() => setReportType("general")}
-                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                    disabled={readOnly}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors disabled:cursor-not-allowed ${
                       reportType === "general"
                         ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
                         : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
@@ -1120,7 +1143,8 @@ export default function ReportDetailPage() {
                   <button
                     type="button"
                     onClick={() => setReportType("node")}
-                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors ${
+                    disabled={readOnly}
+                    className={`flex flex-col items-center gap-2 rounded-lg border-2 p-4 transition-colors disabled:cursor-not-allowed ${
                       reportType === "node"
                         ? "border-slate-900 dark:border-white bg-slate-50 dark:bg-slate-800"
                         : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
@@ -1158,6 +1182,7 @@ export default function ReportDetailPage() {
                             <input
                               type="checkbox"
                               checked={isSelected}
+                              disabled={readOnly}
                               onChange={(e) => {
                                 if (e.target.checked) {
                                   setSelectedNodeIds([...selectedNodeIds, node.id]);
@@ -1165,7 +1190,7 @@ export default function ReportDetailPage() {
                                   setSelectedNodeIds(selectedNodeIds.filter((id) => id !== node.id));
                                 }
                               }}
-                              className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-500"
+                              className="rounded border-slate-300 dark:border-slate-600 text-slate-900 dark:text-white focus:ring-slate-500 disabled:cursor-not-allowed"
                             />
                             <Server className="h-4 w-4 text-slate-400" />
                             <div className="flex-1 min-w-0">
@@ -1191,7 +1216,8 @@ export default function ReportDetailPage() {
                 <select
                   value={reportLocale}
                   onChange={(e) => setReportLocale(e.target.value)}
-                  className={inputClass}
+                  disabled={readOnly}
+                  className={roInput}
                 >
                   <option value="fr">Francais</option>
                   <option value="en">English</option>
@@ -1213,9 +1239,11 @@ export default function ReportDetailPage() {
                     >
                       <Tag className="h-3 w-3" />
                       {tag}
-                      <button onClick={() => removeTag(tag)} className="ml-0.5 hover:text-red-500">
-                        <X className="h-3 w-3" />
-                      </button>
+                      {!readOnly && (
+                        <button onClick={() => removeTag(tag)} className="ml-0.5 hover:text-red-500">
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
                     </span>
                   ))}
                 </div>
@@ -1231,11 +1259,12 @@ export default function ReportDetailPage() {
                       }
                     }}
                     placeholder={t("reports.tagPlaceholder")}
-                    className={inputClass}
+                    disabled={readOnly}
+                    className={roInput}
                   />
                   <button
                     onClick={addTag}
-                    disabled={!tagInput.trim()}
+                    disabled={!tagInput.trim() || readOnly}
                     className="flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 transition-colors"
                   >
                     <Plus className="h-4 w-4" />
@@ -1247,7 +1276,7 @@ export default function ReportDetailPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSaveSettings}
-                  disabled={saving || !reportName.trim()}
+                  disabled={saving || !reportName.trim() || readOnly}
                   className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
                 >
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -1256,17 +1285,19 @@ export default function ReportDetailPage() {
               </div>
 
               {/* Danger zone */}
-              <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-red-50/50 dark:bg-red-500/5 p-6 space-y-3">
-                <h3 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("reports.dangerZone")}</h3>
-                <p className="text-sm text-red-600/80 dark:text-red-400/80">{t("reports.dangerZoneDesc")}</p>
-                <button
-                  onClick={() => setDeleteConfirm(true)}
-                  className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("reports.deleteReport")}
-                </button>
-              </div>
+              {!readOnly && (
+                <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-red-50/50 dark:bg-red-500/5 p-6 space-y-3">
+                  <h3 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("reports.dangerZone")}</h3>
+                  <p className="text-sm text-red-600/80 dark:text-red-400/80">{t("reports.dangerZoneDesc")}</p>
+                  <button
+                    onClick={() => setDeleteConfirm(true)}
+                    className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t("reports.deleteReport")}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

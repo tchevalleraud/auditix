@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import { MailEditor, type Block } from "@/components/MailEditor";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 import {
   ArrowLeft,
   Loader2,
@@ -25,6 +26,7 @@ interface MailReport {
   description: string | null;
   locale: string;
   type: string;
+  managedByPlugin: string | null;
   blocks: Block[];
   recipientUserIds: number[];
   recipientExternalEmails: string[];
@@ -98,7 +100,7 @@ export default function MailReportDetailPage() {
   const update = (patch: Partial<MailReport>) => setReport((r) => (r ? { ...r, ...patch } : r));
 
   const save = async () => {
-    if (!report) return;
+    if (!report || report.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/mail-reports/${report.id}`, {
@@ -156,6 +158,8 @@ export default function MailReportDetailPage() {
   }
   if (!report) return null;
 
+  const readOnly = !!report.managedByPlugin;
+
   const tabBtn = (k: Tab, label: string) => (
     <button
       onClick={() => setTab(k)}
@@ -203,7 +207,7 @@ export default function MailReportDetailPage() {
           </button>
           <button
             onClick={save}
-            disabled={saving}
+            disabled={saving || readOnly}
             className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -211,6 +215,8 @@ export default function MailReportDetailPage() {
           </button>
         </div>
       </div>
+
+      {readOnly && <PluginManagedBanner pluginId={report.managedByPlugin!} />}
 
       <div className="border-b border-slate-200 dark:border-slate-800 flex items-center gap-1">
         {tabBtn("general", t("mail_reports.tab_general"))}
@@ -225,11 +231,12 @@ export default function MailReportDetailPage() {
           servers={servers}
           contextUsers={contextUsers}
           onChange={update}
+          readOnly={readOnly}
         />
       )}
 
       {tab === "editor" && current && (
-        <EditorTab report={report} onChange={update} contextId={current.id} />
+        <EditorTab report={report} onChange={update} contextId={current.id} readOnly={readOnly} />
       )}
 
       {tab === "history" && (
@@ -245,17 +252,19 @@ function GeneralTab({
   servers,
   contextUsers,
   onChange,
+  readOnly = false,
 }: {
   report: MailReport;
   themes: ThemeRef[];
   servers: MailServerRef[];
   contextUsers: ContextUser[];
   onChange: (patch: Partial<MailReport>) => void;
+  readOnly?: boolean;
 }) {
   const { t } = useI18n();
   const [externalDraft, setExternalDraft] = useState("");
 
-  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400/30";
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-400/30 disabled:opacity-60 disabled:cursor-not-allowed";
   const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5";
   const card = "rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5";
 
@@ -286,15 +295,15 @@ function GeneralTab({
         <div className="space-y-4">
           <div>
             <label className={labelCls}>{t("mail_reports.name")}</label>
-            <input className={inputCls} value={report.name} onChange={(e) => onChange({ name: e.target.value })} />
+            <input className={inputCls} value={report.name} onChange={(e) => onChange({ name: e.target.value })} disabled={readOnly} />
           </div>
           <div>
             <label className={labelCls}>{t("mail_reports.subject")}</label>
-            <input className={inputCls} value={report.subject} onChange={(e) => onChange({ subject: e.target.value })} placeholder={t("mail_reports.subjectPlaceholder")} />
+            <input className={inputCls} value={report.subject} onChange={(e) => onChange({ subject: e.target.value })} placeholder={t("mail_reports.subjectPlaceholder")} disabled={readOnly} />
           </div>
           <div>
             <label className={labelCls}>{t("mail_reports.preheader")}</label>
-            <input className={inputCls} value={report.preheader ?? ""} onChange={(e) => onChange({ preheader: e.target.value })} />
+            <input className={inputCls} value={report.preheader ?? ""} onChange={(e) => onChange({ preheader: e.target.value })} disabled={readOnly} />
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("mail_reports.preheaderHint")}</p>
           </div>
           <div>
@@ -302,6 +311,7 @@ function GeneralTab({
             <select
               className={inputCls}
               value={report.theme.id}
+              disabled={readOnly}
               onChange={(e) => {
                 const tId = parseInt(e.target.value, 10);
                 const tn = themes.find((x) => x.id === tId);
@@ -322,6 +332,7 @@ function GeneralTab({
             <select
               className={inputCls}
               value={report.mailServer ? report.mailServer.id : ""}
+              disabled={readOnly}
               onChange={(e) => {
                 const v = e.target.value;
                 if (!v) { onChange({ mailServer: null }); return; }
@@ -359,9 +370,9 @@ function GeneralTab({
                       <input
                         type="checkbox"
                         checked={checked}
-                        disabled={!u.email}
+                        disabled={!u.email || readOnly}
                         onChange={() => toggleUser(u.id)}
-                        className="h-4 w-4 rounded border-slate-300 dark:border-slate-600"
+                        className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                       />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">{fullName}</div>
@@ -380,14 +391,17 @@ function GeneralTab({
               {report.recipientExternalEmails.map((email) => (
                 <span key={email} className="inline-flex items-center gap-1 rounded-full bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 text-xs px-2 py-0.5">
                   {email}
-                  <button onClick={() => removeExternal(email)} className="hover:text-blue-900 dark:hover:text-blue-100">
-                    <X className="h-3 w-3" />
-                  </button>
+                  {!readOnly && (
+                    <button onClick={() => removeExternal(email)} className="hover:text-blue-900 dark:hover:text-blue-100">
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
                 </span>
               ))}
               <input
                 type="text"
                 value={externalDraft}
+                disabled={readOnly}
                 onChange={(e) => setExternalDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === ",") {
@@ -399,7 +413,7 @@ function GeneralTab({
                 }}
                 onBlur={() => addExternal(externalDraft)}
                 placeholder={t("mail_reports.externalEmailPlaceholder")}
-                className="flex-1 min-w-[160px] bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none"
+                className="flex-1 min-w-[160px] bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none disabled:cursor-not-allowed"
               />
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{t("mail_reports.externalEmailsHint")}</p>
@@ -410,7 +424,7 @@ function GeneralTab({
   );
 }
 
-function EditorTab({ report, onChange, contextId }: { report: MailReport; onChange: (patch: Partial<MailReport>) => void; contextId: number }) {
+function EditorTab({ report, onChange, contextId, readOnly = false }: { report: MailReport; onChange: (patch: Partial<MailReport>) => void; contextId: number; readOnly?: boolean }) {
   const { t } = useI18n();
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
   const [previewHtml, setPreviewHtml] = useState<string>("");
@@ -440,7 +454,9 @@ function EditorTab({ report, onChange, contextId }: { report: MailReport; onChan
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 min-h-[70vh]">
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 overflow-y-auto max-h-[80vh]">
         <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{t("mail_reports.blocks_section")}</h2>
-        <MailEditor blocks={report.blocks} onChange={(blocks) => onChange({ blocks })} />
+        <div className={readOnly ? "pointer-events-none opacity-60" : ""}>
+          <MailEditor blocks={report.blocks} onChange={(blocks) => onChange({ blocks })} />
+        </div>
       </div>
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-slate-900/40 overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-3 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">

@@ -2852,6 +2852,9 @@
     "confirmInstall": "Entendido — instalar",
     "export": "Exportar como ZIP"
   },
+  "pluginManaged": {
+    "banner": "Gestionado por el plugin «{plugin}» — solo lectura. Desactiva el plugin para editar este elemento."
+  },
   "pluginConfig": {
     "title": "Configurar plugin",
     "button": "Configurar",

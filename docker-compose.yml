@@ -133,6 +133,13 @@ services:
       <<: *worker-env
       WORKER_SERVICE_NAME: worker-orchestrator
 
+  worker-lifecycle-scheduler:
+    <<: *worker
+    command: php bin/console app:plugin:lifecycle-scheduler
+    environment:
+      <<: *worker-env
+      WORKER_SERVICE_NAME: worker-lifecycle-scheduler
+
   worker-supervisor:
     <<: *worker
     entrypoint: ["supervisor-entrypoint.sh"]

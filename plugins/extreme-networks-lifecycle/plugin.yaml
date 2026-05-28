@@ -19,6 +19,7 @@ entrypoint:
 
 capabilities:
   - lifecycle
+  - configuration
 
 manufacturers:
   - "Extreme Networks"

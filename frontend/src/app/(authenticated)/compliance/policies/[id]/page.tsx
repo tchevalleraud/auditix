@@ -39,12 +39,14 @@ import {
   Eye,
 } from "lucide-react";
 import MatchRuleEditor, { type MatchBlock, type MatchRulesData, type InventoryStructure } from "@/components/MatchRuleEditor";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 interface PolicyDetail {
   id: number;
   name: string;
   description: string | null;
   enabled: boolean;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -280,7 +282,7 @@ export default function CompliancePolicyEditPage() {
   }, [activeTab, policyId, loadResults]);
 
   const saveGeneral = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || policy?.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/compliance-policies/${policyId}`, {
@@ -304,11 +306,12 @@ export default function CompliancePolicyEditPage() {
   };
 
   const handleDelete = async () => {
+    if (policy?.managedByPlugin) return;
     await fetch(`/api/compliance-policies/${policyId}`, { method: "DELETE" });
     router.push("/compliance/policies");
   };
 
-  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
 
   const tabs = [
     { key: "general" as TabKey, label: t("compliance_policies.tabGeneral"), icon: <BookOpen className="h-4 w-4" /> },
@@ -334,6 +337,8 @@ export default function CompliancePolicyEditPage() {
     );
   }
 
+  const readOnly = !!policy.managedByPlugin;
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -357,6 +362,8 @@ export default function CompliancePolicyEditPage() {
           </div>
         )}
       </div>
+
+      {readOnly && <PluginManagedBanner pluginId={policy.managedByPlugin!} />}
 
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-800 shrink-0">
@@ -390,6 +397,7 @@ export default function CompliancePolicyEditPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t("compliance_policies.namePlaceholder")}
+                  disabled={readOnly}
                   className={inputCls}
                 />
               </div>
@@ -400,11 +408,12 @@ export default function CompliancePolicyEditPage() {
                   onChange={(e) => setDescription(e.target.value)}
                   rows={3}
                   placeholder={t("compliance_policies.descriptionPlaceholder")}
+                  disabled={readOnly}
                   className={`${inputCls} resize-none`}
                 />
               </div>
               <label className="flex items-center gap-3 cursor-pointer">
-                <button type="button" onClick={() => setEnabled(!enabled)}>
+                <button type="button" onClick={() => setEnabled(!enabled)} disabled={readOnly} className="disabled:opacity-60 disabled:cursor-not-allowed">
                   {enabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
                 </button>
                 <span className="text-sm text-slate-700 dark:text-slate-300">
@@ -415,7 +424,7 @@ export default function CompliancePolicyEditPage() {
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
               <button
                 onClick={saveGeneral}
-                disabled={saving || !name.trim()}
+                disabled={saving || !name.trim() || readOnly}
                 className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
               >
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -425,23 +434,25 @@ export default function CompliancePolicyEditPage() {
           </div>
 
           {/* Danger zone */}
-          <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-white dark:bg-slate-900 shadow-sm">
-            <div className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">{t("compliance_policies.dangerZone")}</h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.dangerZoneDesc")}</p>
+          {!readOnly && (
+            <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-white dark:bg-slate-900 shadow-sm">
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">{t("compliance_policies.dangerZone")}</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.dangerZoneDesc")}</p>
+                  </div>
+                  <button
+                    onClick={() => setDeleteConfirm(true)}
+                    className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    {t("common.delete")}
+                  </button>
                 </div>
-                <button
-                  onClick={() => setDeleteConfirm(true)}
-                  className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {t("common.delete")}
-                </button>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -489,7 +500,7 @@ export default function CompliancePolicyEditPage() {
                   <Link href={`/compliance/rules/${rule.id}`} className="rounded-lg p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 transition-colors">
                     <Pencil className="h-3.5 w-3.5" />
                   </Link>
-                  {extra && (
+                  {extra && !readOnly && (
                     <button
                       onClick={async () => {
                         await fetch(`/api/compliance-policies/${policyId}/rules/remove`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ruleId: rule.id }) });
@@ -602,10 +613,12 @@ export default function CompliancePolicyEditPage() {
                   <ClipboardCheck className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
                   <p className="text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.noRulesInPolicy")}</p>
                   <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("compliance_policies.noRulesInPolicyDesc")}</p>
-                  <button onClick={() => { setShowAddRuleModal(true); setAddRuleSearch(""); }} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
-                    <Plus className="h-4 w-4" />
-                    {t("compliance_policies.addExtraRule")}
-                  </button>
+                  {!readOnly && (
+                    <button onClick={() => { setShowAddRuleModal(true); setAddRuleSearch(""); }} className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                      <Plus className="h-4 w-4" />
+                      {t("compliance_policies.addExtraRule")}
+                    </button>
+                  )}
                 </div>
               );
             }
@@ -614,12 +627,14 @@ export default function CompliancePolicyEditPage() {
 
             return (
               <>
-                <div className="flex items-center justify-end">
-                  <button onClick={() => { setShowAddRuleModal(true); setAddRuleSearch(""); }} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
-                    <Link2 className="h-4 w-4" />
-                    {t("compliance_policies.addExtraRule")}
-                  </button>
-                </div>
+                {!readOnly && (
+                  <div className="flex items-center justify-end">
+                    <button onClick={() => { setShowAddRuleModal(true); setAddRuleSearch(""); }} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                      <Link2 className="h-4 w-4" />
+                      {t("compliance_policies.addExtraRule")}
+                    </button>
+                  </div>
+                )}
                 <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
                   <div className="divide-y divide-slate-100 dark:divide-slate-800">
                     {folder && renderFolder(folder, 0)}
@@ -769,25 +784,27 @@ export default function CompliancePolicyEditPage() {
                       </select>
                     )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    {someSelected && (
-                      <button
-                        onClick={() => setConfirmBulkRemove(true)}
-                        className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        {t("compliance_policies.removeSelectedNodes", { count: String(selectedNodeIds.size) })}
+                  {!readOnly && (
+                    <div className="flex items-center gap-3">
+                      {someSelected && (
+                        <button
+                          onClick={() => setConfirmBulkRemove(true)}
+                          className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {t("compliance_policies.removeSelectedNodes", { count: String(selectedNodeIds.size) })}
+                        </button>
+                      )}
+                      <button onClick={() => { setShowTagSelector(true); setSelectedTagIds([]); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                        <Tag className="h-4 w-4" />
+                        {t("compliance_policies.addByTags")}
                       </button>
-                    )}
-                    <button onClick={() => { setShowTagSelector(true); setSelectedTagIds([]); }} className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                      <Tag className="h-4 w-4" />
-                      {t("compliance_policies.addByTags")}
-                    </button>
-                    <button onClick={() => { setShowAddNodeModal(true); setAddNodeSearch(""); setAllNodes([]); }} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
-                      <Plus className="h-4 w-4" />
-                      {t("compliance_policies.addNode")}
-                    </button>
-                  </div>
+                      <button onClick={() => { setShowAddNodeModal(true); setAddNodeSearch(""); setAllNodes([]); }} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors">
+                        <Plus className="h-4 w-4" />
+                        {t("compliance_policies.addNode")}
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {policyNodes.length === 0 ? (
@@ -870,17 +887,19 @@ export default function CompliancePolicyEditPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3">
-                              <button
-                                onClick={async () => {
-                                  await fetch(`/api/compliance-policies/${policyId}/nodes/remove`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nodeIds: [node.id] }) });
-                                  loadNodes();
-                                  setSelectedNodeIds((prev) => { const next = new Set(prev); next.delete(node.id); return next; });
-                                }}
-                                className="rounded-lg p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
-                                title={t("compliance_policies.removeNode")}
-                              >
-                                <Minus className="h-3.5 w-3.5" />
-                              </button>
+                              {!readOnly && (
+                                <button
+                                  onClick={async () => {
+                                    await fetch(`/api/compliance-policies/${policyId}/nodes/remove`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nodeIds: [node.id] }) });
+                                    loadNodes();
+                                    setSelectedNodeIds((prev) => { const next = new Set(prev); next.delete(node.id); return next; });
+                                  }}
+                                  className="rounded-lg p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors opacity-0 group-hover:opacity-100"
+                                  title={t("compliance_policies.removeNode")}
+                                >
+                                  <Minus className="h-3.5 w-3.5" />
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -1084,7 +1103,7 @@ export default function CompliancePolicyEditPage() {
                 {t("compliance_policies.autoMatchPreview")}
               </button>
               <button
-                disabled={savingMatchRules}
+                disabled={savingMatchRules || readOnly}
                 onClick={async () => {
                   setSavingMatchRules(true);
                   setMatchRulesSaved(false);
@@ -1114,13 +1133,15 @@ export default function CompliancePolicyEditPage() {
               <Filter className="mx-auto h-8 w-8 text-slate-300 dark:text-slate-600 mb-2" />
               <p className="text-sm text-slate-500 dark:text-slate-400">{t("compliance_policies.autoMatchNoRules")}</p>
               <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("compliance_policies.autoMatchNoRulesDesc")}</p>
-              <button
-                onClick={() => setMatchBlocks([{ type: "if", logic: "and", conditions: [{ field: "name", operator: "equals", value: "" }], result: "include" }])}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                {t("compliance_policies.autoMatchAddIf")}
-              </button>
+              {!readOnly && (
+                <button
+                  onClick={() => setMatchBlocks([{ type: "if", logic: "and", conditions: [{ field: "name", operator: "equals", value: "" }], result: "include" }])}
+                  className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                >
+                  <Plus className="h-4 w-4" />
+                  {t("compliance_policies.autoMatchAddIf")}
+                </button>
+              )}
             </div>
           ) : (
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">

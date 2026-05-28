@@ -2852,6 +2852,9 @@
     "confirmInstall": "Capito — installa",
     "export": "Esporta come ZIP"
   },
+  "pluginManaged": {
+    "banner": "Gestito dal plugin «{plugin}» — sola lettura. Disattiva il plugin per modificare questo elemento."
+  },
   "pluginConfig": {
     "title": "Configura plugin",
     "button": "Configura",

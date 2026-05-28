@@ -154,6 +154,9 @@ class ReportTheme
     #[ORM\JoinColumn(nullable: true, onDelete: 'CASCADE')]
     private ?Context $context = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -162,6 +165,10 @@ class ReportTheme
         $this->createdAt = new \DateTimeImmutable();
         $this->styles = self::DEFAULT_STYLES;
     }
+
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
 
     public function getId(): ?int { return $this->id; }
     public function getName(): string { return $this->name; }

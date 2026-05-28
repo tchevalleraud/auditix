@@ -98,6 +98,11 @@ class ProductRangeController extends AbstractController
     public function update(ProductRange $range, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $range);
+
+        if ($range->getPluginSource() !== null) {
+            return $this->json(['error' => sprintf('This product range is managed by the "%s" plugin. Disable the plugin to modify it.', $range->getPluginSource())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
 
         if (empty($data['name'])) {
@@ -136,6 +141,11 @@ class ProductRangeController extends AbstractController
     public function delete(ProductRange $range, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $range);
+
+        if ($range->getPluginSource() !== null) {
+            return $this->json(['error' => sprintf('This product range is managed by the "%s" plugin. Disable the plugin to remove it.', $range->getPluginSource())], Response::HTTP_FORBIDDEN);
+        }
+
         $em->remove($range);
         $em->flush();
 

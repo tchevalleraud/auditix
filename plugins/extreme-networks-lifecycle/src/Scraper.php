@@ -38,15 +38,28 @@ final class Scraper
     ) {}
 
     /**
+     * @param string[] $ranges Gammes à scraper : switch_engine, fabric_engine, ers.
      * @return LifecycleData[]
      */
-    public function scrapeLifecycleData(): array
+    public function scrapeLifecycleData(array $ranges = ['switch_engine', 'fabric_engine', 'ers']): array
     {
         $entries = [];
-        $entries = array_merge($entries, $this->scrapeSwitchEnginePage());
-        $entries = array_merge($entries, $this->scrapeFabricEnginePage());
-        $entries = array_merge($entries, $this->scrapeErsPage());
+        if (in_array('switch_engine', $ranges, true)) {
+            $entries = array_merge($entries, $this->scrapeSwitchEnginePage());
+        }
+        if (in_array('fabric_engine', $ranges, true)) {
+            $entries = array_merge($entries, $this->scrapeFabricEnginePage());
+        }
+        if (in_array('ers', $ranges, true)) {
+            $entries = array_merge($entries, $this->scrapeErsPage());
+        }
 
+        if ($entries === []) {
+            return [];
+        }
+
+        // La page EoS porte les dates communes ; le merge ne s'applique qu'aux
+        // entrées retenues, donc inutile de la scraper si rien n'est sélectionné.
         $eosData = $this->scrapeEosPage();
         return $this->mergeEosDates($entries, $eosData);
     }

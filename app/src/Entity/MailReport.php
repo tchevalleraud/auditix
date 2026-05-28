@@ -83,6 +83,9 @@ class MailReport
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $sendHistory = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -133,6 +136,9 @@ class MailReport
     public function getSendHistory(): ?array { return $this->sendHistory; }
     public function setSendHistory(?array $v): static { $this->sendHistory = $v; return $this; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
     public function getUpdatedAt(): ?\DateTimeImmutable { return $this->updatedAt; }
     public function setUpdatedAt(?\DateTimeImmutable $v): static { $this->updatedAt = $v; return $this; }
 }

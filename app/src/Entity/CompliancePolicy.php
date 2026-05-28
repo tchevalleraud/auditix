@@ -39,6 +39,9 @@ class CompliancePolicy
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $matchRules = null;
 
+    #[ORM\Column(length: 128, nullable: true)]
+    private ?string $managedByPlugin = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -66,5 +69,8 @@ class CompliancePolicy
     public function removeNode(Node $node): static { $this->nodes->removeElement($node); return $this; }
     public function getMatchRules(): ?array { return $this->matchRules; }
     public function setMatchRules(?array $v): static { $this->matchRules = $v; return $this; }
+    public function getManagedByPlugin(): ?string { return $this->managedByPlugin; }
+    public function setManagedByPlugin(?string $v): static { $this->managedByPlugin = $v; return $this; }
+    public function isManagedByPlugin(): bool { return $this->managedByPlugin !== null; }
     public function getCreatedAt(): \DateTimeImmutable { return $this->createdAt; }
 }

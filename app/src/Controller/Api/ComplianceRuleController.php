@@ -36,6 +36,7 @@ class ComplianceRuleController extends AbstractController
             'multiRowMessages' => $r->getMultiRowMessages(),
             'folderId' => $r->getFolder()?->getId(),
             'hasInventoryCompare' => $this->hasInventoryCompare($r->getConditionTree()),
+            'managedByPlugin' => $r->getManagedByPlugin(),
             'createdAt' => $r->getCreatedAt()->format('c'),
         ];
     }
@@ -214,6 +215,11 @@ class ComplianceRuleController extends AbstractController
     public function update(ComplianceRule $rule, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
+
+        if ($rule->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This compliance rule is managed by the "%s" plugin. Disable the plugin to modify it.', $rule->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -244,6 +250,11 @@ class ComplianceRuleController extends AbstractController
     public function delete(ComplianceRule $rule, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $rule);
+
+        if ($rule->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This compliance rule is managed by the "%s" plugin. Disable the plugin to remove it.', $rule->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $em->remove($rule);
         $em->flush();
 

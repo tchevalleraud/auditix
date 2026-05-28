@@ -4,7 +4,9 @@ namespace App\Controller\Api;
 
 use App\Entity\Context;
 use App\Entity\InstalledPlugin;
+use App\Entity\Node;
 use App\Entity\VendorPlugin;
+use App\Message\RecalculateNodeScoreMessage;
 use App\Message\SyncLifecycleMessage;
 use App\Plugin\Capability\ProvidesCommands;
 use App\Plugin\Capability\ProvidesConfigurationSchema;
@@ -107,6 +109,7 @@ class PluginController extends AbstractController
         string $identifier,
         Request $request,
         EntityManagerInterface $em,
+        MessageBusInterface $bus,
     ): JsonResponse {
         $data = json_decode($request->getContent(), true);
         $contextId = $request->query->getInt('context');
@@ -144,6 +147,11 @@ class PluginController extends AbstractController
             $this->assetsImporter->import($plugin, $context);
         } elseif ($wasEnabled && !$vp->isEnabled()) {
             $this->assetsImporter->remove($identifier, $context);
+            // Removing the plugin's ProductRanges drops the lifecycle data feeding
+            // the System Updates score — recompute so node grades reset to neutral.
+            foreach ($em->getRepository(Node::class)->findBy(['context' => $context]) as $node) {
+                $bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
+            }
         }
 
         return $this->json([

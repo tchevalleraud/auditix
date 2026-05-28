@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
-type FieldType = "text" | "password" | "number" | "boolean" | "select" | "textarea";
+type FieldType = "text" | "password" | "number" | "boolean" | "select" | "multiselect" | "textarea";
 
 interface SelectOption {
   value: string | number;
@@ -53,8 +53,12 @@ export function PluginConfigureModal({ open, pluginName, schema, value, onClose,
         seed[f.name] = value[f.name];
       } else if (f.default !== undefined) {
         seed[f.name] = f.default;
+      } else if (f.type === "boolean") {
+        seed[f.name] = false;
+      } else if (f.type === "multiselect") {
+        seed[f.name] = [];
       } else {
-        seed[f.name] = f.type === "boolean" ? false : "";
+        seed[f.name] = "";
       }
     }
     setDraft(seed);
@@ -158,6 +162,33 @@ function FieldRenderer({ field, value, onChange }: {
             {field.label ?? field.name}
           </span>
         </label>
+        {help}
+      </div>
+    );
+  }
+
+  if (field.type === "multiselect") {
+    const selected: Array<string | number> = Array.isArray(value) ? (value as Array<string | number>) : [];
+    const toggle = (optValue: string | number) => {
+      const exists = selected.some((v) => String(v) === String(optValue));
+      onChange(exists ? selected.filter((v) => String(v) !== String(optValue)) : [...selected, optValue]);
+    };
+    return (
+      <div>
+        {label}
+        <div className="space-y-1.5">
+          {(field.options ?? []).map((o) => (
+            <label key={String(o.value)} className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={selected.some((v) => String(v) === String(o.value))}
+                onChange={() => toggle(o.value)}
+                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-400"
+              />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{o.label}</span>
+            </label>
+          ))}
+        </div>
         {help}
       </div>
     );

@@ -36,6 +36,7 @@ import {
   Terminal,
 } from "lucide-react";
 import CoverPageEditor, { type CoverPageData } from "@/components/CoverPageEditor";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 const FONTS = [
   "Calibri",
@@ -194,6 +195,7 @@ interface ThemeDetail {
   name: string;
   description: string | null;
   isDefault: boolean;
+  managedByPlugin: string | null;
   styles: ThemeStyles;
   createdAt: string;
 }
@@ -309,7 +311,7 @@ export default function ThemeDetailPage() {
   }, [loadTheme]);
 
   const handleSave = async () => {
-    if (!styles) return;
+    if (!styles || theme?.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/report-themes/${themeId}`, {
@@ -333,6 +335,7 @@ export default function ThemeDetailPage() {
   };
 
   const handleDelete = async () => {
+    if (theme?.managedByPlugin) return;
     await fetch(`/api/report-themes/${themeId}`, { method: "DELETE" });
     router.push("/reports/themes");
   };
@@ -371,6 +374,8 @@ export default function ThemeDetailPage() {
     );
   }
 
+  const readOnly = !!theme.managedByPlugin;
+
   const layoutSubTabs: TabKey[] = ["margins", "coverPage", "toc", "header", "footer"];
   const isLayoutActive = layoutSubTabs.includes(activeTab);
 
@@ -399,7 +404,7 @@ export default function ThemeDetailPage() {
           )}
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || readOnly}
             className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -407,6 +412,8 @@ export default function ThemeDetailPage() {
           </button>
         </div>
       </div>
+
+      {readOnly && <PluginManagedBanner pluginId={theme.managedByPlugin!} />}
 
       {/* Tab bar */}
       <div className="flex justify-between border-b border-slate-200 dark:border-slate-800">
@@ -561,7 +568,7 @@ export default function ThemeDetailPage() {
 
       {/* Tab content */}
       {activeTab === "general" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           {/* Left column – 60% config */}
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             {/* Colors */}
@@ -661,7 +668,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "margins" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.marginsSection")}</h2>
@@ -705,7 +712,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "headings" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             {/* Heading numbering */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
@@ -785,7 +792,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "paragraphs" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             {/* Paragraph alignment */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
@@ -922,7 +929,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "tables" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.tableStyles")}</h2>
@@ -978,7 +985,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "toc" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             {/* TOC general settings */}
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
@@ -1163,7 +1170,7 @@ export default function ThemeDetailPage() {
         };
 
         return (
-          <div className="flex-1 min-h-0 flex gap-6">
+          <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
             <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
               {/* Enable + separator */}
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
@@ -1218,7 +1225,7 @@ export default function ThemeDetailPage() {
       })()}
 
       {activeTab === "coverPage" && (
-        <div className="flex-1 min-h-0">
+        <div className={`flex-1 min-h-0 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <CoverPageEditor
             data={styles.coverPage}
             margins={styles.margins}
@@ -1229,7 +1236,7 @@ export default function ThemeDetailPage() {
       )}
 
       {activeTab === "cliCommand" && (
-        <div className="flex-1 min-h-0 flex gap-6">
+        <div className={`flex-1 min-h-0 flex gap-6 ${readOnly ? "pointer-events-none opacity-70" : ""}`}>
           <div className="w-[60%] overflow-y-auto space-y-6 pr-2">
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6 space-y-4">
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.cliStyles")}</h2>
@@ -1398,17 +1405,17 @@ export default function ThemeDetailPage() {
             <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t("report_themes.settingsGeneral")}</h2>
             <div className="space-y-1.5">
               <label className={labelClass}>{t("report_themes.colName")}</label>
-              <input type="text" value={themeName} onChange={(e) => setThemeName(e.target.value)} placeholder={t("report_themes.namePlaceholder")} className={inputClass} />
+              <input type="text" value={themeName} onChange={(e) => setThemeName(e.target.value)} placeholder={t("report_themes.namePlaceholder")} disabled={readOnly} className={`${inputClass} disabled:opacity-60 disabled:cursor-not-allowed`} />
             </div>
             <div className="space-y-1.5">
               <label className={labelClass}>{t("report_themes.colDescription")}</label>
-              <textarea value={themeDescription} onChange={(e) => setThemeDescription(e.target.value)} rows={3} placeholder={t("report_themes.descriptionPlaceholder")} className={`${inputClass} resize-none`} />
+              <textarea value={themeDescription} onChange={(e) => setThemeDescription(e.target.value)} rows={3} placeholder={t("report_themes.descriptionPlaceholder")} disabled={readOnly} className={`${inputClass} resize-none disabled:opacity-60 disabled:cursor-not-allowed`} />
             </div>
           </div>
 
 
 
-          {!theme.isDefault && (
+          {!theme.isDefault && !readOnly && (
             <div className="rounded-xl border border-red-200 dark:border-red-500/20 bg-red-50/50 dark:bg-red-500/5 p-6 space-y-3">
               <h3 className="text-sm font-semibold text-red-700 dark:text-red-400">{t("report_themes.dangerZone")}</h3>
               <p className="text-sm text-red-600/80 dark:text-red-400/80">{t("report_themes.dangerZoneDesc")}</p>

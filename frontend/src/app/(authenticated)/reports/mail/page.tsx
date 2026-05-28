@@ -23,6 +23,7 @@ interface MailReportItem {
   name: string;
   subject: string;
   description: string | null;
+  managedByPlugin: string | null;
   sendingStatus: string | null;
   lastSentAt: string | null;
   lastError: string | null;
@@ -191,13 +192,23 @@ export default function MailReportsListPage() {
                 filtered.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition-colors">
                     <td className="px-5 py-3">
-                      <button
-                        onClick={() => router.push(`/reports/mail/${r.id}`)}
-                        className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:underline flex items-center gap-2"
-                      >
-                        <Mail className="h-4 w-4 text-blue-500" />
-                        {r.name}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => router.push(`/reports/mail/${r.id}`)}
+                          className="text-sm font-medium text-slate-900 dark:text-slate-100 hover:underline flex items-center gap-2"
+                        >
+                          <Mail className="h-4 w-4 text-blue-500" />
+                          {r.name}
+                        </button>
+                        {r.managedByPlugin && (
+                          <span
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-violet-700 bg-violet-100 ring-1 ring-inset ring-violet-200 dark:text-violet-300 dark:bg-violet-900/40 dark:ring-violet-700/50"
+                            title={`Managed by plugin "${r.managedByPlugin}" — read-only`}
+                          >
+                            {r.managedByPlugin}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400 max-w-xs truncate">{r.subject || "\u2014"}</td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400">
@@ -221,12 +232,14 @@ export default function MailReportsListPage() {
                         >
                           <Pencil className="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
                         </button>
-                        <button
-                          onClick={() => setDeleteConfirm(r)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                        >
-                          <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
-                        </button>
+                        {!r.managedByPlugin && (
+                          <button
+                            onClick={() => setDeleteConfirm(r)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                          >
+                            <Trash2 className="h-4 w-4 text-slate-400 hover:text-red-500" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

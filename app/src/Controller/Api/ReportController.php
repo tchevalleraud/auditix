@@ -56,6 +56,7 @@ class ReportController extends AbstractController
             'generatedAt' => $r->getGeneratedAt()?->format('c'),
             'generatedFile' => $r->getGeneratedFile(),
             'generatedFiles' => $r->getGeneratedFiles(),
+            'managedByPlugin' => $r->getManagedByPlugin(),
             'createdAt' => $r->getCreatedAt()->format('c'),
             'updatedAt' => $r->getUpdatedAt()?->format('c'),
         ];
@@ -144,6 +145,11 @@ class ReportController extends AbstractController
     public function update(Report $report, Request $request, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
+
+        if ($report->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This report is managed by the "%s" plugin. Disable the plugin to modify it.', $report->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -223,6 +229,11 @@ class ReportController extends AbstractController
     public function delete(Report $report, EntityManagerInterface $em): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
+
+        if ($report->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This report is managed by the "%s" plugin. Disable the plugin to remove it.', $report->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $em->remove($report);
         $em->flush();
 

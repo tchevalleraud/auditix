@@ -23,6 +23,7 @@ interface ThemeItem {
   name: string;
   description: string | null;
   isDefault: boolean;
+  managedByPlugin: string | null;
   styles: {
     colors: { primary: string; secondary: string };
     body: { font: string; size: number };
@@ -294,6 +295,14 @@ export default function ReportThemesPage() {
                       >
                         {theme.name}
                         {theme.isDefault && <Star className="h-3.5 w-3.5 text-amber-500 fill-amber-500" />}
+                        {theme.managedByPlugin && (
+                          <span
+                            className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium text-violet-700 bg-violet-100 ring-1 ring-inset ring-violet-200 dark:text-violet-300 dark:bg-violet-900/40 dark:ring-violet-700/50"
+                            title={`Managed by plugin "${theme.managedByPlugin}" — read-only`}
+                          >
+                            {theme.managedByPlugin}
+                          </span>
+                        )}
                       </button>
                     </td>
                     <td className="px-5 py-3 text-sm text-slate-500 dark:text-slate-400 max-w-xs truncate">
@@ -337,7 +346,7 @@ export default function ReportThemesPage() {
                         >
                           <Pencil className="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
                         </button>
-                        {!theme.isDefault && (
+                        {!theme.isDefault && !theme.managedByPlugin && (
                           <button
                             onClick={() => setDeleteConfirm(theme)}
                             className="p-1.5 rounded-lg hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"

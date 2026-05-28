@@ -27,6 +27,7 @@ class ReportSchemaController extends AbstractController
             'gridSize' => $s->getGridSize(),
             'snapToGrid' => $s->getSnapToGrid(),
             'elements' => $s->getElements(),
+            'managedByPlugin' => $s->getManagedByPlugin(),
             'createdAt' => $s->getCreatedAt()->format(\DateTimeInterface::ATOM),
             'updatedAt' => $s->getUpdatedAt()->format(\DateTimeInterface::ATOM),
         ];
@@ -165,6 +166,10 @@ class ReportSchemaController extends AbstractController
         }
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schema);
 
+        if ($schema->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This schema is managed by the "%s" plugin. Disable the plugin to modify it.', $schema->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true) ?? [];
 
         if (array_key_exists('name', $data)) {
@@ -205,6 +210,10 @@ class ReportSchemaController extends AbstractController
             return $this->json(['error' => 'Report schema not found'], Response::HTTP_NOT_FOUND);
         }
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schema);
+
+        if ($schema->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This schema is managed by the "%s" plugin. Disable the plugin to remove it.', $schema->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
 
         $em->remove($schema);
         $em->flush();

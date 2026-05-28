@@ -2852,6 +2852,9 @@
     "confirmInstall": "Verstanden — installieren",
     "export": "Als ZIP exportieren"
   },
+  "pluginManaged": {
+    "banner": "Verwaltet vom Plugin „{plugin}“ — schreibgeschützt. Deaktivieren Sie das Plugin, um dieses Element zu bearbeiten."
+  },
   "pluginConfig": {
     "title": "Plugin konfigurieren",
     "button": "Konfigurieren",

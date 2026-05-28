@@ -11,6 +11,7 @@ import {
   Search,
   Cpu,
   TerminalSquare,
+  Lock,
 } from "lucide-react";
 
 interface ManufacturerInfo {
@@ -25,6 +26,7 @@ interface ModelItem {
   description: string | null;
   connectionScript: string | null;
   manufacturer: ManufacturerInfo;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -54,6 +56,7 @@ export default function ModelsPage() {
   );
 
   const handleDelete = async (model: ModelItem) => {
+    if (model.managedByPlugin) return;
     if (!confirm(t("models.confirmDelete", { name: model.name }))) return;
     await fetch(`/api/models/${model.id}`, { method: "DELETE" });
     await loadModels();
@@ -182,12 +185,21 @@ export default function ModelsPage() {
                   </td>
                   <td className="px-5 py-3.5">
                     <div className="flex items-center justify-end gap-1">
-                      <button
-                        onClick={() => handleDelete(model)}
-                        className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      {model.managedByPlugin ? (
+                        <span
+                          title={model.managedByPlugin}
+                          className="inline-flex rounded-lg p-2 text-slate-300 dark:text-slate-600"
+                        >
+                          <Lock className="h-4 w-4" />
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleDelete(model)}
+                          className="rounded-lg p-2 text-slate-400 hover:text-red-600 dark:text-slate-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

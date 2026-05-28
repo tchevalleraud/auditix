@@ -98,6 +98,11 @@ class MailReportController extends AbstractController
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
+
+        if ($report->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This mail report is managed by the "%s" plugin. Disable the plugin to modify it.', $report->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
         if (!is_array($data)) {
             return $this->json(['error' => 'Invalid body'], Response::HTTP_BAD_REQUEST);
@@ -167,6 +172,11 @@ class MailReportController extends AbstractController
             return $this->json(['error' => 'Not found'], Response::HTTP_NOT_FOUND);
         }
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
+
+        if ($report->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This mail report is managed by the "%s" plugin. Disable the plugin to remove it.', $report->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $this->service->delete($report);
         return $this->json(null, Response::HTTP_NO_CONTENT);
     }
@@ -303,6 +313,7 @@ class MailReportController extends AbstractController
             'sendingStatus' => $r->getSendingStatus(),
             'lastSentAt' => $r->getLastSentAt()?->format('c'),
             'lastError' => $r->getLastError(),
+            'managedByPlugin' => $r->getManagedByPlugin(),
             'createdAt' => $r->getCreatedAt()->format('c'),
             'updatedAt' => $r->getUpdatedAt()?->format('c'),
             'theme' => ['id' => $r->getTheme()->getId(), 'name' => $r->getTheme()->getName()],

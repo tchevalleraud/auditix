@@ -23,6 +23,7 @@ class ReportThemeController extends AbstractController
             'isDefault' => $t->isDefault(),
             'styles' => $t->getStyles(),
             'contextId' => $t->getContext()?->getId(),
+            'managedByPlugin' => $t->getManagedByPlugin(),
             'createdAt' => $t->getCreatedAt()->format('c'),
         ];
     }
@@ -91,6 +92,10 @@ class ReportThemeController extends AbstractController
     #[Route('/{id}', methods: ['PUT'])]
     public function update(ReportTheme $theme, Request $request, EntityManagerInterface $em): JsonResponse
     {
+        if ($theme->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This theme is managed by the "%s" plugin. Disable the plugin to modify it.', $theme->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
+        }
+
         $data = json_decode($request->getContent(), true);
 
         if (isset($data['name'])) {
@@ -113,6 +118,9 @@ class ReportThemeController extends AbstractController
     {
         if ($theme->isDefault()) {
             return $this->json(['error' => 'Cannot delete the default theme'], Response::HTTP_BAD_REQUEST);
+        }
+        if ($theme->isManagedByPlugin()) {
+            return $this->json(['error' => sprintf('This theme is managed by the "%s" plugin. Disable the plugin to remove it.', $theme->getManagedByPlugin())], Response::HTTP_FORBIDDEN);
         }
 
         $em->remove($theme);

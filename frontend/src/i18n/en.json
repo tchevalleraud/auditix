@@ -4094,6 +4094,9 @@
     "confirmInstall": "I understand — install",
     "export": "Export as ZIP"
   },
+  "pluginManaged": {
+    "banner": "Managed by the \"{plugin}\" plugin — read-only. Disable the plugin to edit this item."
+  },
   "pluginConfig": {
     "title": "Configure plugin",
     "button": "Configure",

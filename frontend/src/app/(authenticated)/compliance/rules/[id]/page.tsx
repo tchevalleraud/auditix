@@ -44,6 +44,7 @@ import {
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import UnderlineExt from "@tiptap/extension-underline";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 interface DataSource {
   name: string;
@@ -69,6 +70,7 @@ interface RuleDetail {
   conditionTree: ConditionTree | null;
   multiRowMessages: Record<string, string | MultiRowMessageEntry> | null;
   folderId: number | null;
+  managedByPlugin: string | null;
   createdAt: string;
 }
 
@@ -1197,7 +1199,7 @@ export default function ComplianceRuleEditPage() {
   }, [activeTab, loadCategories, loadNodes, loadInventoryStructure, loadInventoryTags]);
 
   const saveGeneral = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || rule?.managedByPlugin) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/compliance-rules/${ruleId}`, {
@@ -1215,6 +1217,7 @@ export default function ComplianceRuleEditPage() {
   };
 
   const saveSource = async () => {
+    if (rule?.managedByPlugin) return;
     setSavingSource(true);
     try {
       const res = await fetch(`/api/compliance-rules/${ruleId}`, {
@@ -1247,11 +1250,13 @@ export default function ComplianceRuleEditPage() {
   };
 
   const handleDelete = async () => {
+    if (rule?.managedByPlugin) return;
     await fetch(`/api/compliance-rules/${ruleId}`, { method: "DELETE" });
     router.push("/compliance/rules");
   };
 
   const saveConditions = async () => {
+    if (rule?.managedByPlugin) return;
     setSavingConditions(true);
     try {
       const res = await fetch(`/api/compliance-rules/${ruleId}`, {
@@ -1393,7 +1398,7 @@ export default function ComplianceRuleEditPage() {
     return t2;
   };
 
-  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+  const inputCls = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
   const labelCls = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
   const tabs = [
@@ -1414,6 +1419,8 @@ export default function ComplianceRuleEditPage() {
   if (!rule) {
     return <div className="flex items-center justify-center py-20"><p className="text-sm text-slate-500">{t("common.noResult")}</p></div>;
   }
+
+  const readOnly = !!rule.managedByPlugin;
 
   return (
     <div className="space-y-6">
@@ -1439,6 +1446,8 @@ export default function ComplianceRuleEditPage() {
         )}
       </div>
 
+      {readOnly && <PluginManagedBanner pluginId={rule.managedByPlugin!} />}
+
       {/* Tabs */}
       <div className="border-b border-slate-200 dark:border-slate-800 shrink-0">
         <nav className="flex gap-1">
@@ -1460,18 +1469,18 @@ export default function ComplianceRuleEditPage() {
             <div className="p-6 space-y-5">
               <div className="space-y-1.5">
                 <label className={labelCls}>{t("compliance_rules.identifier")}</label>
-                <input type="text" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={t("compliance_rules.identifierPlaceholder")} className={`${inputCls} font-mono`} />
+                <input type="text" value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={t("compliance_rules.identifierPlaceholder")} disabled={readOnly} className={`${inputCls} font-mono`} />
               </div>
               <div className="space-y-1.5">
                 <label className={labelCls}>{t("compliance_rules.name")}</label>
-                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("compliance_rules.namePlaceholder")} className={inputCls} />
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("compliance_rules.namePlaceholder")} disabled={readOnly} className={inputCls} />
               </div>
               <div className="space-y-1.5">
                 <label className={labelCls}>{t("compliance_rules.description")}</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={t("compliance_rules.descriptionPlaceholder")} className={`${inputCls} resize-none`} />
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={t("compliance_rules.descriptionPlaceholder")} disabled={readOnly} className={`${inputCls} resize-none`} />
               </div>
               <label className="flex items-center gap-3 cursor-pointer">
-                <button type="button" onClick={() => setEnabled(!enabled)}>
+                <button type="button" onClick={() => setEnabled(!enabled)} disabled={readOnly} className="disabled:opacity-60 disabled:cursor-not-allowed">
                   {enabled ? <ToggleRight className="h-6 w-6 text-emerald-500" /> : <ToggleLeft className="h-6 w-6 text-slate-400" />}
                 </button>
                 <span className="text-sm text-slate-700 dark:text-slate-300">{enabled ? t("compliance_rules.enabled") : t("compliance_rules.disabled")}</span>
@@ -1483,6 +1492,7 @@ export default function ComplianceRuleEditPage() {
                 <select
                   value={folderId ?? ""}
                   onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
+                  disabled={readOnly}
                   className={inputCls}
                 >
                   <option value="">{t("compliance_rules.noFolder")}</option>
@@ -1496,7 +1506,7 @@ export default function ComplianceRuleEditPage() {
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-800">
-              <button onClick={saveGeneral} disabled={saving || !name.trim()} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+              <button onClick={saveGeneral} disabled={saving || !name.trim() || readOnly} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                 {t("common.save")}
               </button>
@@ -1524,18 +1534,20 @@ export default function ComplianceRuleEditPage() {
                 </button>
               </div>
             </div>
-            <div className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">{t("compliance_rules.dangerZone")}</h3>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_rules.dangerZoneDesc")}</p>
+            {!readOnly && (
+              <div className="p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">{t("compliance_rules.dangerZone")}</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t("compliance_rules.dangerZoneDesc")}</p>
+                  </div>
+                  <button onClick={() => setDeleteConfirm(true)} className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
+                    <Trash2 className="h-4 w-4" />
+                    {t("common.delete")}
+                  </button>
                 </div>
-                <button onClick={() => setDeleteConfirm(true)} className="flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-500/30 px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors">
-                  <Trash2 className="h-4 w-4" />
-                  {t("common.delete")}
-                </button>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
@@ -1558,7 +1570,8 @@ export default function ComplianceRuleEditPage() {
                     setDataSources([...dataSources, { name: "", type: "collection", command: "", regex: "", resultMode: "capture" }]);
                     setEditingSourceIdx(dataSources.length);
                   }}
-                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                  disabled={readOnly}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 dark:bg-white px-3 py-1.5 text-xs font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   {t("compliance_rules.addSource")}
@@ -1719,7 +1732,7 @@ export default function ComplianceRuleEditPage() {
               {/* Save button */}
               <div className="flex items-center justify-end gap-2 pt-2">
                 {savedSource && <span className="text-xs text-emerald-600 dark:text-emerald-400">{t("common.saved")}</span>}
-                <button onClick={saveSource} disabled={savingSource} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                <button onClick={saveSource} disabled={savingSource || readOnly} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
                   {savingSource && <Loader2 className="h-4 w-4 animate-spin" />}
                   {t("common.save")}
                 </button>
@@ -1871,7 +1884,7 @@ export default function ComplianceRuleEditPage() {
                       {t("compliance_rules.evaluateRule")}
                     </button>
                   )}
-                  {conditionTree && (
+                  {conditionTree && !readOnly && (
                     <button
                       onClick={async () => {
                         setConditionTree(null);
@@ -1896,7 +1909,7 @@ export default function ComplianceRuleEditPage() {
                     </button>
                   )}
                   {conditionTree && (
-                    <button onClick={saveConditions} disabled={savingConditions} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
+                    <button onClick={saveConditions} disabled={savingConditions || readOnly} className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-colors">
                       {savingConditions ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                       {t("common.save")}
                     </button>
@@ -1913,13 +1926,15 @@ export default function ComplianceRuleEditPage() {
                       <p className="text-xs text-slate-400 dark:text-slate-500">{t("compliance_rules.conditionsNotAppliedDesc")}</p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setConditionTree({ blocks: [makeEmptyBlock("if")] })}
-                    className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
-                  >
-                    <Plus className="h-4 w-4" />
-                    {t("compliance_rules.addCondition")}
-                  </button>
+                  {!readOnly && (
+                    <button
+                      onClick={() => setConditionTree({ blocks: [makeEmptyBlock("if")] })}
+                      className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2.5 text-sm font-medium text-white dark:text-slate-900 hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors"
+                    >
+                      <Plus className="h-4 w-4" />
+                      {t("compliance_rules.addCondition")}
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -2044,8 +2059,9 @@ export default function ComplianceRuleEditPage() {
                 {t("common.cancel")}
               </button>
               <button
-                disabled={savingMultiRow}
+                disabled={savingMultiRow || readOnly}
                 onClick={async () => {
+                  if (rule?.managedByPlugin) return;
                   setSavingMultiRow(true);
                   try {
                     const cleaned: Record<string, MultiRowMessageEntry> = {};

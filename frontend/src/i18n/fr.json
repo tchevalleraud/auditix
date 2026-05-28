@@ -4065,6 +4065,9 @@
     "confirmInstall": "J'ai compris — installer",
     "export": "Exporter en ZIP"
   },
+  "pluginManaged": {
+    "banner": "Géré par le plugin « {plugin} » — lecture seule. Désactivez le plugin pour modifier cet élément."
+  },
   "pluginConfig": {
     "title": "Configurer le plugin",
     "button": "Configurer",

@@ -11,6 +11,7 @@ use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
 use App\Entity\InventoryCategory;
+use App\Entity\ProductRange;
 use App\Plugin\Capability\CommandTemplate;
 use App\Plugin\Capability\DeviceModelTemplate;
 use App\Plugin\Capability\ExtractTemplate;
@@ -164,6 +165,13 @@ class PluginAssetsImporter
             $this->em->remove($mfr);
         }
 
+        // 4b. Product ranges (lifecycle data feeding the System Updates score).
+        // Matched by pluginSource — they may point to a manufacturer owned by
+        // another plugin, so the Editor cascade alone would not remove them.
+        $ranges = $this->em->getRepository(ProductRange::class)
+            ->findBy(['pluginSource' => $identifier, 'context' => $context]);
+        foreach ($ranges as $range) $this->em->remove($range);
+
         $this->em->flush();
 
         // 5. Folders (managed, empty).
@@ -190,6 +198,7 @@ class PluginAssetsImporter
             'models' => count($models),
             'commands' => count($commands),
             'rules' => count($rules),
+            'ranges' => count($ranges),
             'folders' => $foldersRemoved,
         ];
     }

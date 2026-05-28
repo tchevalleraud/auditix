@@ -2852,6 +2852,9 @@
     "confirmInstall": "理解しました — インストール",
     "export": "ZIP としてエクスポート"
   },
+  "pluginManaged": {
+    "banner": "プラグイン「{plugin}」によって管理されています — 読み取り専用です。編集するにはプラグインを無効化してください。"
+  },
   "pluginConfig": {
     "title": "プラグインの設定",
     "button": "設定",

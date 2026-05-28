@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
-import { Loader2, Plus, Pencil, Trash2, Search } from "lucide-react";
+import { PluginManagedBanner } from "@/components/PluginManagedBanner";
+import { Loader2, Plus, Pencil, Trash2, Search, Lock } from "lucide-react";
 
 interface ProductRange {
   id: number;
@@ -22,7 +23,7 @@ interface ProductRange {
 
 interface Editor { id: number; name: string }
 
-const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
+const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors disabled:opacity-60 disabled:cursor-not-allowed";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
 
 export default function ProductRangesPage() {
@@ -83,7 +84,9 @@ export default function ProductRangesPage() {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault(); setSaving(true);
+    e.preventDefault();
+    if (editing?.pluginSource) return;
+    setSaving(true);
     const body = {
       name: formName, description: formDescription || null,
       manufacturerId: Number(formManufacturerId) || null,
@@ -124,6 +127,8 @@ export default function ProductRangesPage() {
   };
 
   if (loading) return <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-slate-400" /></div>;
+
+  const editingReadOnly = !!editing?.pluginSource;
 
   return (
     <div className="space-y-6">
@@ -176,13 +181,21 @@ export default function ProductRangesPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEdit(r)} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
-                        <Pencil className="h-3.5 w-3.5 text-slate-400" />
-                      </button>
-                      <button onClick={() => { if (confirm(t("productRanges.confirmDelete", { name: r.name }))) handleDelete(r.id); }}
-                        className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                        <Trash2 className="h-3.5 w-3.5 text-red-400" />
-                      </button>
+                      {r.pluginSource ? (
+                        <span title={r.pluginSource} className="inline-flex p-1 text-slate-300 dark:text-slate-600">
+                          <Lock className="h-3.5 w-3.5" />
+                        </span>
+                      ) : (
+                        <>
+                          <button onClick={() => openEdit(r)} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800">
+                            <Pencil className="h-3.5 w-3.5 text-slate-400" />
+                          </button>
+                          <button onClick={() => { if (confirm(t("productRanges.confirmDelete", { name: r.name }))) handleDelete(r.id); }}
+                            className="p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                            <Trash2 className="h-3.5 w-3.5 text-red-400" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -200,13 +213,14 @@ export default function ProductRangesPage() {
             <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
               {editing ? t("productRanges.editRange") : t("productRanges.newRange")}
             </h2>
+            {editingReadOnly && <PluginManagedBanner pluginId={editing!.pluginSource!} />}
             <div>
               <label className={labelClass}>{t("productRanges.colName")}</label>
-              <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} required className={inputClass} placeholder={t("productRanges.namePlaceholder")} />
+              <input type="text" value={formName} onChange={(e) => setFormName(e.target.value)} required disabled={editingReadOnly} className={inputClass} placeholder={t("productRanges.namePlaceholder")} />
             </div>
             <div>
               <label className={labelClass}>{t("productRanges.colManufacturer")}</label>
-              <select value={formManufacturerId} onChange={(e) => setFormManufacturerId(e.target.value)} required className={inputClass}>
+              <select value={formManufacturerId} onChange={(e) => setFormManufacturerId(e.target.value)} required disabled={editingReadOnly} className={inputClass}>
                 <option value="">—</option>
                 {manufacturers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
@@ -214,34 +228,34 @@ export default function ProductRangesPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>{t("productRanges.colRecommendedVersion")}</label>
-                <input type="text" value={formRecommendedVersion} onChange={(e) => setFormRecommendedVersion(e.target.value)} className={inputClass} />
+                <input type="text" value={formRecommendedVersion} onChange={(e) => setFormRecommendedVersion(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>{t("systemUpdates.currentVersion")}</label>
-                <input type="text" value={formCurrentVersion} onChange={(e) => setFormCurrentVersion(e.target.value)} className={inputClass} />
+                <input type="text" value={formCurrentVersion} onChange={(e) => setFormCurrentVersion(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={labelClass}>{t("systemUpdates.releaseDate")}</label>
-                <input type="date" value={formReleaseDate} onChange={(e) => setFormReleaseDate(e.target.value)} className={inputClass} />
+                <input type="date" value={formReleaseDate} onChange={(e) => setFormReleaseDate(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>{t("productRanges.colEndOfSale")}</label>
-                <input type="date" value={formEndOfSaleDate} onChange={(e) => setFormEndOfSaleDate(e.target.value)} className={inputClass} />
+                <input type="date" value={formEndOfSaleDate} onChange={(e) => setFormEndOfSaleDate(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>{t("productRanges.colEndOfSupport")}</label>
-                <input type="date" value={formEndOfSupportDate} onChange={(e) => setFormEndOfSupportDate(e.target.value)} className={inputClass} />
+                <input type="date" value={formEndOfSupportDate} onChange={(e) => setFormEndOfSupportDate(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
               <div>
                 <label className={labelClass}>{t("productRanges.colEndOfLife")}</label>
-                <input type="date" value={formEndOfLifeDate} onChange={(e) => setFormEndOfLifeDate(e.target.value)} className={inputClass} />
+                <input type="date" value={formEndOfLifeDate} onChange={(e) => setFormEndOfLifeDate(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
             </div>
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400">{t("common.cancel")}</button>
-              <button type="submit" disabled={saving}
+              <button type="submit" disabled={saving || editingReadOnly}
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-slate-100 px-4 py-2 text-sm font-medium text-white dark:text-slate-900 disabled:opacity-50">
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 {t("common.save")}
