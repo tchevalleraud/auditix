@@ -52,52 +52,10 @@ class VisioStencilImporter
         }
 
         try {
-            $mastersXml = $zip->getFromName('visio/masters/masters.xml');
-            if ($mastersXml === false) {
+            if ($zip->getFromName('visio/masters/masters.xml') === false) {
                 throw new \RuntimeException('Aucun master trouvé dans l\'archive Visio.');
             }
-            $relsXml = $zip->getFromName('visio/masters/_rels/masters.xml.rels');
-            $relTargets = $relsXml !== false ? $this->parseRels($relsXml) : [];
-
-            // Pass 1 — load each master and detect an embedded foreign image.
-            $entries = [];
-            $emfBlobs = [];
-            foreach ($this->parseMasters($mastersXml) as $master) {
-                $target = $relTargets[$master['relId']] ?? null;
-                if ($target === null) {
-                    continue;
-                }
-                $masterFile = ltrim($target, '/');
-                $masterXml = $zip->getFromName('visio/masters/' . $masterFile);
-                if ($masterXml === false) {
-                    continue;
-                }
-                $masterRels = $this->masterRels($zip, $masterFile);
-                $foreign = $this->detectForeign($masterXml, $masterRels);
-                $entries[] = ['name' => $master['name'], 'xml' => $masterXml, 'masterRels' => $masterRels, 'foreign' => $foreign];
-
-                if ($foreign !== null && in_array($foreign['type'], ['enhmetafile', 'metafile'], true) && $foreign['mediaPath'] !== null) {
-                    if (!array_key_exists($foreign['mediaPath'], $emfBlobs)) {
-                        $bytes = $zip->getFromName($foreign['mediaPath']);
-                        if ($bytes !== false) {
-                            $emfBlobs[$foreign['mediaPath']] = $bytes;
-                        }
-                    }
-                }
-            }
-
-            // Pass 2 — batch-convert EMF/WMF in a single LibreOffice invocation.
-            $convertedSvg = $this->emf->convertMany($emfBlobs);
-
-            // Pass 3 — build a spec per master.
-            $specs = [];
-            foreach ($entries as $entry) {
-                $spec = $this->buildSpec($entry, $convertedSvg, $zip);
-                if ($spec !== null) {
-                    $specs[] = $spec;
-                }
-            }
-
+            $specs = array_values($this->buildMasterSpecs($zip));
             if ($specs === []) {
                 throw new \RuntimeException('Aucune forme exploitable dans ce stencil Visio.');
             }
@@ -105,6 +63,64 @@ class VisioStencilImporter
         } finally {
             $zip->close();
         }
+    }
+
+    /**
+     * Render every master of an open Visio archive to a StencilItemSpec, indexed
+     * by the master's Visio `ID` attribute. Shared by the stencil import (which
+     * discards the keys) and the drawing import (which resolves each page shape's
+     * `Master='ID'` reference to its rendered art).
+     *
+     * @return array<string, StencilItemSpec>
+     */
+    public function buildMasterSpecs(\ZipArchive $zip): array
+    {
+        $mastersXml = $zip->getFromName('visio/masters/masters.xml');
+        if ($mastersXml === false) {
+            return [];
+        }
+        $relsXml = $zip->getFromName('visio/masters/_rels/masters.xml.rels');
+        $relTargets = $relsXml !== false ? $this->parseRels($relsXml) : [];
+
+        // Pass 1 — load each master and detect an embedded foreign image.
+        $entries = [];
+        $emfBlobs = [];
+        foreach ($this->parseMasters($mastersXml) as $master) {
+            $target = $relTargets[$master['relId']] ?? null;
+            if ($target === null) {
+                continue;
+            }
+            $masterFile = ltrim($target, '/');
+            $masterXml = $zip->getFromName('visio/masters/' . $masterFile);
+            if ($masterXml === false) {
+                continue;
+            }
+            $masterRels = $this->masterRels($zip, $masterFile);
+            $foreign = $this->detectForeign($masterXml, $masterRels);
+            $entries[] = ['id' => $master['id'], 'name' => $master['name'], 'xml' => $masterXml, 'masterRels' => $masterRels, 'foreign' => $foreign];
+
+            if ($foreign !== null && in_array($foreign['type'], ['enhmetafile', 'metafile'], true) && $foreign['mediaPath'] !== null) {
+                if (!array_key_exists($foreign['mediaPath'], $emfBlobs)) {
+                    $bytes = $zip->getFromName($foreign['mediaPath']);
+                    if ($bytes !== false) {
+                        $emfBlobs[$foreign['mediaPath']] = $bytes;
+                    }
+                }
+            }
+        }
+
+        // Pass 2 — batch-convert EMF/WMF in a single LibreOffice invocation.
+        $convertedSvg = $this->emf->convertMany($emfBlobs);
+
+        // Pass 3 — build a spec per master, keyed by its Visio ID.
+        $specs = [];
+        foreach ($entries as $entry) {
+            $spec = $this->buildSpec($entry, $convertedSvg, $zip);
+            if ($spec !== null && $entry['id'] !== '') {
+                $specs[$entry['id']] = $spec;
+            }
+        }
+        return $specs;
     }
 
     /**
@@ -242,7 +258,7 @@ class VisioStencilImporter
     }
 
     /**
-     * @return array<int, array{relId: string, name: string}>
+     * @return array<int, array{id: string, relId: string, name: string}>
      */
     private function parseMasters(string $xml): array
     {
@@ -264,7 +280,7 @@ class VisioStencilImporter
                 }
             }
             if ($relId !== '') {
-                $out[] = ['relId' => $relId, 'name' => $name];
+                $out[] = ['id' => $node->getAttribute('ID'), 'relId' => $relId, 'name' => $name];
             }
         }
         return $out;

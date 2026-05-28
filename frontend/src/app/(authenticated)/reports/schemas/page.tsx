@@ -34,6 +34,7 @@ export default function ReportSchemasListPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const visioInputRef = useRef<HTMLInputElement>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -121,6 +122,38 @@ export default function ReportSchemasListPage() {
     }
   };
 
+  const handleVisioImportClick = () => {
+    setImportError(null);
+    visioInputRef.current?.click();
+  };
+
+  const handleVisioImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so the same file can be re-picked
+    if (!file || !current) return;
+    setImporting(true);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/report-schemas/import-visio?context=${current.id}`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+      const created = await res.json();
+      await load();
+      router.push(`/reports/schemas/${created.id}`);
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const handleDelete = async (id: number, name: string) => {
     if (!confirm(t("schemas.confirmDelete").replace("{name}", name))) return;
     setBusyId(id);
@@ -146,14 +179,24 @@ export default function ReportSchemasListPage() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
+          <input ref={visioInputRef} type="file" accept=".vsdx,.vsdt" onChange={handleVisioImportFile} className="hidden" />
           <button
             onClick={handleImportClick}
             disabled={importing}
-            title="Importer un schéma depuis un fichier JSON"
+            title={t("schemas.importJsonTitle")}
             className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
           >
             {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Importer
+            {t("schemas.importJson")}
+          </button>
+          <button
+            onClick={handleVisioImportClick}
+            disabled={importing}
+            title={t("schemas.importVisioTitle")}
+            className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
+          >
+            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            {t("schemas.importVisio")}
           </button>
           <button
             onClick={() => setCreateOpen(true)}

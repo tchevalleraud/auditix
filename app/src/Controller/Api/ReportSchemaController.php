@@ -296,6 +296,46 @@ class ReportSchemaController extends AbstractController
         return $this->json($this->serialize($schema), Response::HTTP_CREATED);
     }
 
+    /**
+     * Import a full Visio drawing (.vsdx / .vsdt) as a NEW schema in the target
+     * context. Master instances on the page become image elements, connectors
+     * become glued lines. Never overwrites an existing schema.
+     */
+    #[Route('/import-visio', methods: ['POST'])]
+    public function importVisio(Request $request, EntityManagerInterface $em, \App\Service\Stencil\VisioDrawingImporter $importer): JsonResponse
+    {
+        $context = $this->resolveContext($request, $em);
+        if (!$context) {
+            return $this->json(['error' => 'Context is required'], Response::HTTP_BAD_REQUEST);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
+        $file = $request->files->get('file');
+        if (!$file) {
+            return $this->json(['error' => 'No file uploaded'], Response::HTTP_BAD_REQUEST);
+        }
+        if ($file->getSize() > 20 * 1024 * 1024) {
+            return $this->json(['error' => 'File too large. Max 20MB'], Response::HTTP_BAD_REQUEST);
+        }
+
+        try {
+            $result = $importer->import($file->getPathname(), $file->getClientOriginalName());
+        } catch (\Throwable $e) {
+            return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
+        }
+
+        $schema = new ReportSchema();
+        $schema->setContext($context);
+        $schema->setName($result['name']);
+        $schema->setCanvasSize($result['canvasSize']);
+        $schema->setElements($result['elements']);
+
+        $em->persist($schema);
+        $em->flush();
+
+        return $this->json($this->serialize($schema), Response::HTTP_CREATED);
+    }
+
     #[Route('/{id}/svg', methods: ['GET'], requirements: ['id' => '\d+'])]
     public function svg(int $id, Request $request, EntityManagerInterface $em, \App\Service\ReportSchemaSvgRenderer $renderer): Response
     {
