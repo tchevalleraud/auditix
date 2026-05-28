@@ -2881,6 +2881,7 @@
     "disable": "このコンテキストで無効化",
     "toggleFailed": "切り替えに失敗しました。",
     "supports": "対応メーカー",
+    "requires": "必要なプラグイン",
     "lastSync": "前回の同期",
     "syncNow": "今すぐ同期",
     "syncing": "同期中…"

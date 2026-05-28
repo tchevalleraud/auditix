@@ -19,6 +19,9 @@ icon: "icon.png"
 requires:
   auditix: ">=5.0.0"
   php: ">=8.3"
+  # Other plugins that must be enabled in the context before this one.
+  plugins:
+    - template-report-theme
 
 entrypoint:
   namespace: "Auditix\\Plugin\\TemplateReport"

@@ -2881,6 +2881,7 @@
     "disable": "Disattiva in questo contesto",
     "toggleFailed": "Cambio di stato non riuscito.",
     "supports": "Supporta",
+    "requires": "Richiede",
     "lastSync": "Ultima sincronizzazione",
     "syncNow": "Sincronizza ora",
     "syncing": "Sincronizzazione…"

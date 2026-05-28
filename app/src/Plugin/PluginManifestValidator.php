@@ -102,6 +102,18 @@ class PluginManifestValidator
             if (isset($requires['php']) && (!is_string($requires['php']) || trim($requires['php']) === '')) {
                 $errors[] = 'requires.php, when set, must be a non-empty string.';
             }
+            if (isset($requires['plugins'])) {
+                if (!is_array($requires['plugins']) || array_is_list($requires['plugins']) === false) {
+                    $errors[] = 'requires.plugins, when set, must be a list of plugin identifiers.';
+                } else {
+                    foreach ($requires['plugins'] as $dep) {
+                        if (!is_string($dep) || preg_match(self::IDENTIFIER_PATTERN, $dep) !== 1) {
+                            $errors[] = 'requires.plugins entries must all be kebab-case plugin identifiers.';
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         foreach (['description', 'author', 'homepage', 'license', 'icon'] as $optString) {

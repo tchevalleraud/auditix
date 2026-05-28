@@ -2,6 +2,7 @@
 
 namespace Auditix\Plugin\TemplateReport;
 
+use App\Plugin\Capability\DependsOnPlugins;
 use App\Plugin\Capability\ProvidesReports;
 use App\Plugin\Capability\ReportTemplate;
 use App\Plugin\VendorPluginInterface;
@@ -36,13 +37,22 @@ use App\Plugin\VendorPluginInterface;
  */
 final class TemplateReportPlugin implements
     VendorPluginInterface,
-    ProvidesReports
+    ProvidesReports,
+    DependsOnPlugins
 {
     public function getIdentifier(): string  { return 'template-report'; }
     public function getVersion(): string      { return '1.0.0'; }
     public function getDisplayName(): string  { return 'Template — Report'; }
     public function getDescription(): string  { return 'Educational example: a block-based report template.'; }
     public function getSupportedManufacturers(): array { return []; }
+
+    /**
+     * The report targets the theme provided by 'template-report-theme', so that
+     * plugin must be enabled in the context first.
+     *
+     * @return string[]
+     */
+    public function getRequiredPlugins(): array { return ['template-report-theme']; }
 
     /**
      * @return ReportTemplate[]

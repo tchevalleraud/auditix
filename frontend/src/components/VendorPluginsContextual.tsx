@@ -42,6 +42,8 @@ interface PluginInfo {
   description?: string | null;
   supportedManufacturers?: string[];
   capabilities?: string[];
+  // Identifiers of plugins that must be enabled in this context before this one.
+  requiredPlugins?: string[];
   configurationSchema?: ConfigurationSchema | null;
   configuration?: Record<string, unknown> | null;
   enabled: boolean;
@@ -130,6 +132,8 @@ export function VendorPluginsContextual({ contextId, t, isAdmin }: Props) {
 
   const hasLifecycle = (p: PluginInfo) => (p.capabilities ?? []).includes("lifecycle");
 
+  const pluginById = (id: string) => plugins.find((p) => p.identifier === id);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -208,6 +212,24 @@ export function VendorPluginsContextual({ contextId, t, isAdmin }: Props) {
                     </span>
                   ))}
                 </div>
+              )}
+
+              {plugin.requiredPlugins && plugin.requiredPlugins.length > 0 && (
+                <p className="text-[11px] mb-3">
+                  <span className="text-slate-400 dark:text-slate-500">{t("vendorPluginsCtx.requires")}: </span>
+                  {plugin.requiredPlugins.map((id, i) => {
+                    const dep = pluginById(id);
+                    const met = dep?.enabled ?? false;
+                    return (
+                      <span key={id}>
+                        {i > 0 && <span className="text-slate-400 dark:text-slate-500">, </span>}
+                        <span className={met ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
+                          {dep?.displayName ?? id}
+                        </span>
+                      </span>
+                    );
+                  })}
+                </p>
               )}
 
               {plugin.supportedManufacturers && plugin.supportedManufacturers.length > 0 && (

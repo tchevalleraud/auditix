@@ -8,6 +8,7 @@ use App\Entity\Node;
 use App\Entity\VendorPlugin;
 use App\Message\RecalculateNodeScoreMessage;
 use App\Message\SyncLifecycleMessage;
+use App\Plugin\Capability\DependsOnPlugins;
 use App\Plugin\Capability\ProvidesCommands;
 use App\Plugin\Capability\ProvidesConfigurationSchema;
 use App\Plugin\Capability\ProvidesDeviceModels;
@@ -36,10 +37,17 @@ class PluginController extends AbstractController
     ) {}
 
     #[Route('', methods: ['GET'])]
-    public function index(Request $request, EntityManagerInterface $em): JsonResponse
+    public function index(Request $request, EntityManagerInterface $em, MessageBusInterface $bus): JsonResponse
     {
         $contextId = $request->query->getInt('context');
         if (!$contextId) return $this->json([]);
+
+        $context = $em->getRepository(Context::class)->find($contextId);
+        if (!$context) return $this->json([]);
+
+        // Strict dependency enforcement: heal any plugin that is enabled while a
+        // required plugin is not, before reporting state to the UI.
+        $this->reconcileDependencies($context, $em, $bus);
 
         $allPlugins = $this->pluginRegistry->all();
 
@@ -70,6 +78,7 @@ class PluginController extends AbstractController
                 'description' => $plugin->getDescription(),
                 'supportedManufacturers' => $plugin->getSupportedManufacturers(),
                 'capabilities' => $this->describeCapabilities($plugin),
+                'requiredPlugins' => $plugin instanceof DependsOnPlugins ? array_values($plugin->getRequiredPlugins()) : [],
                 'configurationSchema' => $plugin instanceof ProvidesConfigurationSchema
                     ? $plugin->getConfigurationSchema()
                     : [],
@@ -104,6 +113,82 @@ class PluginController extends AbstractController
         return $caps;
     }
 
+    /**
+     * Required plugins of $plugin that are NOT currently enabled in $context.
+     *
+     * @return array<string,string> identifier => display name
+     */
+    private function missingRequiredPlugins(DependsOnPlugins $plugin, Context $context, EntityManagerInterface $em): array
+    {
+        $missing = [];
+        foreach ($plugin->getRequiredPlugins() as $reqId) {
+            $vp = $em->getRepository(VendorPlugin::class)->findOneBy([
+                'context' => $context,
+                'pluginIdentifier' => $reqId,
+            ]);
+            if (!$vp || !$vp->isEnabled()) {
+                $missing[$reqId] = $this->pluginRegistry->get($reqId)?->getDisplayName() ?? $reqId;
+            }
+        }
+        return $missing;
+    }
+
+    /**
+     * Strict dependency enforcement: any plugin enabled in $context whose required
+     * plugins are not all enabled is forcibly disabled (its assets purged), exactly
+     * as a manual disable would. Repeated until stable, since disabling one plugin
+     * can in turn break a further dependent.
+     */
+    private function reconcileDependencies(Context $context, EntityManagerInterface $em, MessageBusInterface $bus): void
+    {
+        $repo = $em->getRepository(VendorPlugin::class);
+        $guard = count($this->pluginRegistry->all()) + 1;
+
+        do {
+            $changed = false;
+            foreach ($this->pluginRegistry->all() as $id => $plugin) {
+                if (!$plugin instanceof DependsOnPlugins) {
+                    continue;
+                }
+                $vp = $repo->findOneBy(['context' => $context, 'pluginIdentifier' => $id]);
+                if (!$vp || !$vp->isEnabled() || $this->missingRequiredPlugins($plugin, $context, $em) === []) {
+                    continue;
+                }
+
+                $vp->setEnabled(false);
+                $em->flush();
+                $this->assetsImporter->remove($id, $context);
+                foreach ($em->getRepository(Node::class)->findBy(['context' => $context]) as $node) {
+                    $bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
+                }
+                $changed = true;
+            }
+        } while ($changed && --$guard > 0);
+    }
+
+    /**
+     * Plugins enabled in $context that declare $identifier as a required plugin.
+     *
+     * @return array<string,string> identifier => display name
+     */
+    private function enabledDependents(string $identifier, Context $context, EntityManagerInterface $em): array
+    {
+        $dependents = [];
+        foreach ($this->pluginRegistry->all() as $id => $plugin) {
+            if (!$plugin instanceof DependsOnPlugins || !in_array($identifier, $plugin->getRequiredPlugins(), true)) {
+                continue;
+            }
+            $vp = $em->getRepository(VendorPlugin::class)->findOneBy([
+                'context' => $context,
+                'pluginIdentifier' => $id,
+            ]);
+            if ($vp && $vp->isEnabled()) {
+                $dependents[$id] = $plugin->getDisplayName();
+            }
+        }
+        return $dependents;
+    }
+
     #[Route('/{identifier}', methods: ['PUT'])]
     public function update(
         string $identifier,
@@ -133,6 +218,36 @@ class PluginController extends AbstractController
         }
 
         $wasEnabled = $vp->isEnabled();
+        $intendedEnabled = array_key_exists('enabled', $data) ? (bool) $data['enabled'] : $wasEnabled;
+
+        // Enabling: every required plugin must already be enabled in this context.
+        if ($intendedEnabled && !$wasEnabled && $plugin instanceof DependsOnPlugins) {
+            $missing = $this->missingRequiredPlugins($plugin, $context, $em);
+            if ($missing !== []) {
+                return $this->json([
+                    'error' => sprintf(
+                        'This plugin requires the following plugin(s) to be enabled first: %s.',
+                        implode(', ', array_values($missing)),
+                    ),
+                    'missingDependencies' => array_keys($missing),
+                ], Response::HTTP_CONFLICT);
+            }
+        }
+
+        // Disabling: refuse while an enabled plugin in this context still depends on it.
+        if (!$intendedEnabled && $wasEnabled) {
+            $dependents = $this->enabledDependents($identifier, $context, $em);
+            if ($dependents !== []) {
+                return $this->json([
+                    'error' => sprintf(
+                        'This plugin is required by the following enabled plugin(s): %s. Disable them first.',
+                        implode(', ', array_values($dependents)),
+                    ),
+                    'blockingDependents' => array_keys($dependents),
+                ], Response::HTTP_CONFLICT);
+            }
+        }
+
         if (array_key_exists('enabled', $data)) {
             $vp->setEnabled((bool) $data['enabled']);
         }

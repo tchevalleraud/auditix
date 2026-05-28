@@ -4126,6 +4126,7 @@
     "disable": "Disable in this context",
     "toggleFailed": "Toggle failed.",
     "supports": "Supports",
+    "requires": "Requires",
     "lastSync": "Last sync",
     "syncNow": "Sync now",
     "syncing": "Syncing…"

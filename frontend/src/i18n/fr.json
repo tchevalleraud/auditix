@@ -4097,6 +4097,7 @@
     "disable": "Désactiver dans ce contexte",
     "toggleFailed": "Échec du changement d'état.",
     "supports": "Compatible avec",
+    "requires": "Nécessite",
     "lastSync": "Dernière synchro",
     "syncNow": "Synchroniser",
     "syncing": "Synchronisation…"
