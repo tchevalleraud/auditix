@@ -437,9 +437,12 @@ class ComplianceEvaluator
 
     /**
      * Recompute and persist the compliance grade for a node, considering only
-     * results that belong to enabled policies. Caller must flush.
+     * results that belong to enabled policies. Returns null (and clears the
+     * stored grade) when the node has no compliance results at all, so a node
+     * that left every policy shows no grade instead of a misleading "A".
+     * Caller must flush.
      */
-    public function recalculateComplianceGrade(Node $node): string
+    public function recalculateComplianceGrade(Node $node): ?string
     {
         $rows = $this->em->getConnection()->fetchAllAssociative(
             'SELECT cr.status, cr.severity, COUNT(*) as cnt
@@ -449,6 +452,11 @@ class ComplianceEvaluator
              GROUP BY cr.status, cr.severity',
             ['nodeId' => $node->getId()]
         );
+
+        if (empty($rows)) {
+            $node->setComplianceScore(null);
+            return null;
+        }
 
         $penalty = 0;
         $scorable = 0;

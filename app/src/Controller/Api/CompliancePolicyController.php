@@ -268,7 +268,9 @@ class CompliancePolicyController extends AbstractController
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $nodes = [];
         foreach ($policy->getNodes() as $n) {
-            $nodes[] = $this->serializeNodeCompact($n);
+            $node = $this->serializeNodeCompact($n);
+            $node['source'] = $policy->isManualNode($n) ? 'manual' : 'auto';
+            $nodes[] = $node;
         }
         usort($nodes, fn($a, $b) => ($a['name'] ?? '') <=> ($b['name'] ?? '') ?: $a['ipAddress'] <=> $b['ipAddress']);
 
@@ -289,7 +291,7 @@ class CompliancePolicyController extends AbstractController
         foreach ($nodeIds as $nodeId) {
             $node = $nodeRepo->find($nodeId);
             if ($node) {
-                $policy->addNode($node);
+                $policy->addManualNode($node);
             }
         }
         $em->flush();
@@ -298,7 +300,7 @@ class CompliancePolicyController extends AbstractController
     }
 
     #[Route('/{id}/nodes/remove', methods: ['POST'])]
-    public function removeNodes(CompliancePolicy $policy, Request $request, EntityManagerInterface $em): JsonResponse
+    public function removeNodes(CompliancePolicy $policy, Request $request, EntityManagerInterface $em, ComplianceEvaluator $complianceEvaluator, MessageBusInterface $bus): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $data = json_decode($request->getContent(), true);
@@ -308,12 +310,17 @@ class CompliancePolicyController extends AbstractController
         }
 
         $nodeRepo = $em->getRepository(Node::class);
+        $removedIds = [];
         foreach ($nodeIds as $nodeId) {
             $node = $nodeRepo->find($nodeId);
             if ($node) {
                 $policy->removeNode($node);
+                $removedIds[] = $node->getId();
             }
         }
+        // Removed nodes are now orphan members: purge their results for this policy
+        // and refresh their compliance grade / overall score.
+        $this->purgeOrphanResults($policy, $complianceEvaluator, $bus, $em, $removedIds);
         $em->flush();
 
         return $this->json(['ok' => true]);
@@ -329,7 +336,9 @@ class CompliancePolicyController extends AbstractController
             return $this->json(['error' => 'tagIds is required'], Response::HTTP_BAD_REQUEST);
         }
 
-        // Find nodes that have ALL the specified tags
+        // Find nodes that have ALL the specified tags, counting both manual tags
+        // (n.tags) and dynamic tags applied by collection rules (NodeDynamicTag),
+        // matching the auto-match evaluator's tag resolution.
         $qb = $em->createQueryBuilder();
         $qb->select('n')
             ->from(Node::class, 'n')
@@ -339,17 +348,21 @@ class CompliancePolicyController extends AbstractController
         foreach ($tagIds as $i => $tagId) {
             $tag = $em->getRepository(NodeTag::class)->find($tagId);
             if (!$tag) continue;
-            $qb->andWhere(":tag{$i} MEMBER OF n.tags")
-                ->setParameter("tag{$i}", $tag);
+            $qb->andWhere($qb->expr()->orX(
+                ":tag{$i} MEMBER OF n.tags",
+                $qb->expr()->exists(
+                    "SELECT 1 FROM App\Entity\NodeDynamicTag dt{$i} WHERE dt{$i}.node = n AND dt{$i}.tag = :tag{$i}"
+                )
+            ))->setParameter("tag{$i}", $tag);
         }
 
         $nodes = $qb->getQuery()->getResult();
         $added = 0;
         foreach ($nodes as $node) {
-            if (!$policy->getNodes()->contains($node)) {
-                $policy->addNode($node);
+            if (!$policy->isManualNode($node)) {
                 $added++;
             }
+            $policy->addManualNode($node);
         }
         $em->flush();
 
@@ -401,15 +414,43 @@ class CompliancePolicyController extends AbstractController
     }
 
     #[Route('/{id}/match-rules/apply', methods: ['POST'])]
-    public function applyMatchRules(CompliancePolicy $policy, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
+    public function applyMatchRules(CompliancePolicy $policy, EntityManagerInterface $em, NodeMatchEvaluator $evaluator, ComplianceEvaluator $complianceEvaluator, MessageBusInterface $bus): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
+        $sync = $this->syncMatchedNodes($policy, $evaluator);
+        $this->purgeOrphanResults($policy, $complianceEvaluator, $bus, $em, $sync['removedIds']);
+        $em->flush();
+
+        return $this->json([
+            'added' => $sync['added'],
+            'removed' => $sync['removed'],
+            'matched' => $sync['matched'],
+            'total' => $policy->getNodes()->count(),
+        ]);
+    }
+
+    /**
+     * Make the auto-match rules authoritative over policy membership: add nodes
+     * that match, and remove nodes that no longer match (except manually-added
+     * ones). Membership only — call purgeOrphanResults() afterwards to clean up
+     * the results and scores of removed nodes. No-op when the policy has no match
+     * rules.
+     *
+     * @return array{added: int, removed: int, matched: int}
+     */
+    private function syncMatchedNodes(CompliancePolicy $policy, NodeMatchEvaluator $evaluator): array
+    {
         $matchRules = $policy->getMatchRules();
         if (!$matchRules || empty($matchRules['blocks'])) {
-            return $this->json(['added' => 0, 'matched' => 0, 'total' => $policy->getNodes()->count()]);
+            return ['added' => 0, 'removed' => 0, 'matched' => 0];
         }
 
         $matchingNodes = $evaluator->getMatchingNodes($policy->getContext(), $matchRules);
+        $matchingIds = [];
+        foreach ($matchingNodes as $node) {
+            $matchingIds[$node->getId()] = true;
+        }
+
         $added = 0;
         foreach ($matchingNodes as $node) {
             if (!$policy->getNodes()->contains($node)) {
@@ -417,23 +458,87 @@ class CompliancePolicyController extends AbstractController
                 $added++;
             }
         }
-        $em->flush();
 
-        return $this->json(['added' => $added, 'matched' => count($matchingNodes), 'total' => $policy->getNodes()->count()]);
+        $removedIds = [];
+        foreach ($policy->getNodes()->toArray() as $node) {
+            // Keep nodes that still match, and never drop manually-added nodes.
+            if (isset($matchingIds[$node->getId()]) || $policy->isManualNode($node)) {
+                continue;
+            }
+            $policy->removeNode($node);
+            $removedIds[] = $node->getId();
+        }
+
+        return ['added' => $added, 'removed' => count($removedIds), 'matched' => count($matchingNodes), 'removedIds' => $removedIds];
+    }
+
+    /**
+     * Delete every ComplianceResult of this policy whose node is no longer part
+     * of the policy membership (neither manually added nor auto-matched), then
+     * refresh each affected node's compliance grade and overall score so it no
+     * longer shows a stale grade for a policy it left. Caller must flush.
+     */
+    private function purgeOrphanResults(CompliancePolicy $policy, ComplianceEvaluator $complianceEvaluator, MessageBusInterface $bus, EntityManagerInterface $em, array $alsoRecompute = []): int
+    {
+        $validIds = [];
+        foreach ($policy->getNodes() as $n) {
+            $validIds[] = $n->getId();
+        }
+
+        // Nodes that still carry results for this policy but are no longer members.
+        $dql = 'SELECT DISTINCT IDENTITY(r.node) AS nid FROM App\Entity\ComplianceResult r WHERE r.policy = :policy';
+        if (!empty($validIds)) {
+            $dql .= ' AND r.node NOT IN (:ids)';
+        }
+        $query = $em->createQuery($dql)->setParameter('policy', $policy);
+        if (!empty($validIds)) {
+            $query->setParameter('ids', $validIds);
+        }
+        $orphanIds = array_map(fn($r) => (int) $r['nid'], $query->getScalarResult());
+
+        if (!empty($orphanIds)) {
+            $em->createQuery('DELETE FROM App\Entity\ComplianceResult r WHERE r.policy = :policy AND r.node IN (:ids)')
+                ->setParameter('policy', $policy)
+                ->setParameter('ids', $orphanIds)
+                ->execute();
+        }
+
+        // Recompute scores for orphans (results just removed) plus any caller-supplied
+        // ex-members that may carry a stale grade even without leftover results.
+        $affectedIds = array_values(array_unique(array_merge($orphanIds, array_map('intval', $alsoRecompute))));
+        $nodeRepo = $em->getRepository(Node::class);
+        foreach ($affectedIds as $nid) {
+            $node = $nodeRepo->find($nid);
+            if ($node) {
+                $this->recomputeNodeScore($node, $complianceEvaluator, $bus);
+            }
+        }
+
+        return count($orphanIds);
+    }
+
+    /**
+     * Refresh a node's compliance grade from its remaining results and trigger a
+     * recompute of its overall (combined) score. Caller must flush.
+     */
+    private function recomputeNodeScore(Node $node, ComplianceEvaluator $complianceEvaluator, MessageBusInterface $bus): void
+    {
+        $complianceEvaluator->recalculateComplianceGrade($node);
+        $node->setComplianceEvaluating(null);
+        $bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
     }
 
     #[Route('/{id}/evaluate', methods: ['POST'])]
-    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em, NodeMatchEvaluator $evaluator): JsonResponse
+    public function evaluate(CompliancePolicy $policy, MessageBusInterface $bus, EntityManagerInterface $em, NodeMatchEvaluator $evaluator, ComplianceEvaluator $complianceEvaluator): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
-        // Auto-apply match rules before evaluating
-        $matchRules = $policy->getMatchRules();
-        if ($matchRules && !empty($matchRules['blocks'])) {
-            $matchingNodes = $evaluator->getMatchingNodes($policy->getContext(), $matchRules);
-            foreach ($matchingNodes as $node) {
-                $policy->addNode($node);
-            }
-        }
+        // Sync membership to the match rules before evaluating: add matches and
+        // remove nodes that no longer match, so auto-match stays authoritative
+        // over which nodes get evaluated.
+        $sync = $this->syncMatchedNodes($policy, $evaluator);
+        // Drop leftover results for nodes that are no longer in the policy (neither
+        // manual nor auto-matched) and refresh their now-stale compliance grade.
+        $this->purgeOrphanResults($policy, $complianceEvaluator, $bus, $em, $sync['removedIds']);
 
         $nodes = $policy->getNodes();
         $nodeIds = [];
@@ -525,7 +630,7 @@ class CompliancePolicyController extends AbstractController
     }
 
     #[Route('/{id}/results/{nodeId}', methods: ['DELETE'])]
-    public function deleteNodeResults(CompliancePolicy $policy, int $nodeId, EntityManagerInterface $em): JsonResponse
+    public function deleteNodeResults(CompliancePolicy $policy, int $nodeId, EntityManagerInterface $em, ComplianceEvaluator $complianceEvaluator, MessageBusInterface $bus): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $policy);
         $node = $em->getRepository(Node::class)->find($nodeId);
@@ -535,7 +640,8 @@ class CompliancePolicyController extends AbstractController
             'DELETE FROM App\Entity\ComplianceResult r WHERE r.policy = :policy AND r.node = :node'
         )->setParameter('policy', $policy)->setParameter('node', $node)->execute();
 
-        $node->setScore(null);
+        // Refresh the grade from whatever results remain (null if none left).
+        $this->recomputeNodeScore($node, $complianceEvaluator, $bus);
         $em->flush();
 
         return $this->json(['ok' => true]);

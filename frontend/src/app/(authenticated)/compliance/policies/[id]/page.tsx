@@ -86,6 +86,7 @@ interface PolicyNode {
   manufacturer: { id: number; name: string } | null;
   model: { id: number; name: string } | null;
   tags: NodeTag[];
+  source?: "manual" | "auto";
 }
 
 interface PolicyResultEntry {
@@ -845,6 +846,7 @@ export default function CompliancePolicyEditPage() {
                           <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colManufacturer")}</th>
                           <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("nodes.colModel")}</th>
                           <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("tags.title")}</th>
+                          <th className="px-4 py-3 font-medium text-slate-500 dark:text-slate-400">{t("compliance_policies.colSource")}</th>
                           <th className="px-4 py-3 w-12"></th>
                         </tr>
                       </thead>
@@ -887,6 +889,13 @@ export default function CompliancePolicyEditPage() {
                               </div>
                             </td>
                             <td className="px-4 py-3">
+                              {node.source === "manual" ? (
+                                <span className="inline-flex rounded-full bg-blue-100 dark:bg-blue-500/15 px-2 py-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-300">{t("compliance_policies.sourceManual")}</span>
+                              ) : (
+                                <span className="inline-flex rounded-full bg-slate-100 dark:bg-slate-700/40 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-300">{t("compliance_policies.sourceAuto")}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
                               {!readOnly && (
                                 <button
                                   onClick={async () => {
@@ -905,7 +914,7 @@ export default function CompliancePolicyEditPage() {
                         ))}
                         {filteredNodes.length === 0 && policyNodes.length > 0 && (
                           <tr>
-                            <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400">{t("common.noResult")}</td>
+                            <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400">{t("common.noResult")}</td>
                           </tr>
                         )}
                       </tbody>
