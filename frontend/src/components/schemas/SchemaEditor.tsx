@@ -2315,11 +2315,6 @@ export default function SchemaEditor({ schemaId }: Props) {
 
   return (
     <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950">
-      {readOnly && (
-        <div className="px-4 pt-3">
-          <PluginManagedBanner pluginId={data.managedByPlugin!} />
-        </div>
-      )}
       {/* Top bar */}
       <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2">
         <div className="flex items-center gap-3">
@@ -2421,6 +2416,14 @@ export default function SchemaEditor({ schemaId }: Props) {
 
         {/* Canvas */}
         <div ref={containerRef} className="flex-1 overflow-hidden relative" onDragOver={handleCanvasDragOver} onDrop={handleCanvasDrop} style={{ cursor: panStart.current ? "grabbing" : tool === "select" ? "default" : "crosshair" }}>
+          {readOnly && (
+            <div className="absolute top-0 left-0 right-0 z-10">
+              <PluginManagedBanner
+                pluginId={data.managedByPlugin!}
+                className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300"
+              />
+            </div>
+          )}
           <svg
             ref={svgRef}
             className="w-full h-full"
