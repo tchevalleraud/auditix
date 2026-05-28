@@ -34,7 +34,14 @@ export default function ReportSchemasListPage() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
-  const visioInputRef = useRef<HTMLInputElement>(null);
+
+  const [visioOpen, setVisioOpen] = useState(false);
+  const [visioFile, setVisioFile] = useState<File | null>(null);
+  const [visioPages, setVisioPages] = useState<{ index: number; name: string }[]>([]);
+  const [visioPage, setVisioPage] = useState(0);
+  const [visioLoadingPages, setVisioLoadingPages] = useState(false);
+  const [visioImporting, setVisioImporting] = useState(false);
+  const [visioError, setVisioError] = useState<string | null>(null);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -122,21 +129,51 @@ export default function ReportSchemasListPage() {
     }
   };
 
-  const handleVisioImportClick = () => {
-    setImportError(null);
-    visioInputRef.current?.click();
+  const openVisioModal = () => {
+    setVisioOpen(true);
+    setVisioFile(null);
+    setVisioPages([]);
+    setVisioPage(0);
+    setVisioError(null);
   };
 
-  const handleVisioImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleVisioFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // reset so the same file can be re-picked
     if (!file || !current) return;
-    setImporting(true);
-    setImportError(null);
+    setVisioFile(file);
+    setVisioPages([]);
+    setVisioPage(0);
+    setVisioError(null);
+    setVisioLoadingPages(true);
     try {
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/report-schemas/import-visio?context=${current.id}`, {
+      const res = await fetch(`/api/report-schemas/import-visio/pages?context=${current.id}`, {
+        method: "POST",
+        body: fd,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setVisioPages(data.pages ?? []);
+    } catch (err) {
+      setVisioError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setVisioLoadingPages(false);
+    }
+  };
+
+  const handleVisioImport = async () => {
+    if (!visioFile || !current) return;
+    setVisioImporting(true);
+    setVisioError(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", visioFile);
+      const res = await fetch(`/api/report-schemas/import-visio?context=${current.id}&page=${visioPage}`, {
         method: "POST",
         body: fd,
       });
@@ -145,12 +182,13 @@ export default function ReportSchemasListPage() {
         throw new Error(err?.error ?? `HTTP ${res.status}`);
       }
       const created = await res.json();
+      setVisioOpen(false);
       await load();
       router.push(`/reports/schemas/${created.id}`);
     } catch (err) {
-      setImportError(err instanceof Error ? err.message : String(err));
+      setVisioError(err instanceof Error ? err.message : String(err));
     } finally {
-      setImporting(false);
+      setVisioImporting(false);
     }
   };
 
@@ -179,7 +217,6 @@ export default function ReportSchemasListPage() {
         </div>
         <div className="flex items-center gap-2">
           <input ref={importInputRef} type="file" accept="application/json,.json" onChange={handleImportFile} className="hidden" />
-          <input ref={visioInputRef} type="file" accept=".vsdx,.vsdt" onChange={handleVisioImportFile} className="hidden" />
           <button
             onClick={handleImportClick}
             disabled={importing}
@@ -190,12 +227,11 @@ export default function ReportSchemasListPage() {
             {t("schemas.importJson")}
           </button>
           <button
-            onClick={handleVisioImportClick}
-            disabled={importing}
+            onClick={openVisioModal}
             title={t("schemas.importVisioTitle")}
             className="flex items-center gap-2 rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50"
           >
-            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            <Upload className="h-4 w-4" />
             {t("schemas.importVisio")}
           </button>
           <button
@@ -346,6 +382,77 @@ export default function ReportSchemasListPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {visioOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => !visioImporting && setVisioOpen(false)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 shadow-2xl"
+          >
+            <h2 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
+              {t("schemas.importVisioTitle")}
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+              {t("schemas.importVisioHint")}
+            </p>
+
+            <label className="flex items-center gap-2 cursor-pointer rounded-lg border border-dashed border-slate-300 dark:border-slate-700 px-4 py-3 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800">
+              <Upload className="h-4 w-4 shrink-0" />
+              <span className="truncate">{visioFile ? visioFile.name : t("schemas.importVisioChoose")}</span>
+              <input type="file" accept=".vsdx,.vsdt" onChange={handleVisioFileSelected} className="hidden" />
+            </label>
+
+            {visioLoadingPages && (
+              <div className="flex items-center gap-2 mt-4 text-sm text-slate-500 dark:text-slate-400">
+                <Loader2 className="h-4 w-4 animate-spin" /> {t("schemas.importVisioReading")}
+              </div>
+            )}
+
+            {visioPages.length > 0 && (
+              <div className="mt-4 space-y-1">
+                <label className="block text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1">
+                  {t("schemas.importVisioTab")}
+                </label>
+                <div className="max-h-52 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-800">
+                  {visioPages.map((p) => (
+                    <label key={p.index} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
+                      <input
+                        type="radio"
+                        name="visio-page"
+                        checked={visioPage === p.index}
+                        onChange={() => setVisioPage(p.index)}
+                      />
+                      <span className="text-slate-700 dark:text-slate-200">{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {visioError && <p className="text-xs text-red-600 dark:text-red-400 mt-3">{visioError}</p>}
+
+            <div className="flex items-center justify-end gap-2 pt-5">
+              <button
+                type="button"
+                onClick={() => setVisioOpen(false)}
+                disabled={visioImporting}
+                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg disabled:opacity-50"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleVisioImport}
+                disabled={visioImporting || visioPages.length === 0}
+                className="flex items-center gap-2 rounded-lg bg-slate-900 dark:bg-white px-4 py-2 text-sm font-medium text-white dark:text-slate-900 disabled:opacity-50"
+              >
+                {visioImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                {t("schemas.importVisioAction")}
+              </button>
+            </div>
           </div>
         </div>
       )}

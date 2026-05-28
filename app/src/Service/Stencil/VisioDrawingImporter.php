@@ -2,44 +2,73 @@
 
 namespace App\Service\Stencil;
 
+use App\Service\Stencil\Visio\EmfConverter;
+use App\Service\Stencil\Visio\VisioRenderContext;
+use App\Service\Stencil\Visio\VisioShapeRenderer;
 use Psr\Log\LoggerInterface;
 
 /**
  * Imports a full Visio drawing (.vsdx / .vsdt) as a set of ReportSchema elements.
  *
- * Where {@see VisioStencilImporter} turns each *master* into a reusable shape,
- * this importer reads the *page* (visio/pages/pageN.xml): every master instance
- * becomes an `image` element placed at its converted position, every connector
- * becomes a `line` element glued (sourceId/targetId + nearest anchor) to the
- * shapes its <Connects> entries reference. Shape text becomes a `text` element;
- * connector text becomes a line label.
+ * Each top-level shape of the chosen page is rendered to a self-contained SVG
+ * image element (faithfully reproducing groups, geometry, inherited master art
+ * and text via {@see VisioShapeRenderer}); connectors become line elements glued
+ * to their endpoints through the page's <Connects> table.
  *
  * Coordinate model: Visio uses inches with a bottom-left origin (Y up); the
  * schema canvas uses pixels with a top-left origin (Y down). Conversion applies
  * INCH_PX and flips Y against the page height.
- *
- * Best-effort, page 1 only: connector routing is reduced to a straight segment
- * between anchors, and character-level text styling is not preserved.
  */
 class VisioDrawingImporter
 {
     private const INCH_PX = 96.0;
 
-    /** Anchor name → unit offset of the point within a (0..1)×(0..1) box. */
+    /** Anchor name → unit offset within a (0..1)×(0..1) box. */
     private const ANCHORS = [
         'n'  => [0.5, 0.0], 'ne' => [1.0, 0.0], 'e' => [1.0, 0.5], 'se' => [1.0, 1.0],
         's'  => [0.5, 1.0], 'sw' => [0.0, 1.0], 'w' => [0.0, 0.5], 'nw' => [0.0, 0.0],
     ];
 
+    private readonly EmfConverter $emf;
+
     public function __construct(
         private readonly VisioStencilImporter $stencils,
+        private readonly VisioShapeRenderer $renderer,
         private readonly LoggerInterface $logger,
-    ) {}
+    ) {
+        $this->emf = new EmfConverter($this->logger);
+    }
+
+    /**
+     * List the drawing's pages (tabs) in tab order, without rendering them.
+     *
+     * @return array<int, array{index: int, name: string}>
+     */
+    public function listPages(string $path): array
+    {
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            throw new \RuntimeException('Archive Visio illisible (.vsdx attendu).');
+        }
+        try {
+            $pages = $this->resolvePages($zip);
+            if ($pages === []) {
+                throw new \RuntimeException('Aucune page trouvée dans le dessin Visio.');
+            }
+            $out = [];
+            foreach ($pages as $i => $p) {
+                $out[] = ['index' => $i, 'name' => $p['name']];
+            }
+            return $out;
+        } finally {
+            $zip->close();
+        }
+    }
 
     /**
      * @return array{name: string, canvasSize: array{width: float, height: float}, elements: array<int, array<string, mixed>>}
      */
-    public function import(string $path, string $originalName): array
+    public function import(string $path, string $originalName, int $pageIndex = 0): array
     {
         $zip = new \ZipArchive();
         if ($zip->open($path) !== true) {
@@ -47,26 +76,39 @@ class VisioDrawingImporter
         }
 
         try {
-            $masterSpecs = $this->stencils->buildMasterSpecs($zip);
-
-            $pagePath = $this->firstPagePath($zip);
-            $pageXml = $pagePath !== null ? $zip->getFromName($pagePath) : false;
-            if ($pageXml === false) {
+            $pages = $this->resolvePages($zip);
+            if ($pages === []) {
                 throw new \RuntimeException('Aucune page exploitable dans le dessin Visio.');
             }
-            [$pageW, $pageH] = $this->pageSize($zip);
+            $page = $pages[$pageIndex] ?? $pages[0];
 
-            $elements = $this->buildElements($pageXml, $masterSpecs, $pageH);
+            $pageXml = $zip->getFromName($page['file']);
+            if ($pageXml === false) {
+                throw new \RuntimeException('Page Visio illisible.');
+            }
+            $dom = new \DOMDocument();
+            if (!@$dom->loadXML($pageXml)) {
+                throw new \RuntimeException('Page Visio illisible.');
+            }
+            $xp = new \DOMXPath($dom);
+
+            $masterSpecs = $this->rasterizeLargeMasters($this->stencils->buildMasterSpecs($zip));
+            $pageRels = $this->partRels($zip, $page['file']);
+            $convertedEmf = $this->convertPageEmf($zip, $xp, $pageRels);
+            $ctx = new VisioRenderContext($zip, 'visio/pages/', $pageRels, $masterSpecs, $convertedEmf, true);
+
+            $pageH = $page['height'];
+            $elements = $this->buildElements($xp, $ctx, $pageH);
             if ($elements === []) {
-                throw new \RuntimeException('Aucune forme exploitable dans ce dessin Visio.');
+                throw new \RuntimeException('Aucune forme exploitable sur cette page Visio.');
             }
 
+            $canvas = $this->fitToContent($elements);
+
+            $baseName = pathinfo($originalName, PATHINFO_FILENAME) ?: 'Schéma Visio';
             return [
-                'name' => pathinfo($originalName, PATHINFO_FILENAME) ?: 'Schéma Visio',
-                'canvasSize' => [
-                    'width' => max(1.0, $pageW * self::INCH_PX),
-                    'height' => max(1.0, $pageH * self::INCH_PX),
-                ],
+                'name' => $page['name'] !== '' ? $page['name'] : $baseName,
+                'canvasSize' => $canvas,
                 'elements' => $elements,
             ];
         } finally {
@@ -75,131 +117,150 @@ class VisioDrawingImporter
     }
 
     /**
-     * @param array<string, StencilItemSpec> $masterSpecs
      * @return array<int, array<string, mixed>>
      */
-    private function buildElements(string $pageXml, array $masterSpecs, float $pageH): array
+    private function buildElements(\DOMXPath $xp, VisioRenderContext $ctx, float $pageH): array
     {
-        $dom = new \DOMDocument();
-        if (!@$dom->loadXML($pageXml)) {
-            return [];
-        }
-        $xp = new \DOMXPath($dom);
-
         $topShapes = $xp->query("/*/*[local-name()='Shapes']/*[local-name()='Shape']");
         if ($topShapes === false || $topShapes->length === 0) {
             return [];
         }
 
-        // Pass 1 — split shapes into nodes (master instances) and connectors.
-        $nodes = [];       // visioId => DOMElement
-        $connectors = [];  // visioId => DOMElement
+        $elements = [];
+        $bboxes = [];        // visioId => [x, y, w, h] (pixels)
+        $elementId = [];     // visioId => schema element id
+        $deferredConnectors = []; // [shape, zIndex]
+        $z = 0;
+
         foreach ($topShapes as $shape) {
             if (!$shape instanceof \DOMElement) {
                 continue;
             }
             $vid = $shape->getAttribute('ID');
-            if ($vid === '') {
+            $isConnector = $this->cell($xp, $shape, 'BeginX') !== null && $this->cell($xp, $shape, 'EndX') !== null;
+
+            if ($isConnector) {
+                $deferredConnectors[] = ['shape' => $shape, 'z' => $z++];
                 continue;
             }
-            if ($this->cell($xp, $shape, 'BeginX') !== null && $this->cell($xp, $shape, 'EndX') !== null) {
-                $connectors[$vid] = $shape;
-            } else {
-                $nodes[$vid] = $shape;
+
+            $rendered = $this->renderer->renderShapesToSvg($xp, [$shape], $ctx);
+            if ($rendered === null) {
+                $z++;
+                continue;
             }
-        }
-
-        // Pass 2 — place each node as an image (or a fallback rectangle).
-        $elements = [];
-        $bboxes = [];      // visioId => [x, y, w, h] (pixels)
-        $elementId = [];   // visioId => schema element id
-        $z = 1000;         // nodes sit above connectors
-        foreach ($nodes as $vid => $shape) {
-            $masterId = $shape->getAttribute('Master');
-            $spec = $masterId !== '' ? ($masterSpecs[$masterId] ?? null) : null;
-
-            $wInch = $this->numCell($xp, $shape, 'Width') ?? ($spec ? $spec->width / self::INCH_PX : 0.5);
-            $hInch = $this->numCell($xp, $shape, 'Height') ?? ($spec ? $spec->height / self::INCH_PX : 0.5);
-            $pinX = $this->numCell($xp, $shape, 'PinX') ?? 0.0;
-            $pinY = $this->numCell($xp, $shape, 'PinY') ?? 0.0;
-            $locX = $this->numCell($xp, $shape, 'LocPinX') ?? $wInch / 2;
-            $locY = $this->numCell($xp, $shape, 'LocPinY') ?? $hInch / 2;
-
-            $x = ($pinX - $locX) * self::INCH_PX;
-            $y = ($pageH - ($pinY - $locY + $hInch)) * self::INCH_PX;
-            $w = max(1.0, $wInch * self::INCH_PX);
-            $h = max(1.0, $hInch * self::INCH_PX);
-            $rotation = $this->rotationDeg($this->numCell($xp, $shape, 'Angle') ?? 0.0);
-
+            $x = $rendered['minX'] * self::INCH_PX;
+            $y = $pageH * self::INCH_PX - $rendered['minY'] * self::INCH_PX - $rendered['height'];
             $id = $this->id('img');
-            if ($spec !== null) {
-                $elements[] = [
-                    'id' => $id, 'kind' => 'image',
-                    'x' => $this->r($x), 'y' => $this->r($y), 'width' => $this->r($w), 'height' => $this->r($h),
-                    'rotation' => $rotation, 'zIndex' => $z++,
-                    'url' => $spec->dataUrl, 'opacity' => 1,
-                ];
-            } else {
-                $this->logger->warning('Visio drawing: master not found for shape', ['shape' => $vid, 'master' => $masterId]);
-                $elements[] = [
-                    'id' => $id, 'kind' => 'shape', 'shape' => 'rectangle',
-                    'x' => $this->r($x), 'y' => $this->r($y), 'width' => $this->r($w), 'height' => $this->r($h),
-                    'rotation' => $rotation, 'zIndex' => $z++,
-                    'style' => ['fill' => '#f1f5f9', 'stroke' => '#94a3b8', 'strokeWidth' => 1, 'dash' => 'solid', 'opacity' => 1, 'fillOpacity' => 1, 'borderRadius' => 4],
-                ];
-            }
-            $bboxes[$vid] = [$x, $y, $w, $h];
-            $elementId[$vid] = $id;
-
-            $text = $this->shapeText($xp, $shape);
-            if ($text !== '') {
-                $elements[] = $this->textElement($text, $x, $y, $w, $h, $z++);
+            $elements[] = [
+                'id' => $id, 'kind' => 'image',
+                'x' => $this->r($x), 'y' => $this->r($y),
+                'width' => $this->r($rendered['width']), 'height' => $this->r($rendered['height']),
+                'rotation' => 0, 'zIndex' => $z++,
+                'url' => $rendered['dataUrl'], 'opacity' => 1,
+            ];
+            if ($vid !== '') {
+                $bboxes[$vid] = [$x, $y, $rendered['width'], $rendered['height']];
+                $elementId[$vid] = $id;
             }
         }
 
-        // Pass 3 — connector endpoints + glue from the <Connects> table.
         $connects = $this->parseConnects($xp);
-        $z = 0;
-        foreach ($connectors as $vid => $shape) {
-            $bx = $this->numCell($xp, $shape, 'BeginX') ?? 0.0;
-            $by = $this->numCell($xp, $shape, 'BeginY') ?? 0.0;
-            $ex = $this->numCell($xp, $shape, 'EndX') ?? 0.0;
-            $ey = $this->numCell($xp, $shape, 'EndY') ?? 0.0;
-            $x1 = $bx * self::INCH_PX; $y1 = ($pageH - $by) * self::INCH_PX;
-            $x2 = $ex * self::INCH_PX; $y2 = ($pageH - $ey) * self::INCH_PX;
-
-            $line = [
-                'id' => $this->id('line'), 'kind' => 'line',
-                'x1' => $this->r($x1), 'y1' => $this->r($y1), 'x2' => $this->r($x2), 'y2' => $this->r($y2),
-                'zIndex' => $z++,
-                'style' => ['stroke' => '#334155', 'strokeWidth' => 1.5, 'dash' => 'solid', 'opacity' => 1],
-                'arrowStart' => false, 'arrowEnd' => false,
-            ];
-
-            $beginTo = $connects[$vid]['begin'] ?? null;
-            if ($beginTo !== null && isset($bboxes[$beginTo], $elementId[$beginTo])) {
-                $line['sourceId'] = $elementId[$beginTo];
-                $line['sourceAnchor'] = $this->nearestAnchor($bboxes[$beginTo], $x1, $y1);
-            }
-            $endTo = $connects[$vid]['end'] ?? null;
-            if ($endTo !== null && isset($bboxes[$endTo], $elementId[$endTo])) {
-                $line['targetId'] = $elementId[$endTo];
-                $line['targetAnchor'] = $this->nearestAnchor($bboxes[$endTo], $x2, $y2);
-            }
-
-            $text = $this->shapeText($xp, $shape);
-            if ($text !== '') {
-                $line['labels'] = [[
-                    'id' => $this->id('lbl'), 'kind' => 'text', 't' => 0.5, 'text' => $text,
-                    'offset' => 0, 'fontSize' => 12, 'color' => '#0f172a', 'fontWeight' => 400,
-                    'fontStyle' => 'normal', 'bgColor' => '#ffffff', 'borderRadius' => 3, 'padding' => 2,
-                ]];
-            }
-
-            $elements[] = $line;
+        foreach ($deferredConnectors as $c) {
+            $elements[] = $this->buildConnector($xp, $c['shape'], $c['z'], $connects, $bboxes, $elementId, $pageH);
         }
 
         return $elements;
+    }
+
+    /**
+     * @param array<string, array{begin?: string, end?: string}> $connects
+     * @param array<string, array{0: float, 1: float, 2: float, 3: float}> $bboxes
+     * @param array<string, string> $elementId
+     * @return array<string, mixed>
+     */
+    private function buildConnector(\DOMXPath $xp, \DOMElement $shape, int $z, array $connects, array $bboxes, array $elementId, float $pageH): array
+    {
+        $bx = $this->numCell($xp, $shape, 'BeginX') ?? 0.0;
+        $by = $this->numCell($xp, $shape, 'BeginY') ?? 0.0;
+        $ex = $this->numCell($xp, $shape, 'EndX') ?? 0.0;
+        $ey = $this->numCell($xp, $shape, 'EndY') ?? 0.0;
+        $x1 = $bx * self::INCH_PX; $y1 = ($pageH - $by) * self::INCH_PX;
+        $x2 = $ex * self::INCH_PX; $y2 = ($pageH - $ey) * self::INCH_PX;
+
+        $line = [
+            'id' => $this->id('line'), 'kind' => 'line',
+            'x1' => $this->r($x1), 'y1' => $this->r($y1), 'x2' => $this->r($x2), 'y2' => $this->r($y2),
+            'zIndex' => $z,
+            'style' => ['stroke' => '#334155', 'strokeWidth' => 1.5, 'dash' => 'solid', 'opacity' => 1],
+            'arrowStart' => false, 'arrowEnd' => false,
+        ];
+
+        $vid = $shape->getAttribute('ID');
+        $beginTo = $connects[$vid]['begin'] ?? null;
+        if ($beginTo !== null && isset($bboxes[$beginTo], $elementId[$beginTo])) {
+            $line['sourceId'] = $elementId[$beginTo];
+            $line['sourceAnchor'] = $this->nearestAnchor($bboxes[$beginTo], $x1, $y1);
+        }
+        $endTo = $connects[$vid]['end'] ?? null;
+        if ($endTo !== null && isset($bboxes[$endTo], $elementId[$endTo])) {
+            $line['targetId'] = $elementId[$endTo];
+            $line['targetAnchor'] = $this->nearestAnchor($bboxes[$endTo], $x2, $y2);
+        }
+
+        $text = $this->shapeText($xp, $shape);
+        if ($text !== '') {
+            $line['labels'] = [[
+                'id' => $this->id('lbl'), 'kind' => 'text', 't' => 0.5, 'text' => $text,
+                'offset' => 0, 'fontSize' => 12, 'color' => '#0f172a', 'fontWeight' => 400,
+                'fontStyle' => 'normal', 'bgColor' => '#ffffff', 'borderRadius' => 3, 'padding' => 2,
+            ]];
+        }
+
+        return $line;
+    }
+
+    /**
+     * Trim the empty page margins: shift every element so the content starts at a
+     * small margin and size the canvas to the content bounding box.
+     *
+     * @param array<int, array<string, mixed>> $elements (modified in place)
+     * @return array{width: float, height: float}
+     */
+    private function fitToContent(array &$elements): array
+    {
+        $margin = 40.0;
+        $minX = INF; $minY = INF; $maxX = -INF; $maxY = -INF;
+        foreach ($elements as $el) {
+            if ($el['kind'] === 'image') {
+                $minX = min($minX, $el['x']); $minY = min($minY, $el['y']);
+                $maxX = max($maxX, $el['x'] + $el['width']); $maxY = max($maxY, $el['y'] + $el['height']);
+            } elseif ($el['kind'] === 'line') {
+                $minX = min($minX, $el['x1'], $el['x2']); $minY = min($minY, $el['y1'], $el['y2']);
+                $maxX = max($maxX, $el['x1'], $el['x2']); $maxY = max($maxY, $el['y1'], $el['y2']);
+            }
+        }
+        if (!is_finite($minX) || $maxX <= $minX || $maxY <= $minY) {
+            return ['width' => 1000.0, 'height' => 1000.0];
+        }
+
+        $dx = $margin - $minX;
+        $dy = $margin - $minY;
+        foreach ($elements as &$el) {
+            if ($el['kind'] === 'image') {
+                $el['x'] = $this->r($el['x'] + $dx);
+                $el['y'] = $this->r($el['y'] + $dy);
+            } elseif ($el['kind'] === 'line') {
+                $el['x1'] = $this->r($el['x1'] + $dx); $el['y1'] = $this->r($el['y1'] + $dy);
+                $el['x2'] = $this->r($el['x2'] + $dx); $el['y2'] = $this->r($el['y2'] + $dy);
+            }
+        }
+        unset($el);
+
+        return [
+            'width' => $this->r($maxX - $minX + 2 * $margin),
+            'height' => $this->r($maxY - $minY + 2 * $margin),
+        ];
     }
 
     /**
@@ -248,89 +309,193 @@ class VisioDrawingImporter
     }
 
     /**
-     * @return array{0: float, 1: float} page width, height (inches)
+     * Resolve every page to its name + part path + dimensions, in tab order.
+     *
+     * @return array<int, array{name: string, file: string, width: float, height: float}>
      */
-    private function pageSize(\ZipArchive $zip): array
+    private function resolvePages(\ZipArchive $zip): array
     {
         $xml = $zip->getFromName('visio/pages/pages.xml');
-        $w = 8.26771653543307; // A4 portrait, the Visio default
-        $h = 11.69291338582677;
         if ($xml === false) {
-            return [$w, $h];
+            return [];
         }
         $dom = new \DOMDocument();
         if (!@$dom->loadXML($xml)) {
-            return [$w, $h];
+            return [];
         }
         $xp = new \DOMXPath($dom);
-        $sheet = $xp->query("//*[local-name()='Page'][1]/*[local-name()='PageSheet']")->item(0);
-        if ($sheet instanceof \DOMElement) {
-            $w = $this->numCell($xp, $sheet, 'PageWidth') ?? $w;
-            $h = $this->numCell($xp, $sheet, 'PageHeight') ?? $h;
+        $rels = $this->partRels($zip, 'visio/pages/pages.xml');
+
+        $pages = [];
+        foreach ($xp->query("/*/*[local-name()='Page']") as $page) {
+            if (!$page instanceof \DOMElement) {
+                continue;
+            }
+            // The user-facing tab label is `Name`; `NameU` is the internal name.
+            $name = $page->getAttribute('Name') ?: $page->getAttribute('NameU') ?: ('Page ' . (count($pages) + 1));
+            $sheet = $xp->query("./*[local-name()='PageSheet']", $page)->item(0);
+            $w = 11.69291338582677; $h = 8.26771653543307;
+            if ($sheet instanceof \DOMElement) {
+                $w = $this->numCell($xp, $sheet, 'PageWidth') ?? $w;
+                $h = $this->numCell($xp, $sheet, 'PageHeight') ?? $h;
+            }
+            $relId = '';
+            $rel = $xp->query("./*[local-name()='Rel']", $page)->item(0);
+            if ($rel instanceof \DOMElement) {
+                foreach ($rel->attributes as $a) {
+                    if ($a->localName === 'id') {
+                        $relId = $a->value;
+                    }
+                }
+            }
+            $target = $relId !== '' ? ($rels[$relId] ?? null) : null;
+            if ($target === null) {
+                continue;
+            }
+            $pages[] = ['name' => $name, 'file' => 'visio/pages/' . ltrim($target, '/'), 'width' => $w, 'height' => $h];
         }
-        return [$w, $h];
+        return $pages;
     }
 
-    private function firstPagePath(\ZipArchive $zip): ?string
+    /**
+     * Collect and batch-convert every EMF/WMF ForeignData image referenced on
+     * the page into SVG, keyed by media path.
+     *
+     * @param array<string, string> $pageRels
+     * @return array<string, string|null>
+     */
+    private function convertPageEmf(\ZipArchive $zip, \DOMXPath $xp, array $pageRels): array
     {
-        $pagesXml = $zip->getFromName('visio/pages/pages.xml');
-        $relsXml = $zip->getFromName('visio/pages/_rels/pages.xml.rels');
-        if ($pagesXml !== false && $relsXml !== false) {
-            $dom = new \DOMDocument();
-            if (@$dom->loadXML($pagesXml)) {
-                $xp = new \DOMXPath($dom);
-                $rel = $xp->query("//*[local-name()='Page'][1]/*[local-name()='Rel']")->item(0);
+        $blobs = [];
+        foreach ($xp->query("//*[local-name()='ForeignData']") as $fd) {
+            if (!$fd instanceof \DOMElement) {
+                continue;
+            }
+            $type = strtolower($fd->getAttribute('ForeignType'));
+            if (!in_array($type, ['enhmetafile', 'metafile'], true)) {
+                continue;
+            }
+            $relId = '';
+            foreach ($xp->query("./*[local-name()='Rel']", $fd) as $rel) {
                 if ($rel instanceof \DOMElement) {
-                    $relId = '';
                     foreach ($rel->attributes as $a) {
                         if ($a->localName === 'id') {
                             $relId = $a->value;
                         }
                     }
-                    $target = $this->relTarget($relsXml, $relId);
-                    if ($target !== null) {
-                        return 'visio/pages/' . ltrim($target, '/');
-                    }
+                }
+            }
+            if ($relId === '' || !isset($pageRels[$relId])) {
+                continue;
+            }
+            $mediaPath = $this->resolveMediaPath($pageRels[$relId]);
+            if (!array_key_exists($mediaPath, $blobs)) {
+                $bytes = $zip->getFromName($mediaPath);
+                if ($bytes !== false) {
+                    $blobs[$mediaPath] = $bytes;
                 }
             }
         }
-        // Fallback to the conventional path.
-        return $zip->getFromName('visio/pages/page1.xml') !== false ? 'visio/pages/page1.xml' : null;
-    }
-
-    private function relTarget(string $relsXml, string $relId): ?string
-    {
-        if ($relId === '') {
-            return null;
-        }
-        $dom = new \DOMDocument();
-        if (!@$dom->loadXML($relsXml)) {
-            return null;
-        }
-        $xp = new \DOMXPath($dom);
-        foreach ($xp->query("//*[local-name()='Relationship']") as $r) {
-            if ($r instanceof \DOMElement && $r->getAttribute('Id') === $relId) {
-                return $r->getAttribute('Target');
-            }
-        }
-        return null;
+        return $blobs === [] ? [] : $this->emf->convertMany($blobs);
     }
 
     /**
-     * @param array{0: float, 1: float, 2: float, 3: float}|null $unused kept for clarity
+     * LibreOffice turns the device EMFs into very large SVGs (1–2 MB each). Since
+     * each master is embedded into every instance, that explodes the schema size.
+     * Rasterize any oversized SVG master to a compact PNG (vector geometry shapes,
+     * which stay small, are left untouched).
+     *
+     * @param array<string, StencilItemSpec> $specs
+     * @return array<string, StencilItemSpec>
      */
-    private function textElement(string $text, float $x, float $y, float $w, float $h, int $z): array
+    private function rasterizeLargeMasters(array $specs): array
     {
-        $fontSize = 13.0;
-        return [
-            'id' => $this->id('txt'), 'kind' => 'text',
-            'x' => $this->r($x), 'y' => $this->r($y + $h / 2 - $fontSize / 2),
-            'width' => $this->r(max(24.0, $w)), 'height' => $this->r($fontSize + 6),
-            'rotation' => 0, 'zIndex' => $z,
-            'text' => $text, 'fontSize' => $fontSize, 'color' => '#0f172a',
-            'fontFamily' => 'Inter, system-ui, sans-serif', 'fontWeight' => 400, 'fontStyle' => 'normal',
-            'textAlign' => 'center', 'bgColor' => null, 'padding' => 2,
-        ];
+        $threshold = 120 * 1024; // bytes of data URL
+        $maxSide = 900.0;        // px cap on the longest rendered side
+        $out = [];
+        foreach ($specs as $id => $spec) {
+            $prefix = 'data:image/svg+xml;base64,';
+            if (strlen($spec->dataUrl) <= $threshold || !str_starts_with($spec->dataUrl, $prefix)) {
+                $out[$id] = $spec;
+                continue;
+            }
+            $svg = base64_decode(substr($spec->dataUrl, strlen($prefix)), true);
+            if ($svg === false) {
+                $out[$id] = $spec;
+                continue;
+            }
+            $scale = min($maxSide / max(1.0, $spec->width), $maxSide / max(1.0, $spec->height), 1.0);
+            $w = max(1, (int) round($spec->width * $scale));
+            $h = max(1, (int) round($spec->height * $scale));
+            $png = $this->rsvgToPng($svg, $w, $h);
+            if ($png === null) {
+                $out[$id] = $spec;
+                continue;
+            }
+            $dataUrl = 'data:image/png;base64,' . base64_encode($png);
+            $out[$id] = new StencilItemSpec($spec->name, $spec->keywords, $dataUrl, null, $spec->width, $spec->height);
+        }
+        return $out;
+    }
+
+    private function rsvgToPng(string $svg, int $w, int $h): ?string
+    {
+        $in = tempnam(sys_get_temp_dir(), 'vsvg');
+        $out = tempnam(sys_get_temp_dir(), 'vpng');
+        if ($in === false || $out === false) {
+            return null;
+        }
+        try {
+            file_put_contents($in, $svg);
+            $cmd = sprintf('rsvg-convert -w %d -h %d -f png -o %s %s 2>/dev/null', $w, $h, escapeshellarg($out), escapeshellarg($in));
+            exec($cmd, $_, $code);
+            if ($code !== 0) {
+                return null;
+            }
+            $png = file_get_contents($out);
+            return $png !== false && $png !== '' ? $png : null;
+        } finally {
+            @unlink($in);
+            @unlink($out);
+        }
+    }
+
+    /**
+     * @return array<string, string> relId => Target
+     */
+    private function partRels(\ZipArchive $zip, string $partPath): array
+    {
+        $dir = \dirname($partPath);
+        $relsPath = $dir . '/_rels/' . basename($partPath) . '.rels';
+        $xml = $zip->getFromName($relsPath);
+        if ($xml === false) {
+            return [];
+        }
+        $dom = new \DOMDocument();
+        if (!@$dom->loadXML($xml)) {
+            return [];
+        }
+        $xp = new \DOMXPath($dom);
+        $out = [];
+        foreach ($xp->query("//*[local-name()='Relationship']") as $r) {
+            if ($r instanceof \DOMElement) {
+                $out[$r->getAttribute('Id')] = $r->getAttribute('Target');
+            }
+        }
+        return $out;
+    }
+
+    private function resolveMediaPath(string $target): string
+    {
+        $parts = [];
+        foreach (explode('/', 'visio/pages/' . $target) as $p) {
+            if ($p === '..') {
+                array_pop($parts);
+            } elseif ($p !== '.' && $p !== '') {
+                $parts[] = $p;
+            }
+        }
+        return implode('/', $parts);
     }
 
     /** Concatenated, whitespace-collapsed text content of a shape's <Text> node. */
@@ -342,15 +507,6 @@ class VisioDrawingImporter
         }
         $text = preg_replace('/\s+/u', ' ', $node->textContent ?? '');
         return trim((string) $text);
-    }
-
-    /** Visio Angle (radians, CCW, Y-up) → schema rotation (degrees, CW, Y-down). */
-    private function rotationDeg(float $rad): float
-    {
-        if (abs($rad) < 1e-9) {
-            return 0.0;
-        }
-        return $this->r(-$rad * 180.0 / M_PI);
     }
 
     private function cell(\DOMXPath $xp, \DOMElement $shape, string $name): ?string

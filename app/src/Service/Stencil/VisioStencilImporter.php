@@ -2,10 +2,9 @@
 
 namespace App\Service\Stencil;
 
-use App\Service\Stencil\Visio\ColorResolver;
 use App\Service\Stencil\Visio\EmfConverter;
-use App\Service\Stencil\Visio\GeometryConverter;
-use App\Service\Stencil\Visio\Transform;
+use App\Service\Stencil\Visio\VisioRenderContext;
+use App\Service\Stencil\Visio\VisioShapeRenderer;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -30,14 +29,12 @@ class VisioStencilImporter
 {
     private const INCH_PX = 96.0;
 
-    private readonly ColorResolver $colors;
-    private readonly GeometryConverter $geometry;
     private readonly EmfConverter $emf;
 
-    public function __construct(private readonly LoggerInterface $logger)
-    {
-        $this->colors = new ColorResolver();
-        $this->geometry = new GeometryConverter($logger);
+    public function __construct(
+        private readonly LoggerInterface $logger,
+        private readonly VisioShapeRenderer $renderer,
+    ) {
         $this->emf = new EmfConverter($logger);
     }
 
@@ -220,41 +217,21 @@ class VisioStencilImporter
         }
         $xp = new \DOMXPath($dom);
         // Only the root <Shapes>'s direct <Shape> children are top-level; nested
-        // sub-shapes are handled by renderShape() recursion. A descendant query
+        // sub-shapes are handled by the renderer's recursion. A descendant query
         // would render nested shapes twice.
-        $topShapes = $xp->query("/*/*[local-name()='Shapes']/*[local-name()='Shape']");
-        if ($topShapes === false || $topShapes->length === 0) {
-            return null;
-        }
-
-        [$minX, $minY, $W, $H] = $this->extent($xp, $topShapes);
-
-        $hasContent = false;
-        $body = '';
-        foreach ($topShapes as $shape) {
-            if ($shape instanceof \DOMElement) {
-                $body .= $this->renderShape($xp, $shape, $zip, $masterRels, $hasContent);
+        $topShapes = [];
+        foreach ($xp->query("/*/*[local-name()='Shapes']/*[local-name()='Shape']") ?: [] as $s) {
+            if ($s instanceof \DOMElement) {
+                $topShapes[] = $s;
             }
         }
-
-        if (!$hasContent || $body === '') {
+        $ctx = new VisioRenderContext($zip, 'visio/masters/', $masterRels);
+        $rendered = $this->renderer->renderShapesToSvg($xp, $topShapes, $ctx);
+        if ($rendered === null) {
             $this->logger->warning('Visio master without renderable content', ['name' => $name]);
             return null;
         }
-
-        $pxW = max(1.0, $W * self::INCH_PX);
-        $pxH = max(1.0, $H * self::INCH_PX);
-        $e = -self::INCH_PX * $minX;
-        $f = self::INCH_PX * ($minY + $H);
-        $svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
-            . 'viewBox="0 0 ' . $this->n($pxW) . ' ' . $this->n($pxH) . '" '
-            . 'width="' . $this->n($pxW) . '" height="' . $this->n($pxH) . '">'
-            . '<g transform="matrix(' . self::INCH_PX . ' 0 0 ' . (-self::INCH_PX) . ' ' . $this->n($e) . ' ' . $this->n($f) . ')">'
-            . $body
-            . '</g></svg>';
-
-        $dataUrl = 'data:image/svg+xml;base64,' . base64_encode($svg);
-        return new StencilItemSpec($name, 'visio', $dataUrl, $svg, $pxW, $pxH);
+        return new StencilItemSpec($name, 'visio', $rendered['dataUrl'], $rendered['svg'], $rendered['width'], $rendered['height']);
     }
 
     /**
@@ -315,147 +292,6 @@ class VisioStencilImporter
         return $xml !== false ? $this->parseRels($xml) : [];
     }
 
-    /**
-     * @param \DOMNodeList<\DOMNode> $topShapes
-     * @return array{0: float, 1: float, 2: float, 3: float} minX, minY, width, height (inches)
-     */
-    private function extent(\DOMXPath $xp, \DOMNodeList $topShapes): array
-    {
-        $minX = INF; $minY = INF; $maxX = -INF; $maxY = -INF;
-        foreach ($topShapes as $shape) {
-            if (!$shape instanceof \DOMElement) {
-                continue;
-            }
-            $w = (float) ($this->cell($xp, $shape, 'Width') ?? 0);
-            $h = (float) ($this->cell($xp, $shape, 'Height') ?? 0);
-            $pinX = (float) ($this->cell($xp, $shape, 'PinX') ?? 0);
-            $pinY = (float) ($this->cell($xp, $shape, 'PinY') ?? 0);
-            $locX = (float) ($this->cell($xp, $shape, 'LocPinX') ?? $w / 2);
-            $locY = (float) ($this->cell($xp, $shape, 'LocPinY') ?? $h / 2);
-            $x0 = $pinX - $locX; $y0 = $pinY - $locY;
-            $minX = min($minX, $x0); $minY = min($minY, $y0);
-            $maxX = max($maxX, $x0 + $w); $maxY = max($maxY, $y0 + $h);
-        }
-        if (!is_finite($minX) || $maxX <= $minX || $maxY <= $minY) {
-            return [0.0, 0.0, 1.0, 1.0];
-        }
-        return [$minX, $minY, $maxX - $minX, $maxY - $minY];
-    }
-
-    /**
-     * @param array<string, string> $masterRels
-     */
-    private function renderShape(\DOMXPath $xp, \DOMElement $shape, \ZipArchive $zip, array $masterRels, bool &$hasContent): string
-    {
-        $w = (float) ($this->cell($xp, $shape, 'Width') ?? 0);
-        $h = (float) ($this->cell($xp, $shape, 'Height') ?? 0);
-        $pinX = (float) ($this->cell($xp, $shape, 'PinX') ?? 0);
-        $pinY = (float) ($this->cell($xp, $shape, 'PinY') ?? 0);
-        $locX = (float) ($this->cell($xp, $shape, 'LocPinX') ?? $w / 2);
-        $locY = (float) ($this->cell($xp, $shape, 'LocPinY') ?? $h / 2);
-        $angle = (float) ($this->cell($xp, $shape, 'Angle') ?? 0);
-        $flipX = trim((string) ($this->cell($xp, $shape, 'FlipX') ?? '0')) === '1';
-        $flipY = trim((string) ($this->cell($xp, $shape, 'FlipY') ?? '0')) === '1';
-
-        $transform = Transform::forShape($pinX, $pinY, $locX, $locY, $angle, $flipX, $flipY);
-
-        $fill = $this->colors->fill($this->cell($xp, $shape, 'FillForegnd'), $this->cell($xp, $shape, 'FillPattern'));
-        $stroke = $this->colors->stroke($this->cell($xp, $shape, 'LineColor'), $this->cell($xp, $shape, 'LinePattern'));
-        $dash = $this->colors->dashArray($this->cell($xp, $shape, 'LinePattern'));
-        $lw = $this->cell($xp, $shape, 'LineWeight');
-        $sw = is_numeric($lw) ? max(0.004, (float) $lw) : 0.01;
-
-        $inner = '';
-
-        foreach ($xp->query("./*[local-name()='Section'][@N='Geometry']", $shape) as $section) {
-            if (!$section instanceof \DOMElement) {
-                continue;
-            }
-            if (trim((string) $this->sectionCell($xp, $section, 'NoShow')) === '1') {
-                continue;
-            }
-            $noFill = trim((string) $this->sectionCell($xp, $section, 'NoFill')) === '1';
-            $noLine = trim((string) $this->sectionCell($xp, $section, 'NoLine')) === '1';
-            $f = $noFill ? 'none' : $fill;
-            $s = $noLine ? 'none' : $stroke;
-
-            foreach ($this->geometry->convert($xp, $section, $w, $h) as $prim) {
-                if ($prim[0] === 'path') {
-                    [, $d, $closed] = $prim;
-                    $fillAttr = ($closed && $f !== 'none') ? $f : 'none';
-                    $inner .= '<path d="' . $d . '" fill="' . $fillAttr . '" stroke="' . $s . '" stroke-width="' . $this->n($sw) . '"'
-                        . ($dash ? ' stroke-dasharray="' . $dash . '"' : '')
-                        . ' stroke-linejoin="round" stroke-linecap="round"/>';
-                    $hasContent = true;
-                } elseif ($prim[0] === 'ellipse') {
-                    [, $cx, $cy, $rx, $ry, $ang] = $prim;
-                    $open = abs($ang) > 1e-6 ? '<g transform="rotate(' . $this->n($ang) . ' ' . $this->n($cx) . ' ' . $this->n($cy) . ')">' : '';
-                    $close = $open !== '' ? '</g>' : '';
-                    $inner .= $open . '<ellipse cx="' . $this->n($cx) . '" cy="' . $this->n($cy) . '" rx="' . $this->n($rx) . '" ry="' . $this->n($ry) . '" fill="' . $f . '" stroke="' . $s . '" stroke-width="' . $this->n($sw) . '"/>' . $close;
-                    $hasContent = true;
-                }
-            }
-        }
-
-        $inner .= $this->renderForeignData($xp, $shape, $w, $h, $zip, $masterRels, $hasContent);
-
-        foreach ($xp->query("./*[local-name()='Shapes']/*[local-name()='Shape']", $shape) as $sub) {
-            if ($sub instanceof \DOMElement) {
-                $inner .= $this->renderShape($xp, $sub, $zip, $masterRels, $hasContent);
-            }
-        }
-
-        if ($inner === '') {
-            return '';
-        }
-        return $transform !== '' ? '<g transform="' . $transform . '">' . $inner . '</g>' : $inner;
-    }
-
-    /**
-     * Embeds an inline raster ForeignData image (used on the geometry path; EMF/WMF
-     * are handled earlier by buildSpec via LibreOffice).
-     *
-     * @param array<string, string> $masterRels
-     */
-    private function renderForeignData(\DOMXPath $xp, \DOMElement $shape, float $w, float $h, \ZipArchive $zip, array $masterRels, bool &$hasContent): string
-    {
-        $fdList = $xp->query("./*[local-name()='ForeignData']", $shape);
-        if ($fdList === false || $fdList->length === 0) {
-            return '';
-        }
-        $fd = $fdList->item(0);
-        if (!$fd instanceof \DOMElement) {
-            return '';
-        }
-        $type = strtolower($fd->getAttribute('ForeignType'));
-        if ($type !== 'bitmap' && $type !== '') {
-            return ''; // EMF/WMF/Ink handled elsewhere or unsupported
-        }
-        $relId = '';
-        foreach ($xp->query("./*[local-name()='Rel']", $fd) as $rel) {
-            if ($rel instanceof \DOMElement) {
-                $relId = $this->relId($rel);
-            }
-        }
-        if ($relId === '' || !isset($masterRels[$relId])) {
-            return '';
-        }
-        $mediaPath = $this->resolveMediaPath($masterRels[$relId]);
-        $bytes = $zip->getFromName($mediaPath);
-        if ($bytes === false) {
-            return '';
-        }
-        $mime = $this->imageMime($bytes);
-        if ($mime === null) {
-            return '';
-        }
-        $dataUrl = 'data:' . $mime . ';base64,' . base64_encode($bytes);
-        $hasContent = true;
-        return '<g transform="matrix(1 0 0 -1 0 ' . $this->n($h) . ')">'
-            . '<image x="0" y="0" width="' . $this->n($w) . '" height="' . $this->n($h) . '" preserveAspectRatio="none" '
-            . 'xlink:href="' . $dataUrl . '" href="' . $dataUrl . '"/></g>';
-    }
-
     private function resolveMediaPath(string $target): string
     {
         $parts = [];
@@ -496,15 +332,6 @@ class VisioStencilImporter
     private function cell(\DOMXPath $xp, \DOMElement $shape, string $name): ?string
     {
         $nodes = $xp->query("./*[local-name()='Cell'][@N='" . $name . "']", $shape);
-        if ($nodes && $nodes->length > 0 && $nodes->item(0) instanceof \DOMElement) {
-            return $nodes->item(0)->getAttribute('V');
-        }
-        return null;
-    }
-
-    private function sectionCell(\DOMXPath $xp, \DOMElement $section, string $name): ?string
-    {
-        $nodes = $xp->query("./*[local-name()='Cell'][@N='" . $name . "']", $section);
         if ($nodes && $nodes->length > 0 && $nodes->item(0) instanceof \DOMElement) {
             return $nodes->item(0)->getAttribute('V');
         }
