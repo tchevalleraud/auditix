@@ -35,6 +35,7 @@ class GenerateReportMessageHandler
         private readonly LoggerInterface $logger,
         private readonly \App\Service\TopologyV2SvgRenderer $topologyV2Renderer,
         private readonly \App\Service\ReportSchemaSvgRenderer $reportSchemaRenderer,
+        private readonly \App\Service\SvgRasterizer $svgRasterizer,
         private readonly NodeTagResolver $tagResolver,
     ) {}
 
@@ -2983,9 +2984,6 @@ class GenerateReportMessageHandler
                     $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
                 }
 
-                $tmpSvg = tempnam(sys_get_temp_dir(), 'rsch_') . '.svg';
-                file_put_contents($tmpSvg, $svg);
-
                 $pageW = $pdf->getPageWidth();
                 $contentW = $pageW - $mLeft - $mRight;
                 $imgW = $contentW * ($schemaWidth / 100);
@@ -3003,8 +3001,21 @@ class GenerateReportMessageHandler
                     $yBefore = $pdf->GetY();
                 }
 
-                $pdf->ImageSVG($tmpSvg, $imgX, $yBefore, $imgW, $imgH, '', '', '', 0, false);
-                @unlink($tmpSvg);
+                // Rasterize the schema with librsvg and embed the PNG. TCPDF's SVG
+                // parser cannot render SVG-in-<image> (imported Visio/SVG shapes),
+                // so we rasterize the whole schema — nested icons included — and
+                // fall back to TCPDF's ImageSVG only if rasterization is unavailable.
+                $targetPx = (int) round($imgW / 25.4 * 250); // ~250 DPI
+                $pngFile = $this->svgRasterizer->toPngFile($svg, $targetPx);
+                if ($pngFile !== null) {
+                    $pdf->Image($pngFile, $imgX, $yBefore, $imgW, $imgH, 'PNG', '', '', true, 300, '', false, false, 0);
+                    @unlink($pngFile);
+                } else {
+                    $tmpSvg = tempnam(sys_get_temp_dir(), 'rsch_') . '.svg';
+                    file_put_contents($tmpSvg, $svg);
+                    $pdf->ImageSVG($tmpSvg, $imgX, $yBefore, $imgW, $imgH, '', '', '', 0, false);
+                    @unlink($tmpSvg);
+                }
 
                 $pdf->SetY($yBefore + $imgH);
 

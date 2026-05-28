@@ -30,6 +30,14 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# LibreOffice (headless, Draw only) — converts Visio EMF/WMF stencil masters to SVG.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libreoffice-draw \
+    libreoffice-core \
+    fonts-liberation \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 COPY php.ini /usr/local/etc/php/conf.d/zz-app.ini

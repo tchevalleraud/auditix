@@ -31,6 +31,7 @@ import {
   Redo2,
   SendToBack,
   Settings2,
+  Shapes,
   X,
   Spline,
   Square as SquareIcon,
@@ -45,6 +46,7 @@ import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import { PluginManagedBanner } from "@/components/PluginManagedBanner";
+import ShapeLibraryPanel, { type ShapeLibraryDto, type ShapeLibraryItemDto, type SaveTarget, SHAPE_DND_MIME } from "./ShapeLibraryPanel";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -602,6 +604,27 @@ const elementBounds = (el: SchemaElement): { x: number; y: number; w: number; h:
   }
 };
 
+/**
+ * Strip node-specific data bindings so a saved stencil behaves as a reusable
+ * template — the user rebinds nodes after dropping it onto a schema.
+ */
+const neutralizeNodeBinding = (el: SchemaElement): SchemaElement => {
+  if (el.kind === "node_card_styled" || el.kind === "node_card_table" || el.kind === "data_label") {
+    return { ...el, nodeId: null } as SchemaElement;
+  }
+  if (el.kind === "line" && el.labels) {
+    return {
+      ...el,
+      labels: el.labels.map((l) => ({
+        ...l,
+        nodeId: l.nodeId !== undefined ? null : l.nodeId,
+        dataBinding: l.dataBinding ? { ...l.dataBinding, nodeId: null } : l.dataBinding,
+      })),
+    };
+  }
+  return el;
+};
+
 const translateElement = (el: SchemaElement, dx: number, dy: number): SchemaElement => {
   switch (el.kind) {
     case "shape":
@@ -751,6 +774,8 @@ export default function SchemaEditor({ schemaId }: Props) {
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [saving, setSaving] = useState(false);
+  const [libraries, setLibraries] = useState<ShapeLibraryDto[]>([]);
+  const [libraryPanelOpen, setLibraryPanelOpen] = useState(false);
 
   // Interactions state (refs to avoid re-renders during drag)
   const containerRef = useRef<HTMLDivElement>(null);
@@ -820,6 +845,17 @@ export default function SchemaEditor({ schemaId }: Props) {
       .catch(() => { if (alive) setInventoryCategories([]); });
     return () => { alive = false; };
   }, [current]);
+
+  // Load reusable shape libraries (stencils) for the current context.
+  const refreshLibraries = useCallback(() => {
+    if (!current) return;
+    fetch(`/api/shape-libraries?context=${current.id}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: ShapeLibraryDto[]) => setLibraries(Array.isArray(rows) ? rows : []))
+      .catch(() => setLibraries([]));
+  }, [current]);
+
+  useEffect(() => { refreshLibraries(); }, [refreshLibraries]);
 
   // ---------------------------------------------------------------------------
   // Save (debounced)
@@ -1160,6 +1196,166 @@ export default function SchemaEditor({ schemaId }: Props) {
     if (elements.length === 0) return 1;
     return Math.max(...elements.map((el) => el.zIndex)) + 1;
   }, [elements]);
+
+  // ---------------------------------------------------------------------------
+  // Shape libraries (stencils) — stamping, drop and persistence
+  // ---------------------------------------------------------------------------
+
+  // Deep-clone a bundle with fresh ids, remapping internal line references and
+  // dropping references that point outside the bundle.
+  const remapBundle = useCallback((bundle: SchemaElement[]): SchemaElement[] => {
+    const idMap = new Map<string, string>();
+    bundle.forEach((el) => idMap.set(el.id, genId()));
+    return bundle.map((el) => {
+      const clone = JSON.parse(JSON.stringify(el)) as SchemaElement;
+      clone.id = idMap.get(el.id)!;
+      if (clone.kind === "line") {
+        clone.sourceId = clone.sourceId && idMap.has(clone.sourceId) ? idMap.get(clone.sourceId) : undefined;
+        clone.targetId = clone.targetId && idMap.has(clone.targetId) ? idMap.get(clone.targetId) : undefined;
+        if (!clone.sourceId) clone.sourceAnchor = undefined;
+        if (!clone.targetId) clone.targetAnchor = undefined;
+      }
+      return clone;
+    });
+  }, []);
+
+  // Stamp a library item onto the canvas centered on (worldX, worldY).
+  const placeShapeItem = useCallback((item: ShapeLibraryItemDto, worldX: number, worldY: number) => {
+    if (!data || data.managedByPlugin) return;
+    const payload = (item.payload ?? []) as unknown as SchemaElement[];
+    if (payload.length === 0) return;
+    const remapped = remapBundle(payload);
+    const baseZ = nextZIndex();
+    const ox = worldX - item.width / 2;
+    const oy = worldY - item.height / 2;
+    const stamped = remapped.map((el, i) => ({ ...translateElement(el, ox, oy), zIndex: baseZ + i } as SchemaElement));
+    commitElements([...elements, ...stamped]);
+    setSelectedIds(new Set(stamped.map((e) => e.id)));
+  }, [data, elements, remapBundle, nextZIndex, commitElements]);
+
+  const findLibraryItem = useCallback((itemId: number): ShapeLibraryItemDto | null => {
+    for (const lib of libraries) {
+      const found = lib.items.find((it) => it.id === itemId);
+      if (found) return found;
+    }
+    return null;
+  }, [libraries]);
+
+  const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes(SHAPE_DND_MIME)) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+
+  const handleCanvasDrop = useCallback((e: React.DragEvent) => {
+    const raw = e.dataTransfer.getData(SHAPE_DND_MIME);
+    if (!raw) return;
+    e.preventDefault();
+    const item = findLibraryItem(Number(raw));
+    if (!item) return;
+    const w = toWorld(e.clientX, e.clientY);
+    placeShapeItem(item, w.x, w.y);
+  }, [findLibraryItem, toWorld, placeShapeItem]);
+
+  const placeItemCenter = useCallback((item: ShapeLibraryItemDto) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const w = toWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    placeShapeItem(item, w.x, w.y);
+  }, [toWorld, placeShapeItem]);
+
+  // Normalise the current selection into a reusable stencil payload at origin (0,0).
+  const buildSelectionPayload = useCallback((): { payload: SchemaElement[]; width: number; height: number } | null => {
+    const els = selectedElements;
+    if (els.length === 0) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of els) {
+      const b = elementBounds(el);
+      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+    }
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const ids = new Set(els.map((e) => e.id));
+    const payload = els.map((el) => {
+      let clone = JSON.parse(JSON.stringify(el)) as SchemaElement;
+      if (clone.kind === "line") {
+        if (clone.sourceId && !ids.has(clone.sourceId)) { clone.sourceId = undefined; clone.sourceAnchor = undefined; }
+        if (clone.targetId && !ids.has(clone.targetId)) { clone.targetId = undefined; clone.targetAnchor = undefined; }
+      }
+      clone = neutralizeNodeBinding(clone);
+      return translateElement(clone, -minX, -minY);
+    });
+    return { payload, width, height };
+  }, [selectedElements]);
+
+  const saveSelectionAsShape = useCallback(async (target: SaveTarget, name: string) => {
+    if (!current) return;
+    const built = buildSelectionPayload();
+    if (!built) return;
+    let libraryId: number | null = null;
+    if ("libraryId" in target) {
+      libraryId = target.libraryId;
+    } else {
+      const res = await fetch(`/api/shape-libraries?context=${current.id}`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: target.newLibraryName }),
+      });
+      if (!res.ok) return;
+      libraryId = (await res.json()).id;
+    }
+    if (libraryId == null) return;
+    await fetch(`/api/shape-libraries/${libraryId}/items`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, payload: built.payload, width: built.width, height: built.height }),
+    });
+    refreshLibraries();
+  }, [current, buildSelectionPayload, refreshLibraries]);
+
+  const createLibrary = useCallback(async (name: string) => {
+    if (!current) return;
+    await fetch(`/api/shape-libraries?context=${current.id}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+    });
+    refreshLibraries();
+  }, [current, refreshLibraries]);
+
+  const renameLibrary = useCallback(async (id: number, name: string) => {
+    await fetch(`/api/shape-libraries/${id}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
+    });
+    refreshLibraries();
+  }, [refreshLibraries]);
+
+  const deleteLibrary = useCallback(async (id: number) => {
+    await fetch(`/api/shape-libraries/${id}`, { method: "DELETE" });
+    refreshLibraries();
+  }, [refreshLibraries]);
+
+  const deleteLibraryItem = useCallback(async (libraryId: number, itemId: number) => {
+    await fetch(`/api/shape-libraries/${libraryId}/items/${itemId}`, { method: "DELETE" });
+    refreshLibraries();
+  }, [refreshLibraries]);
+
+  const uploadIcon = useCallback(async (libraryId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("image", file);
+    await fetch(`/api/shape-libraries/${libraryId}/items/upload`, { method: "POST", body: fd });
+    refreshLibraries();
+  }, [refreshLibraries]);
+
+  const importStencil = useCallback(async (file: File) => {
+    if (!current) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/shape-libraries/import?context=${current.id}`, { method: "POST", body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      window.alert(err.error || "Échec de l'import du stencil.");
+    }
+    refreshLibraries();
+  }, [current, refreshLibraries]);
 
   // ---------------------------------------------------------------------------
   // Tool creation — mouse down on empty canvas
@@ -2145,6 +2341,18 @@ export default function SchemaEditor({ schemaId }: Props) {
             <Download className="h-3.5 w-3.5" />
             Exporter
           </a>
+          <button
+            onClick={() => setLibraryPanelOpen((v) => !v)}
+            title="Bibliothèques de formes"
+            className={`ml-1 inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${
+              libraryPanelOpen
+                ? "border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+                : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+            }`}
+          >
+            <Shapes className="h-3.5 w-3.5" />
+            Formes
+          </button>
         </div>
         <div className="flex items-center gap-1">
           <button onClick={undo} disabled={past.length === 0} title={t("schemas.undo")} className="p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-30"><Undo2 className="h-4 w-4" /></button>
@@ -2194,8 +2402,25 @@ export default function SchemaEditor({ schemaId }: Props) {
           ))}
         </div>
 
+        {/* Shape library panel */}
+        {libraryPanelOpen && (
+          <ShapeLibraryPanel
+            libraries={libraries}
+            onClose={() => setLibraryPanelOpen(false)}
+            canSave={!readOnly && selectedElements.length > 0}
+            onSaveSelection={saveSelectionAsShape}
+            onCreateLibrary={createLibrary}
+            onRenameLibrary={renameLibrary}
+            onDeleteLibrary={deleteLibrary}
+            onDeleteItem={deleteLibraryItem}
+            onUpload={uploadIcon}
+            onImportStencil={importStencil}
+            onPlaceItemCenter={placeItemCenter}
+          />
+        )}
+
         {/* Canvas */}
-        <div ref={containerRef} className="flex-1 overflow-hidden relative" style={{ cursor: panStart.current ? "grabbing" : tool === "select" ? "default" : "crosshair" }}>
+        <div ref={containerRef} className="flex-1 overflow-hidden relative" onDragOver={handleCanvasDragOver} onDrop={handleCanvasDrop} style={{ cursor: panStart.current ? "grabbing" : tool === "select" ? "default" : "crosshair" }}>
           <svg
             ref={svgRef}
             className="w-full h-full"

@@ -35,10 +35,21 @@ class ReportSchemaSvgRenderer
 
     public function render(ReportSchema $schema, array $options = []): string
     {
+        return $this->renderElements($schema->getElements(), $schema->getCanvasSize(), $options);
+    }
+
+    /**
+     * Render an arbitrary element bundle to a standalone SVG string. Used by
+     * render() and to generate shape-library item previews (thumbnails).
+     *
+     * @param array<int, array<string, mixed>> $elements
+     * @param array{width: float|int, height: float|int}|null $canvasSize
+     */
+    public function renderElements(array $elements, ?array $canvasSize = null, array $options = []): string
+    {
         $canvasWidth = (int) ($options['canvasWidth'] ?? 1200);
         $viewportFrame = $options['viewportFrame'] ?? null;
 
-        $elements = $schema->getElements();
         if (empty($elements)) {
             return $this->emptySvg('Empty schema');
         }
@@ -137,7 +148,6 @@ class ReportSchemaSvgRenderer
             $vw = max(1.0, (float)$viewportFrame['width']);
             $vh = max(1.0, (float)$viewportFrame['height']);
         } else {
-            $canvasSize = $schema->getCanvasSize();
             if (is_array($canvasSize) && isset($canvasSize['width'], $canvasSize['height'])) {
                 $minX = 0.0;
                 $minY = 0.0;

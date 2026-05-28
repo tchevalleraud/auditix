@@ -12,6 +12,8 @@ use App\Entity\DeviceModel;
 use App\Entity\Editor;
 use App\Entity\InventoryCategory;
 use App\Entity\ProductRange;
+use App\Entity\ShapeLibrary;
+use App\Entity\ShapeLibraryItem;
 use App\Plugin\Capability\CommandTemplate;
 use App\Plugin\Capability\DeviceModelTemplate;
 use App\Plugin\Capability\ExtractTemplate;
@@ -20,8 +22,12 @@ use App\Plugin\Capability\ProvidesCommands;
 use App\Plugin\Capability\ProvidesDeviceModels;
 use App\Plugin\Capability\ProvidesExtractionRules;
 use App\Plugin\Capability\ProvidesManufacturers;
+use App\Plugin\Capability\ProvidesShapeLibraries;
 use App\Plugin\Capability\RuleTemplate;
+use App\Plugin\Capability\ShapeLibraryItemTemplate;
+use App\Plugin\Capability\ShapeLibraryTemplate;
 use App\Repository\InstalledPluginRepository;
+use App\Service\ShapeLibraryItemFactory;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -43,8 +49,8 @@ use Symfony\Component\Filesystem\Filesystem;
  */
 class PluginAssetsImporter
 {
-    /** @var array{manufacturers: int, models: int, commands: int, rules: int, extracts: int, folders: int, logos: int} */
-    private array $stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0];
+    /** @var array{manufacturers: int, models: int, commands: int, rules: int, extracts: int, folders: int, logos: int, shapeLibraries: int, shapeItems: int} */
+    private array $stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0];
 
     /** @var array<string, Editor> */
     private array $manufacturerCache = [];
@@ -62,6 +68,7 @@ class PluginAssetsImporter
         private readonly EntityManagerInterface $em,
         private readonly InstalledPluginRepository $installedRepo,
         private readonly LoggerInterface $logger,
+        private readonly ShapeLibraryItemFactory $shapeItemFactory,
         #[Autowire('%kernel.project_dir%')] string $projectDir,
     ) {
         $this->fs = new Filesystem();
@@ -107,6 +114,13 @@ class PluginAssetsImporter
                 foreach ($plugin->provideRules() as $tpl) {
                     if (!$tpl instanceof RuleTemplate) continue;
                     $this->importRule($tpl, $identifier, $context);
+                }
+            }
+
+            if ($plugin instanceof ProvidesShapeLibraries) {
+                foreach ($plugin->provideShapeLibraries() as $tpl) {
+                    if (!$tpl instanceof ShapeLibraryTemplate) continue;
+                    $this->importShapeLibrary($tpl, $identifier, $context, $archivePath);
                 }
             }
         });
@@ -172,6 +186,11 @@ class PluginAssetsImporter
             ->findBy(['pluginSource' => $identifier, 'context' => $context]);
         foreach ($ranges as $range) $this->em->remove($range);
 
+        // 4c. Shape libraries (stencils) — items cascade on delete.
+        $shapeLibraries = $this->em->getRepository(ShapeLibrary::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($shapeLibraries as $lib) $this->em->remove($lib);
+
         $this->em->flush();
 
         // 5. Folders (managed, empty).
@@ -199,6 +218,7 @@ class PluginAssetsImporter
             'commands' => count($commands),
             'rules' => count($rules),
             'ranges' => count($ranges),
+            'shapeLibraries' => count($shapeLibraries),
             'folders' => $foldersRemoved,
         ];
     }
@@ -345,6 +365,78 @@ class PluginAssetsImporter
         $this->stats['rules']++;
     }
 
+    private function importShapeLibrary(ShapeLibraryTemplate $tpl, string $identifier, Context $context, ?string $archivePath): void
+    {
+        $library = new ShapeLibrary();
+        $library->setName($tpl->name);
+        $library->setDescription($tpl->description !== '' ? $tpl->description : null);
+        $library->setContext($context);
+        $library->setManagedByPlugin($identifier);
+        $this->em->persist($library);
+        $this->stats['shapeLibraries']++;
+
+        $position = 0;
+        foreach ($tpl->items as $itemTpl) {
+            if (!$itemTpl instanceof ShapeLibraryItemTemplate) continue;
+
+            $payload = $itemTpl->payload;
+            $width = $itemTpl->width;
+            $height = $itemTpl->height;
+            $previewSvg = null;
+
+            // SVG provided by the plugin archive → embed it as an image element.
+            if ($itemTpl->svgPath !== null && $archivePath !== null) {
+                $src = rtrim($archivePath, '/') . '/' . ltrim($itemTpl->svgPath, '/');
+                $svg = is_file($src) ? @file_get_contents($src) : false;
+                if ($svg === false || trim((string)$svg) === '') {
+                    $this->logger->warning('Plugin shape SVG not found in archive', [
+                        'plugin' => $identifier, 'svgPath' => $itemTpl->svgPath, 'expected' => $src,
+                    ]);
+                    continue;
+                }
+                [$w, $h] = $this->svgDimensions($svg);
+                $width = $width > 0 ? $width : $w;
+                $height = $height > 0 ? $height : $h;
+                $dataUrl = 'data:image/svg+xml;base64,' . base64_encode($svg);
+                $payload = $this->shapeItemFactory->imagePayload($dataUrl, $width, $height);
+                $previewSvg = $svg;
+            }
+
+            if ($payload === []) {
+                continue;
+            }
+            if ($width <= 0 || $height <= 0) {
+                $width = $width > 0 ? $width : 120;
+                $height = $height > 0 ? $height : 120;
+            }
+
+            $item = new ShapeLibraryItem();
+            $item->setName($itemTpl->name);
+            $item->setKeywords($itemTpl->keywords);
+            $item->setPayload($payload);
+            $item->setWidth($width);
+            $item->setHeight($height);
+            $item->setPreviewSvg($previewSvg ?? $this->shapeItemFactory->renderPreview($payload, $width, $height));
+            $item->setPosition($position++);
+            $library->addItem($item);
+            $this->em->persist($item);
+            $this->stats['shapeItems']++;
+        }
+    }
+
+    /**
+     * @return array{0: float, 1: float}
+     */
+    private function svgDimensions(string $svg): array
+    {
+        if (preg_match('/viewBox\s*=\s*"[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)"/i', $svg, $m)) {
+            return [max(1.0, (float)$m[1]), max(1.0, (float)$m[2])];
+        }
+        $w = preg_match('/\bwidth\s*=\s*"([\d.]+)/i', $svg, $mw) ? (float)$mw[1] : 0.0;
+        $h = preg_match('/\bheight\s*=\s*"([\d.]+)/i', $svg, $mh) ? (float)$mh[1] : 0.0;
+        return ($w > 0 && $h > 0) ? [$w, $h] : [120.0, 120.0];
+    }
+
     private function resolveCommandFolder(string $folderPath, string $identifier, Context $context): ?CollectionFolder
     {
         $segments = $this->splitPath($folderPath);
@@ -439,7 +531,7 @@ class PluginAssetsImporter
 
     private function resetState(): void
     {
-        $this->stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0];
+        $this->stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0];
         $this->manufacturerCache = [];
         $this->cmdFolderCache = [];
         $this->ruleFolderCache = [];
