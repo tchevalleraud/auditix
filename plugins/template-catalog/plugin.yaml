@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #1 — CATALOG (manufacturer + models + commands + rules)
+# ─────────────────────────────────────────────────────────────────────────────
+#  This manifest is commented field by field to serve as a learning template.
+#  A real manifest does not need all these comments.
+#
+#  plugin.yaml MUST sit at the root of the plugin's ZIP archive. It is validated
+#  by App\Plugin\PluginManifestValidator at install time.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Manifest format version. Always 1 for now (the only supported value).
+manifest_version: 1
+
+# Unique plugin identifier — kebab-case, [a-z0-9] with - or _ in the middle, <= 128 chars.
+# Used as a key everywhere: managed_by_plugin, install dir var/plugins/{identifier}/...
+identifier: template-catalog
+
+# Semantic version (strict semver: MAJOR.MINOR.PATCH).
+version: 1.0.0
+
+# Human-readable name shown in the UI.
+name: "Template — Catalog"
+
+# Short description (optional but recommended).
+description: "Educational TEMPLATE plugin: shows how to provide a manufacturer (editor + logo), OS models, collection commands and extraction rules. Data is 100% fake (DemoVendor) — duplicate it to build a real vendor catalog."
+
+# Optional metadata.
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+
+# Plugin icon (path relative to the ZIP). PNG or JPEG, ~128x128.
+icon: "icon.png"
+
+# Compatibility constraints. `auditix` is required; `php` is recommended.
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+# Entry point: PSR-4 namespace + short class name of the main class.
+# The class must live under src/ and implement App\Plugin\VendorPluginInterface.
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateCatalog"
+  class: "TemplateCatalogPlugin"
+
+# Informative list of the capabilities provided (purely declarative / UI display).
+# The capabilities actually active are determined by the Provides* interfaces the
+# class implements — not by this list.
+capabilities:
+  - manufacturers
+  - models
+  - commands
+  - rules
+  - configuration
+
+# Manufacturer (editor) names covered — used for display matching.
+manufacturers:
+  - "DemoVendor"

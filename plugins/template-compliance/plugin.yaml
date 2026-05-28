@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #3 — COMPLIANCE (policies & rules)
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shows how a plugin provides a compliance policy and its rules. A rule reads a
+#  data source and evaluates a condition tree to produce a status
+#  (compliant / non_compliant) with severity and message.
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+identifier: template-compliance
+version: 1.0.0
+name: "Template — Compliance"
+description: "Educational TEMPLATE plugin: provides a compliance policy and a sample rule (checks that a directive is present in the configuration). Demonstrates dataSources + conditionTree."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+icon: "icon.png"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateCompliance"
+  class: "TemplateCompliancePlugin"
+
+capabilities:
+  - compliance

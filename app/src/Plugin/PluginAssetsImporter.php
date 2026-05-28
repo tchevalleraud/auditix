@@ -7,22 +7,37 @@ use App\Entity\CollectionFolder;
 use App\Entity\CollectionRule;
 use App\Entity\CollectionRuleExtract;
 use App\Entity\CollectionRuleFolder;
+use App\Entity\CompliancePolicy;
+use App\Entity\ComplianceRule;
+use App\Entity\ComplianceRuleFolder;
 use App\Entity\Context;
 use App\Entity\DeviceModel;
 use App\Entity\Editor;
 use App\Entity\InventoryCategory;
 use App\Entity\ProductRange;
+use App\Entity\Report;
+use App\Entity\ReportSchema;
+use App\Entity\ReportTheme;
 use App\Entity\ShapeLibrary;
 use App\Entity\ShapeLibraryItem;
 use App\Plugin\Capability\CommandTemplate;
+use App\Plugin\Capability\CompliancePolicyTemplate;
+use App\Plugin\Capability\ComplianceRuleTemplate;
 use App\Plugin\Capability\DeviceModelTemplate;
 use App\Plugin\Capability\ExtractTemplate;
 use App\Plugin\Capability\ManufacturerTemplate;
 use App\Plugin\Capability\ProvidesCommands;
+use App\Plugin\Capability\ProvidesCompliancePolicies;
 use App\Plugin\Capability\ProvidesDeviceModels;
 use App\Plugin\Capability\ProvidesExtractionRules;
 use App\Plugin\Capability\ProvidesManufacturers;
+use App\Plugin\Capability\ProvidesReports;
+use App\Plugin\Capability\ProvidesReportSchemas;
+use App\Plugin\Capability\ProvidesReportThemes;
 use App\Plugin\Capability\ProvidesShapeLibraries;
+use App\Plugin\Capability\ReportSchemaTemplate;
+use App\Plugin\Capability\ReportTemplate;
+use App\Plugin\Capability\ReportThemeTemplate;
 use App\Plugin\Capability\RuleTemplate;
 use App\Plugin\Capability\ShapeLibraryItemTemplate;
 use App\Plugin\Capability\ShapeLibraryTemplate;
@@ -49,8 +64,8 @@ use Symfony\Component\Filesystem\Filesystem;
  */
 class PluginAssetsImporter
 {
-    /** @var array{manufacturers: int, models: int, commands: int, rules: int, extracts: int, folders: int, logos: int, shapeLibraries: int, shapeItems: int} */
-    private array $stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0];
+    /** @var array{manufacturers: int, models: int, commands: int, rules: int, extracts: int, folders: int, logos: int, shapeLibraries: int, shapeItems: int, themes: int, reports: int, schemas: int, policies: int, complianceRules: int} */
+    private array $stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0, 'themes' => 0, 'reports' => 0, 'schemas' => 0, 'policies' => 0, 'complianceRules' => 0];
 
     /** @var array<string, Editor> */
     private array $manufacturerCache = [];
@@ -60,6 +75,9 @@ class PluginAssetsImporter
 
     /** @var array<string, CollectionRuleFolder> */
     private array $ruleFolderCache = [];
+
+    /** @var array<string, ReportTheme> */
+    private array $themeCache = [];
 
     private readonly Filesystem $fs;
     private readonly string $logoDir;
@@ -123,6 +141,35 @@ class PluginAssetsImporter
                     $this->importShapeLibrary($tpl, $identifier, $context, $archivePath);
                 }
             }
+
+            // Themes before reports: a report resolves its theme by name.
+            if ($plugin instanceof ProvidesReportThemes) {
+                foreach ($plugin->provideReportThemes() as $tpl) {
+                    if (!$tpl instanceof ReportThemeTemplate) continue;
+                    $this->importReportTheme($tpl, $identifier, $context);
+                }
+            }
+
+            if ($plugin instanceof ProvidesReports) {
+                foreach ($plugin->provideReports() as $tpl) {
+                    if (!$tpl instanceof ReportTemplate) continue;
+                    $this->importReport($tpl, $identifier, $context);
+                }
+            }
+
+            if ($plugin instanceof ProvidesReportSchemas) {
+                foreach ($plugin->provideReportSchemas() as $tpl) {
+                    if (!$tpl instanceof ReportSchemaTemplate) continue;
+                    $this->importReportSchema($tpl, $identifier, $context);
+                }
+            }
+
+            if ($plugin instanceof ProvidesCompliancePolicies) {
+                foreach ($plugin->provideCompliancePolicies() as $tpl) {
+                    if (!$tpl instanceof CompliancePolicyTemplate) continue;
+                    $this->importCompliancePolicy($tpl, $identifier, $context);
+                }
+            }
         });
 
         $this->logger->info('Plugin assets imported', [
@@ -151,6 +198,39 @@ class PluginAssetsImporter
      */
     private function purge(string $identifier, Context $context): array
     {
+        // 0a. Reports BEFORE themes (Report.theme is a non-nullable FK with no DB cascade).
+        $reports = $this->em->getRepository(Report::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($reports as $r) $this->em->remove($r);
+
+        // 0b. Report schemas (canvas / diagrams).
+        $schemas = $this->em->getRepository(ReportSchema::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($schemas as $s) $this->em->remove($s);
+
+        $this->em->flush();
+
+        // 0c. Report themes (now unreferenced by managed reports).
+        $themes = $this->em->getRepository(ReportTheme::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($themes as $t) $this->em->remove($t);
+
+        // 0d. Compliance: remove policies first. Removing the owning side clears
+        // the policy↔rule join rows, and the DB cascades policy → folders → rules
+        // (ComplianceRuleFolder.policy and ComplianceRule.folder both onDelete CASCADE).
+        $policies = $this->em->getRepository(CompliancePolicy::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($policies as $p) $this->em->remove($p);
+
+        $this->em->flush();
+
+        // 0e. Any managed compliance rules not attached to a managed folder.
+        $complianceRules = $this->em->getRepository(ComplianceRule::class)
+            ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
+        foreach ($complianceRules as $cr) $this->em->remove($cr);
+
+        $this->em->flush();
+
         // 1. Rules first (cascade → extracts via orphanRemoval).
         $rules = $this->em->getRepository(CollectionRule::class)
             ->findBy(['managedByPlugin' => $identifier, 'context' => $context]);
@@ -219,6 +299,11 @@ class PluginAssetsImporter
             'rules' => count($rules),
             'ranges' => count($ranges),
             'shapeLibraries' => count($shapeLibraries),
+            'reports' => count($reports),
+            'schemas' => count($schemas),
+            'themes' => count($themes),
+            'policies' => count($policies),
+            'complianceRules' => count($complianceRules),
             'folders' => $foldersRemoved,
         ];
     }
@@ -424,6 +509,144 @@ class PluginAssetsImporter
         }
     }
 
+    // ── Report themes / reports / schemas ──
+
+    private function importReportTheme(ReportThemeTemplate $tpl, string $identifier, Context $context): void
+    {
+        $theme = new ReportTheme();
+        $theme->setName($tpl->name);
+        $theme->setDescription($tpl->description !== '' ? $tpl->description : null);
+        // Styles vides => garder les DEFAULT_STYLES posés par le constructeur.
+        if ($tpl->styles !== []) {
+            $theme->setStyles($tpl->styles);
+        }
+        $theme->setIsDefault($tpl->isDefault);
+        $theme->setContext($context);
+        $theme->setManagedByPlugin($identifier);
+
+        $this->em->persist($theme);
+        $this->stats['themes']++;
+        $this->themeCache[$this->themeKey($context, $tpl->name)] = $theme;
+    }
+
+    private function importReport(ReportTemplate $tpl, string $identifier, Context $context): void
+    {
+        $theme = $this->resolveTheme($tpl->themeName, $context);
+        if (!$theme) {
+            $this->logger->warning('Skipping Report: no theme available', [
+                'plugin' => $identifier, 'report' => $tpl->name, 'theme' => $tpl->themeName,
+            ]);
+            return;
+        }
+
+        $report = new Report();
+        $report->setName($tpl->name);
+        $report->setDescription($tpl->description !== '' ? $tpl->description : null);
+        $report->setTitle($tpl->title);
+        $report->setSubtitle($tpl->subtitle);
+        $report->setLocale($tpl->locale);
+        $report->setBlocks($tpl->blocks);
+        $report->setAuthors($tpl->authors);
+        $report->setShowTableOfContents($tpl->showTableOfContents);
+        $report->setShowAuthorsPage($tpl->showAuthorsPage);
+        $report->setType(Report::TYPE_GENERAL);
+        $report->setTheme($theme);
+        $report->setContext($context);
+        $report->setManagedByPlugin($identifier);
+
+        $this->em->persist($report);
+        $this->stats['reports']++;
+    }
+
+    private function resolveTheme(?string $name, Context $context): ?ReportTheme
+    {
+        // 1. By name (managed by this plugin in the current import, then DB).
+        if ($name !== null && $name !== '') {
+            $cacheKey = $this->themeKey($context, $name);
+            if (isset($this->themeCache[$cacheKey])) return $this->themeCache[$cacheKey];
+
+            $theme = $this->em->getRepository(ReportTheme::class)
+                ->findOneBy(['name' => $name, 'context' => $context]);
+            if ($theme) { $this->themeCache[$cacheKey] = $theme; return $theme; }
+        }
+
+        // 2. Fallback: the context default theme, else any theme in the context.
+        $repo = $this->em->getRepository(ReportTheme::class);
+        return $repo->findOneBy(['isDefault' => true, 'context' => $context])
+            ?? $repo->findOneBy(['context' => $context]);
+    }
+
+    private function themeKey(Context $context, string $name): string
+    {
+        return sprintf('%d|%s', $context->getId(), $name);
+    }
+
+    private function importReportSchema(ReportSchemaTemplate $tpl, string $identifier, Context $context): void
+    {
+        $schema = new ReportSchema();
+        $schema->setName($tpl->name);
+        $schema->setDescription($tpl->description !== '' ? $tpl->description : null);
+        $schema->setElements($tpl->elements);
+        $schema->setCanvasSize($tpl->canvasSize);
+        $schema->setGridSize($tpl->gridSize);
+        $schema->setSnapToGrid($tpl->snapToGrid);
+        $schema->setContext($context);
+        $schema->setManagedByPlugin($identifier);
+
+        $this->em->persist($schema);
+        $this->stats['schemas']++;
+    }
+
+    // ── Compliance policies / rules ──
+
+    private function importCompliancePolicy(CompliancePolicyTemplate $tpl, string $identifier, Context $context): void
+    {
+        $policy = new CompliancePolicy();
+        $policy->setName($tpl->name);
+        $policy->setDescription($tpl->description !== '' ? $tpl->description : null);
+        $policy->setEnabled($tpl->enabled);
+        $policy->setMatchRules($tpl->matchRules);
+        $policy->setContext($context);
+        $policy->setManagedByPlugin($identifier);
+        $this->em->persist($policy);
+        $this->stats['policies']++;
+
+        // Folders are owned by the policy so they cascade-delete with it on purge
+        // (ComplianceRuleFolder has no managed_by_plugin flag of its own).
+        $folderCache = [];
+
+        foreach ($tpl->rules as $ruleTpl) {
+            if (!$ruleTpl instanceof ComplianceRuleTemplate) continue;
+
+            $rule = new ComplianceRule();
+            $rule->setName($ruleTpl->name);
+            $rule->setDescription($ruleTpl->description !== '' ? $ruleTpl->description : null);
+            $rule->setIdentifier($ruleTpl->identifier);
+            $rule->setEnabled($ruleTpl->enabled);
+            $rule->setDataSources($ruleTpl->dataSources);
+            $rule->setConditionTree($ruleTpl->conditionTree);
+            $rule->setMultiRowMessages($ruleTpl->multiRowMessages);
+            $rule->setContext($context);
+            $rule->setManagedByPlugin($identifier);
+
+            if ($ruleTpl->folderName !== null && $ruleTpl->folderName !== '') {
+                if (!isset($folderCache[$ruleTpl->folderName])) {
+                    $folder = new ComplianceRuleFolder();
+                    $folder->setName($ruleTpl->folderName);
+                    $folder->setPolicy($policy);
+                    $folder->setContext($context);
+                    $this->em->persist($folder);
+                    $folderCache[$ruleTpl->folderName] = $folder;
+                }
+                $rule->setFolder($folderCache[$ruleTpl->folderName]);
+            }
+
+            $this->em->persist($rule);
+            $policy->addExtraRule($rule);
+            $this->stats['complianceRules']++;
+        }
+    }
+
     /**
      * @return array{0: float, 1: float}
      */
@@ -531,9 +754,10 @@ class PluginAssetsImporter
 
     private function resetState(): void
     {
-        $this->stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0];
+        $this->stats = ['manufacturers' => 0, 'models' => 0, 'commands' => 0, 'rules' => 0, 'extracts' => 0, 'folders' => 0, 'logos' => 0, 'shapeLibraries' => 0, 'shapeItems' => 0, 'themes' => 0, 'reports' => 0, 'schemas' => 0, 'policies' => 0, 'complianceRules' => 0];
         $this->manufacturerCache = [];
         $this->cmdFolderCache = [];
         $this->ruleFolderCache = [];
+        $this->themeCache = [];
     }
 }

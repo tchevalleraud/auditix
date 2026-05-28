@@ -67,7 +67,7 @@ class PluginActivateCommand extends Command
         if (!$wasEnabled) {
             $stats = $this->importer->import($plugin, $context);
             $parts = [];
-            foreach (['manufacturers', 'models', 'commands', 'rules', 'extracts', 'folders', 'logos'] as $k) {
+            foreach (['manufacturers', 'models', 'commands', 'rules', 'extracts', 'folders', 'logos', 'shapeLibraries', 'themes', 'reports', 'schemas', 'policies', 'complianceRules'] as $k) {
                 if (($stats[$k] ?? 0) > 0) $parts[] = sprintf('%d %s', $stats[$k], $k);
             }
             $output->writeln(sprintf(

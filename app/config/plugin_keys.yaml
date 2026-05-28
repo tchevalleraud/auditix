@@ -11,4 +11,7 @@
 # screen on install) — they are NOT rejected.
 #
 # Generate a fresh keypair with: php bin/console app:plugin:keygen
-keys: []
+keys:
+  - key_id: auditix-official-2026
+    algorithm: ed25519
+    public_key: "91cBDjT4sMFal78BEBS8EesYPMeHiCVARONsxuZDchQ="

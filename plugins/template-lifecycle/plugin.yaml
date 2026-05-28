@@ -1,0 +1,33 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #2 — LIFECYCLE (recommended versions + end-of-life dates)
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shows how a plugin feeds "product ranges" with End of Sale / End of Support /
+#  End of Life dates, consumed by Auditix's "System Updates" score.
+#  Data is 100% static (no network call).
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+identifier: template-lifecycle
+version: 1.0.0
+name: "Template — Lifecycle"
+description: "Educational TEMPLATE plugin: provides lifecycle data (recommended version, EoS / EoSupport / EoL dates) for fake product ranges, with a configuration page. No network connection — all data is static."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+icon: "icon.png"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateLifecycle"
+  class: "TemplateLifecyclePlugin"
+
+capabilities:
+  - lifecycle
+  - configuration
+
+manufacturers:
+  - "DemoVendor"

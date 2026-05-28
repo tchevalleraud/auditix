@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #4 — REPORT THEME
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shows how a plugin provides a theme (style set) reusable by the context's PDF
+#  reports and email reports.
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+identifier: template-report-theme
+version: 1.0.0
+name: "Template — Report theme"
+description: "Educational TEMPLATE plugin: provides a ready-to-use report theme (colors, typography, headers/footers, tables...). Starts from Auditix's default styles and overrides only a few of them."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+icon: "icon.png"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateReportTheme"
+  class: "TemplateReportThemePlugin"
+
+capabilities:
+  - themes

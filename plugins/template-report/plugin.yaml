@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #5 — REPORT
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shows how a plugin provides a report template (a document structured in
+#  blocks) attached to a theme.
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+identifier: template-report
+version: 1.0.0
+name: "Template — Report"
+description: "Educational TEMPLATE plugin: provides a report template (title, table of contents, heading/paragraph blocks) attached to a theme. Best paired with 'template-report-theme'."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+icon: "icon.png"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateReport"
+  class: "TemplateReportPlugin"
+
+capabilities:
+  - reports

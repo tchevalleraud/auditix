@@ -1,0 +1,28 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  PLUGIN TEMPLATE #6 — SCHEMA
+# ─────────────────────────────────────────────────────────────────────────────
+#  Shows how a plugin provides a schema (Excalidraw-style canvas): shapes, text
+#  and links. Not to be confused with "shape libraries" (reusable stencil sets).
+# ─────────────────────────────────────────────────────────────────────────────
+
+manifest_version: 1
+
+identifier: template-schema
+version: 1.0.0
+name: "Template — Schema"
+description: "Educational TEMPLATE plugin: provides a pre-drawn schema (canvas) with two shapes connected by a link and a title. Illustrates the element structure (kind: shape | text | line)."
+author: "Auditix"
+homepage: "https://auditix.io/plugins/templates"
+license: "MIT"
+icon: "icon.png"
+
+requires:
+  auditix: ">=5.0.0"
+  php: ">=8.3"
+
+entrypoint:
+  namespace: "Auditix\\Plugin\\TemplateSchema"
+  class: "TemplateSchemaPlugin"
+
+capabilities:
+  - schemas

@@ -55,3 +55,7 @@ frontend/.next/
 
 # Logs
 *.log
+
+# Plugin signing keys — NEVER commit the private key
+*.priv
+app/var/plugin-signing/

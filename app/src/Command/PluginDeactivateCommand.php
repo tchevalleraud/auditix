@@ -56,7 +56,7 @@ class PluginDeactivateCommand extends Command
 
         $stats = $this->importer->remove($identifier, $context);
         $parts = [];
-        foreach (['manufacturers', 'models', 'commands', 'rules', 'folders'] as $k) {
+        foreach (['manufacturers', 'models', 'commands', 'rules', 'ranges', 'shapeLibraries', 'reports', 'schemas', 'themes', 'policies', 'complianceRules', 'folders'] as $k) {
             if (($stats[$k] ?? 0) > 0) $parts[] = sprintf('%d %s', $stats[$k], $k);
         }
         $output->writeln(sprintf(
