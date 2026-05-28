@@ -76,9 +76,14 @@
     "labs": "ラボ",
     "api": "API",
     "settings": "設定",
+    "authentication": "認証",
     "mailServers": "メールサーバー",
+    "syslogServers": "Syslogサーバー",
+    "llmProviders": "LLMプロバイダー",
+    "audit": "監査ログ",
     "nginx": "NGINX",
-    "workers": "ワーカー"
+    "workers": "ワーカー",
+    "vendorPlugins": "ベンダープラグイン"
   },
   "topbar": {
     "backToContext": "コンテキストに戻る",
@@ -864,9 +869,16 @@
   "settings": {
     "title": "設定",
     "subtitle": "コンテキスト {name} の設定",
+    "sectionContext": "コンテキスト",
+    "sectionGlobal": "グローバル",
     "tabGeneral": "一般",
     "tabMonitoring": "モニタリング",
     "tabMembers": "メンバー",
+    "tabVulnerability": "脆弱性",
+    "tabSystemUpdates": "システム更新",
+    "tabVendorPlugins": "ベンダープラグイン",
+    "tabNodeColumns": "ノードカラム",
+    "tabAiAssistant": "AIアシスタント",
     "tabLab": "ラボ",
     "labTitle": "公開ラボページ",
     "labDesc": "学生がラボ構成を検証できる公開ページを有効にします",
@@ -2815,5 +2827,50 @@
     "severity_medium": "中",
     "severity_high": "高",
     "severity_critical": "重大"
+  },
+  "vendorPlugins": {
+    "title": "ベンダープラグイン",
+    "subtitle": "この Auditix インスタンス用のベンダープラグイン（コマンド、抽出ルール、ライフサイクルデータ）をアップロードおよび管理します。",
+    "dropHint": "プラグインの .zip をここにドラッグ＆ドロップするか、ファイルを選択してください（最大 50 MB）。",
+    "chooseFile": "ファイルを選択",
+    "uploadFailed": "アップロードに失敗しました。",
+    "uninstallFailed": "アンインストールに失敗しました。",
+    "errZipOnly": ".zip アーカイブのみ受け付けます。",
+    "errTooLarge": "アーカイブが大きすぎます（最大 50 MB）。",
+    "empty": "インストールされているプラグインはありません。",
+    "colPlugin": "プラグイン",
+    "colSignature": "署名",
+    "colCapabilities": "機能",
+    "colInstalled": "インストール日",
+    "sigOfficial": "公式",
+    "sigCommunity": "コミュニティ",
+    "sigInvalid": "無効",
+    "confirmTitle": "不明なソースからプラグインをインストール",
+    "confirmBody1": "このプラグインは、Auditix インスタンスとそのデータベースへの完全なアクセス権限を持つ任意の PHP コードを実行します。",
+    "confirmBody2": "信頼できるソースのプラグインのみをインストールしてください。公式プラグインは署名され、自動的に検証されますが、コミュニティプラグインは検証されません。",
+    "confirmFile": "ファイル",
+    "confirmInstall": "理解しました — インストール",
+    "export": "ZIP としてエクスポート"
+  },
+  "pluginConfig": {
+    "title": "プラグインの設定",
+    "button": "設定",
+    "saving": "保存中…",
+    "saveFailed": "設定を保存できませんでした。",
+    "empty": "このプラグインには設定オプションがありません。"
+  },
+  "vendorPluginsCtx": {
+    "title": "このコンテキストのベンダープラグイン",
+    "subtitle": "このコンテキストでベンダープラグインを有効化、設定、同期します。インストールはすべてのコンテキストで共有されます。",
+    "manageInstall": "インストールを管理",
+    "empty": "このインスタンスにはまだプラグインがインストールされていません。",
+    "installFirst": "1 つインストール →",
+    "enable": "このコンテキストで有効化",
+    "disable": "このコンテキストで無効化",
+    "toggleFailed": "切り替えに失敗しました。",
+    "supports": "対応メーカー",
+    "lastSync": "前回の同期",
+    "syncNow": "今すぐ同期",
+    "syncing": "同期中…"
   }
 }

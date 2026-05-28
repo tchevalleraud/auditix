@@ -76,9 +76,14 @@
     "labs": "Labs",
     "api": "API",
     "settings": "Impostazioni",
+    "authentication": "Autenticazione",
     "mailServers": "Server di posta",
+    "syslogServers": "Server syslog",
+    "llmProviders": "Provider LLM",
+    "audit": "Registro di audit",
     "nginx": "NGINX",
-    "workers": "Workers"
+    "workers": "Workers",
+    "vendorPlugins": "Plugin vendor"
   },
   "topbar": {
     "backToContext": "Torna al contesto",
@@ -864,9 +869,16 @@
   "settings": {
     "title": "Impostazioni",
     "subtitle": "Impostazioni del contesto {name}",
+    "sectionContext": "Contesto",
+    "sectionGlobal": "Globale",
     "tabGeneral": "Generale",
     "tabMonitoring": "Monitoraggio",
     "tabMembers": "Membri",
+    "tabVulnerability": "Vulnerabilità",
+    "tabSystemUpdates": "Aggiornamenti",
+    "tabVendorPlugins": "Plugin vendor",
+    "tabNodeColumns": "Colonne dei nodi",
+    "tabAiAssistant": "Assistenti IA",
     "tabLab": "Lab",
     "labTitle": "Pagina pubblica Lab",
     "labDesc": "Abilita una pagina pubblica per permettere agli studenti di validare la configurazione del loro lab",
@@ -2815,5 +2827,50 @@
     "severity_medium": "Media",
     "severity_high": "Alta",
     "severity_critical": "Critica"
+  },
+  "vendorPlugins": {
+    "title": "Plugin vendor",
+    "subtitle": "Carica e gestisci i plugin vendor (comandi, regole di estrazione, dati di ciclo di vita) per questa istanza Auditix.",
+    "dropHint": "Trascina qui un .zip di plugin oppure scegli un file (max 50 MB).",
+    "chooseFile": "Scegli file",
+    "uploadFailed": "Caricamento non riuscito.",
+    "uninstallFailed": "Disinstallazione non riuscita.",
+    "errZipOnly": "Sono accettati solo archivi .zip.",
+    "errTooLarge": "Archivio troppo grande (max 50 MB).",
+    "empty": "Nessun plugin installato.",
+    "colPlugin": "Plugin",
+    "colSignature": "Firma",
+    "colCapabilities": "Funzionalità",
+    "colInstalled": "Installato",
+    "sigOfficial": "Ufficiale",
+    "sigCommunity": "Community",
+    "sigInvalid": "Non valida",
+    "confirmTitle": "Installa plugin da fonte sconosciuta",
+    "confirmBody1": "Questo plugin eseguirà codice PHP arbitrario con accesso completo alla tua istanza Auditix e al suo database.",
+    "confirmBody2": "Installa solo plugin da fonti di cui ti fidi. I plugin ufficiali sono firmati e verificati automaticamente — quelli della community no.",
+    "confirmFile": "File",
+    "confirmInstall": "Capito — installa",
+    "export": "Esporta come ZIP"
+  },
+  "pluginConfig": {
+    "title": "Configura plugin",
+    "button": "Configura",
+    "saving": "Salvataggio…",
+    "saveFailed": "Impossibile salvare la configurazione.",
+    "empty": "Questo plugin non ha opzioni di configurazione."
+  },
+  "vendorPluginsCtx": {
+    "title": "Plugin vendor in questo contesto",
+    "subtitle": "Attiva, configura e sincronizza i plugin vendor per questo contesto. L'installazione è condivisa tra tutti i contesti.",
+    "manageInstall": "Gestisci installazioni",
+    "empty": "Nessun plugin installato in questa istanza.",
+    "installFirst": "Installane uno →",
+    "enable": "Attiva in questo contesto",
+    "disable": "Disattiva in questo contesto",
+    "toggleFailed": "Cambio di stato non riuscito.",
+    "supports": "Supporta",
+    "lastSync": "Ultima sincronizzazione",
+    "syncNow": "Sincronizza ora",
+    "syncing": "Sincronizzazione…"
   }
 }

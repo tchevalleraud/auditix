@@ -13,6 +13,26 @@ import {
 import Link from "next/link";
 import { PluginConfigureModal, type ConfigurationSchema } from "@/components/PluginConfigureModal";
 
+function PluginIcon({ iconUrl, name }: { iconUrl: string | null | undefined; name: string }) {
+  const [errored, setErrored] = useState(false);
+  const showFallback = !iconUrl || errored;
+  return (
+    <div className="shrink-0 h-12 w-12 rounded-lg overflow-hidden ring-1 ring-slate-200 dark:ring-slate-700 bg-white dark:bg-slate-800 flex items-center justify-center">
+      {showFallback ? (
+        <Package className="h-5 w-5 text-slate-300 dark:text-slate-600" />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={iconUrl}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setErrored(true)}
+        />
+      )}
+    </div>
+  );
+}
+
 type SignatureStatus = "official" | "community" | "invalid";
 
 interface PluginInfo {
@@ -29,6 +49,7 @@ interface PluginInfo {
   lastSyncStatus?: string | null;
   // Optional — only present if the parent endpoint exposes it. Falls back gracefully.
   signatureStatus?: SignatureStatus;
+  iconUrl?: string | null;
 }
 
 interface Props {
@@ -155,8 +176,9 @@ export function VendorPluginsContextual({ contextId, t, isAdmin }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {plugins.map((plugin) => (
             <div key={plugin.identifier} className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 flex flex-col">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="min-w-0">
+              <div className="flex items-start gap-3 mb-3">
+                <PluginIcon iconUrl={plugin.iconUrl} name={plugin.displayName} />
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{plugin.displayName}</h3>
                     {plugin.version && (

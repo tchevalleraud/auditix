@@ -76,9 +76,14 @@
     "labs": "Labs",
     "api": "API",
     "settings": "Einstellungen",
+    "authentication": "Authentifizierung",
     "mailServers": "Mail-Server",
+    "syslogServers": "Syslog-Server",
+    "llmProviders": "LLM-Anbieter",
+    "audit": "Audit-Log",
     "nginx": "NGINX",
-    "workers": "Workers"
+    "workers": "Workers",
+    "vendorPlugins": "Vendor-Plugins"
   },
   "topbar": {
     "backToContext": "Zuruck zum Kontext",
@@ -864,9 +869,16 @@
   "settings": {
     "title": "Einstellungen",
     "subtitle": "Einstellungen fur Kontext {name}",
+    "sectionContext": "Kontext",
+    "sectionGlobal": "Global",
     "tabGeneral": "Allgemein",
     "tabMonitoring": "Monitoring",
     "tabMembers": "Mitglieder",
+    "tabVulnerability": "Schwachstellen",
+    "tabSystemUpdates": "System-Updates",
+    "tabVendorPlugins": "Vendor-Plugins",
+    "tabNodeColumns": "Knotenspalten",
+    "tabAiAssistant": "KI-Assistenten",
     "tabLab": "Lab",
     "labTitle": "Oeffentliche Lab-Seite",
     "labDesc": "Aktivieren Sie eine oeffentliche Seite, damit Studierende ihre Lab-Konfiguration validieren koennen",
@@ -2815,5 +2827,50 @@
     "severity_medium": "Mittel",
     "severity_high": "Hoch",
     "severity_critical": "Kritisch"
+  },
+  "vendorPlugins": {
+    "title": "Vendor-Plugins",
+    "subtitle": "Vendor-Plugins (Befehle, Extraktionsregeln, Lifecycle-Daten) für diese Auditix-Instanz hochladen und verwalten.",
+    "dropHint": "Plugin-.zip hierher ziehen oder eine Datei auswählen (max. 50 MB).",
+    "chooseFile": "Datei auswählen",
+    "uploadFailed": "Upload fehlgeschlagen.",
+    "uninstallFailed": "Deinstallation fehlgeschlagen.",
+    "errZipOnly": "Nur .zip-Archive werden akzeptiert.",
+    "errTooLarge": "Archiv zu groß (max. 50 MB).",
+    "empty": "Kein Plugin installiert.",
+    "colPlugin": "Plugin",
+    "colSignature": "Signatur",
+    "colCapabilities": "Capabilities",
+    "colInstalled": "Installiert",
+    "sigOfficial": "Offiziell",
+    "sigCommunity": "Community",
+    "sigInvalid": "Ungültig",
+    "confirmTitle": "Plugin aus unbekannter Quelle installieren",
+    "confirmBody1": "Dieses Plugin führt beliebigen PHP-Code mit vollem Zugriff auf Ihre Auditix-Instanz und ihre Datenbank aus.",
+    "confirmBody2": "Installieren Sie nur Plugins aus Quellen, denen Sie vertrauen. Offizielle Plugins sind signiert und werden automatisch verifiziert — Community-Plugins nicht.",
+    "confirmFile": "Datei",
+    "confirmInstall": "Verstanden — installieren",
+    "export": "Als ZIP exportieren"
+  },
+  "pluginConfig": {
+    "title": "Plugin konfigurieren",
+    "button": "Konfigurieren",
+    "saving": "Speichern…",
+    "saveFailed": "Konfiguration konnte nicht gespeichert werden.",
+    "empty": "Dieses Plugin hat keine Konfigurationsoptionen."
+  },
+  "vendorPluginsCtx": {
+    "title": "Vendor-Plugins in diesem Kontext",
+    "subtitle": "Vendor-Plugins für diesen Kontext aktivieren, konfigurieren und synchronisieren. Die Installation wird kontextübergreifend geteilt.",
+    "manageInstall": "Installationen verwalten",
+    "empty": "Noch kein Plugin auf dieser Instanz installiert.",
+    "installFirst": "Eines installieren →",
+    "enable": "In diesem Kontext aktivieren",
+    "disable": "In diesem Kontext deaktivieren",
+    "toggleFailed": "Statuswechsel fehlgeschlagen.",
+    "supports": "Unterstützt",
+    "lastSync": "Letzte Synchronisierung",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiere…"
   }
 }

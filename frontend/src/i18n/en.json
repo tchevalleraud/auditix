@@ -1143,6 +1143,7 @@
     "tabMembers": "Members",
     "tabVulnerability": "Vulnerabilities",
     "tabSystemUpdates": "System Updates",
+    "tabVendorPlugins": "Vendor plugins",
     "tabLab": "Lab",
     "labTitle": "Public Lab Page",
     "labDesc": "Enable a public page so students can validate their lab configuration",

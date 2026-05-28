@@ -76,9 +76,14 @@
     "labs": "Labs",
     "api": "API",
     "settings": "Configuracion",
+    "authentication": "Autenticacion",
     "mailServers": "Servidores de correo",
+    "syslogServers": "Servidores syslog",
+    "llmProviders": "Proveedores LLM",
+    "audit": "Registro de auditoria",
     "nginx": "NGINX",
-    "workers": "Workers"
+    "workers": "Workers",
+    "vendorPlugins": "Plugins de proveedor"
   },
   "topbar": {
     "backToContext": "Volver al contexto",
@@ -864,9 +869,16 @@
   "settings": {
     "title": "Configuracion",
     "subtitle": "Configuracion del contexto {name}",
+    "sectionContext": "Contexto",
+    "sectionGlobal": "Global",
     "tabGeneral": "General",
     "tabMonitoring": "Monitoreo",
     "tabMembers": "Miembros",
+    "tabVulnerability": "Vulnerabilidades",
+    "tabSystemUpdates": "Actualizaciones",
+    "tabVendorPlugins": "Plugins de proveedor",
+    "tabNodeColumns": "Columnas de nodos",
+    "tabAiAssistant": "Asistentes IA",
     "tabLab": "Lab",
     "labTitle": "Pagina publica del Lab",
     "labDesc": "Active una pagina publica para que los estudiantes validen la configuracion de su laboratorio",
@@ -2815,5 +2827,50 @@
     "severity_medium": "Media",
     "severity_high": "Alta",
     "severity_critical": "Crítica"
+  },
+  "vendorPlugins": {
+    "title": "Plugins de proveedor",
+    "subtitle": "Cargar y gestionar plugins de proveedor (comandos, reglas de extracción, datos de ciclo de vida) para esta instancia Auditix.",
+    "dropHint": "Arrastra un .zip de plugin aquí o selecciona un archivo (máx. 50 MB).",
+    "chooseFile": "Elegir archivo",
+    "uploadFailed": "Error al cargar.",
+    "uninstallFailed": "Error al desinstalar.",
+    "errZipOnly": "Solo se aceptan archivos .zip.",
+    "errTooLarge": "Archivo demasiado grande (máx. 50 MB).",
+    "empty": "Ningún plugin instalado.",
+    "colPlugin": "Plugin",
+    "colSignature": "Firma",
+    "colCapabilities": "Capacidades",
+    "colInstalled": "Instalado",
+    "sigOfficial": "Oficial",
+    "sigCommunity": "Community",
+    "sigInvalid": "Inválida",
+    "confirmTitle": "Instalar plugin de fuente desconocida",
+    "confirmBody1": "Este plugin ejecutará código PHP arbitrario con acceso total a su instancia Auditix y a su base de datos.",
+    "confirmBody2": "Instale solo plugins de fuentes en las que confíe. Los plugins oficiales están firmados y verificados automáticamente — los de la comunidad no.",
+    "confirmFile": "Archivo",
+    "confirmInstall": "Entendido — instalar",
+    "export": "Exportar como ZIP"
+  },
+  "pluginConfig": {
+    "title": "Configurar plugin",
+    "button": "Configurar",
+    "saving": "Guardando…",
+    "saveFailed": "No se pudo guardar la configuración.",
+    "empty": "Este plugin no tiene opciones de configuración."
+  },
+  "vendorPluginsCtx": {
+    "title": "Plugins de proveedor en este contexto",
+    "subtitle": "Active, configure y sincronice los plugins de proveedor para este contexto. La instalación es compartida entre todos los contextos.",
+    "manageInstall": "Gestionar instalaciones",
+    "empty": "Aún no hay plugins instalados en esta instancia.",
+    "installFirst": "Instalar uno →",
+    "enable": "Activar en este contexto",
+    "disable": "Desactivar en este contexto",
+    "toggleFailed": "Error al cambiar el estado.",
+    "supports": "Soporta",
+    "lastSync": "Última sincronización",
+    "syncNow": "Sincronizar ahora",
+    "syncing": "Sincronizando…"
   }
 }

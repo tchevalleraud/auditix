@@ -15,8 +15,10 @@ use App\Plugin\Capability\ProvidesManufacturers;
 use App\Plugin\PluginAssetsImporter;
 use App\Plugin\VendorPluginInterface;
 use App\Plugin\VendorPluginRegistry;
+use App\Repository\InstalledPluginRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -76,6 +78,9 @@ class PluginController extends AbstractController
                 'dbId' => $dbRecord?->getId(),
                 'signatureStatus' => $installRecord?->getSignatureStatus(),
                 'signatureKeyId' => $installRecord?->getSignatureKeyId(),
+                'iconUrl' => $installRecord !== null && self::hasIcon($installRecord->getManifest())
+                    ? sprintf('/api/plugins/%s/icon', $id)
+                    : null,
             ];
         }
 
@@ -168,5 +173,42 @@ class PluginController extends AbstractController
         $bus->dispatch(new SyncLifecycleMessage($context->getId(), $identifier));
 
         return $this->json(['dispatched' => true]);
+    }
+
+    #[Route('/{identifier}/icon', methods: ['GET'])]
+    public function icon(string $identifier, InstalledPluginRepository $installedRepo): Response
+    {
+        $installed = $installedRepo->findByIdentifier($identifier);
+        if (!$installed) {
+            return new Response('Not found', Response::HTTP_NOT_FOUND);
+        }
+
+        $manifest = $installed->getManifest();
+        if (!self::hasIcon($manifest)) {
+            return new Response('Not found', Response::HTTP_NOT_FOUND);
+        }
+        $iconRel = ltrim((string) $manifest['icon'], '/');
+
+        // Defense in depth — resolved path must stay inside the plugin's archive dir.
+        $archive = realpath($installed->getArchivePath());
+        if ($archive === false) {
+            return new Response('Not found', Response::HTTP_NOT_FOUND);
+        }
+        $target = realpath($archive . DIRECTORY_SEPARATOR . $iconRel);
+        if ($target === false || !is_file($target) || strncmp($target, $archive . DIRECTORY_SEPARATOR, strlen($archive) + 1) !== 0) {
+            return new Response('Not found', Response::HTTP_NOT_FOUND);
+        }
+
+        $response = new BinaryFileResponse($target);
+        $response->headers->set('Cache-Control', 'public, max-age=86400');
+        return $response;
+    }
+
+    /**
+     * @param array<string,mixed> $manifest
+     */
+    private static function hasIcon(array $manifest): bool
+    {
+        return isset($manifest['icon']) && is_string($manifest['icon']) && trim($manifest['icon']) !== '';
     }
 }

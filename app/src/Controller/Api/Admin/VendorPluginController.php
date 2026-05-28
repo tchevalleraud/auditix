@@ -109,6 +109,10 @@ class VendorPluginController extends AbstractController
 
     private function serialize(InstalledPlugin $p): array
     {
+        $manifest = $p->getManifest();
+        $icon = $manifest['icon'] ?? null;
+        $hasIcon = is_string($icon) && trim($icon) !== '';
+
         return [
             'id' => $p->getId(),
             'identifier' => $p->getIdentifier(),
@@ -121,10 +125,11 @@ class VendorPluginController extends AbstractController
             'sha256' => $p->getSha256(),
             'signatureStatus' => $p->getSignatureStatus(),
             'signatureKeyId' => $p->getSignatureKeyId(),
-            'capabilities' => array_values((array) ($p->getManifest()['capabilities'] ?? [])),
-            'manufacturers' => array_values((array) ($p->getManifest()['manufacturers'] ?? [])),
+            'capabilities' => array_values((array) ($manifest['capabilities'] ?? [])),
+            'manufacturers' => array_values((array) ($manifest['manufacturers'] ?? [])),
             'installedBy' => $p->getInstalledBy()?->getUserIdentifier(),
             'installedAt' => $p->getInstalledAt()->format('c'),
+            'iconUrl' => $hasIcon ? sprintf('/api/plugins/%s/icon', $p->getIdentifier()) : null,
         ];
     }
 }

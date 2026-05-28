@@ -51,7 +51,7 @@ final class ExtremeNetworksPlugin implements
             new ManufacturerTemplate(
                 name: self::MANUFACTURER,
                 description: 'Constructeur d\'équipements réseau (Switch Engine / EXOS, Fabric Engine / VOSS, ERS).',
-                logoPath: 'assets/logo.svg',
+                logoPath: 'assets/logo.jpeg',
             ),
         ];
     }
