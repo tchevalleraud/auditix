@@ -148,7 +148,14 @@ class WorkerPoolCommand extends Command
             $queue,
             '--time-limit=3600',
             '--memory-limit=' . $memory . 'M',
-        ], $this->projectDir);
+        ], $this->projectDir, [
+            // Long-running consumers never need the profiler. Forcing debug off
+            // disables Doctrine's BacktraceDebugDataHolder, which otherwise
+            // accumulates every executed SQL query (with backtrace) in memory
+            // for the lifetime of the process and OOM-kills heavy handlers such
+            // as ProcessInventoryMessage when APP_ENV=dev.
+            'APP_DEBUG' => '0',
+        ]);
         $process->setTimeout(null);
         $process->start(function (string $type, string $buffer) use ($output, $queue): void {
             foreach (preg_split('/\R/', rtrim($buffer)) as $line) {

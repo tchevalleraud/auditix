@@ -819,16 +819,31 @@ class ContextImporter
             if (!$node) {
                 continue;
             }
+            // Never carry over a transient (in-flight) state from the source:
+            // the export may have been taken mid-collect/mid-extract, leaving a
+            // 'running'/'pending' status with no worker behind it on the target.
+            // A bundled collection is, by definition, a finished one.
+            $status = $row['status'] ?? Collection::STATUS_COMPLETED;
+            if (!in_array($status, [Collection::STATUS_COMPLETED, Collection::STATUS_FAILED], true)) {
+                $status = Collection::STATUS_COMPLETED;
+            }
+            $extractStatus = $row['extractStatus'] ?? null;
+            if (!in_array($extractStatus, [Collection::EXTRACT_STATUS_COMPLETED, Collection::EXTRACT_STATUS_FAILED], true)) {
+                // No extraction is actually running on the target — drop the
+                // phantom indicator. Inventory is (re)built on the next extract.
+                $extractStatus = null;
+            }
+
             $c = new Collection();
             $c->setNode($node);
             $c->setContext($context);
             $c->setTags($row['tags'] ?? []);
-            $c->setStatus($row['status'] ?? Collection::STATUS_COMPLETED);
+            $c->setStatus($status);
             $c->setCommandCount((int) ($row['commandCount'] ?? 0));
             $c->setCompletedCount((int) ($row['completedCount'] ?? 0));
             $c->setStartedAt($this->dt($row['startedAt'] ?? null));
             $c->setCompletedAt($this->dt($row['completedAt'] ?? null));
-            $c->setExtractStatus($row['extractStatus'] ?? null);
+            $c->setExtractStatus($extractStatus);
             $c->setLastExtractedAt($this->dt($row['lastExtractedAt'] ?? null));
             $this->em->persist($c);
             $this->em->flush($c);

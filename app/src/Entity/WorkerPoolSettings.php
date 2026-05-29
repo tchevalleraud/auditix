@@ -53,8 +53,8 @@ class WorkerPoolSettings
     #[ORM\Column(options: ['default' => 120])]
     private int $scaleDownIdleSeconds = 120;
 
-    #[ORM\Column(options: ['default' => 256])]
-    private int $memoryLimitMb = 256;
+    #[ORM\Column(options: ['default' => 512])]
+    private int $memoryLimitMb = 512;
 
     #[ORM\Column(options: ['default' => 'CURRENT_TIMESTAMP'])]
     private \DateTimeImmutable $createdAt;
