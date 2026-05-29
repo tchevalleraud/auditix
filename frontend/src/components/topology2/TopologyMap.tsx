@@ -853,7 +853,7 @@ export default function TopologyMap({ topologyId }: Props) {
     }
   };
 
-  const updateAnnotation = async (id: number, patch: Partial<Annotation> & { data?: Partial<AnnotationData> }) => {
+  const updateAnnotation = async (id: number, patch: Omit<Partial<Annotation>, "data"> & { data?: Partial<AnnotationData> }) => {
     if (!data) return;
     const current = data.annotations.find((a) => a.id === id);
     if (!current) return;
@@ -2052,7 +2052,7 @@ function AnnotationPanel({
   t,
 }: PanelProps & {
   annotation: Annotation;
-  onChange: (patch: Partial<Annotation> & { data?: Partial<AnnotationData> }) => void;
+  onChange: (patch: Omit<Partial<Annotation>, "data"> & { data?: Partial<AnnotationData> }) => void;
   onDelete: () => void;
 }) {
   const title = annotation.type === "text"
