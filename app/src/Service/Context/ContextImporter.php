@@ -280,6 +280,7 @@ class ContextImporter
             );
             $this->importCollectionRules($data['collectionRules'] ?? [], $context, $idMap);
             $this->importCollectionRuleExtracts($data['collectionRuleExtracts'] ?? [], $context, $idMap);
+            $this->remapRuleTranslationExtractIds($data['collectionRules'] ?? [], $idMap);
 
             $this->importNodeDynamicTags($data['nodeDynamicTags'] ?? [], $idMap);
 
@@ -700,6 +701,47 @@ class ContextImporter
         foreach ($deferred as [$extract, $ref]) {
             if (isset($idMap[$ref])) {
                 $extract->setKeyExtract($idMap[$ref]);
+            }
+        }
+    }
+
+    /**
+     * Rule translations reference their extracts by the extract's database id
+     * (`extractId`). After import those extracts have brand-new ids, so the
+     * stored ids are stale and the runtime translation matching
+     * (CollectNodeMessageHandler::applyTranslation) never fires. Remap each
+     * stale id to the freshly-imported extract.
+     *
+     * The export encodes an extract's old id in its `_ref` as
+     * "collectionRuleExtract:<oldId>", so we can recover the mapping from the
+     * already-populated $idMap without touching the export format — making this
+     * backward-compatible with previously exported files.
+     */
+    private function remapRuleTranslationExtractIds(array $ruleRows, array $idMap): void
+    {
+        foreach ($ruleRows as $row) {
+            $rule = $idMap[$row['_ref']] ?? null;
+            if (!$rule || !is_array($row['translations'] ?? null)) {
+                continue;
+            }
+
+            $changed = false;
+            $translations = $row['translations'];
+            foreach ($translations as &$t) {
+                $oldId = $t['extractId'] ?? null;
+                if ($oldId === null) {
+                    continue;
+                }
+                $newExtract = $idMap['collectionRuleExtract:' . $oldId] ?? null;
+                if ($newExtract !== null) {
+                    $t['extractId'] = $newExtract->getId();
+                    $changed = true;
+                }
+            }
+            unset($t);
+
+            if ($changed) {
+                $rule->setTranslations($translations);
             }
         }
     }

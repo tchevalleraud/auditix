@@ -916,6 +916,25 @@ class CollectionRuleController extends AbstractController
                 $extractIdMap[$original->getId()]->setKeyExtract($extractIdMap[$keyExt->getId()]);
             }
         }
+
+        // Translations reference extracts by database id; remap the copied
+        // translations onto the new clone ids so they keep matching at runtime
+        // (CollectNodeMessageHandler::applyTranslation).
+        $translations = $copy->getTranslations();
+        if (is_array($translations)) {
+            $changed = false;
+            foreach ($translations as &$t) {
+                $oldId = $t['extractId'] ?? null;
+                if ($oldId !== null && isset($extractIdMap[$oldId])) {
+                    $t['extractId'] = $extractIdMap[$oldId]->getId();
+                    $changed = true;
+                }
+            }
+            unset($t);
+            if ($changed) {
+                $copy->setTranslations($translations);
+            }
+        }
         $em->flush();
 
         return $this->json($this->serializeRule($copy), Response::HTTP_CREATED);
