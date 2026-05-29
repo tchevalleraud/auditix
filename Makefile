@@ -185,11 +185,9 @@ _upgrade_apply:
 	@if ! docker compose up -d --build --remove-orphans 2>/tmp/auditix_upgrade_up.err; then \
 		cat /tmp/auditix_upgrade_up.err; \
 		if grep -q 'is already in use by container' /tmp/auditix_upgrade_up.err; then \
-			echo "\033[33m[4/7]\033[0m Stale container name conflict, removing leftover container(s) and retrying..."; \
-			for c in $$(grep -o '"/[A-Za-z0-9_.-]*"' /tmp/auditix_upgrade_up.err | tr -d '"/'); do \
-				echo "  - removing $$c"; docker rm -f "$$c" >/dev/null 2>&1 || true; \
-			done; \
-			docker compose up -d --build --force-recreate --remove-orphans; \
+			echo "\033[33m[4/7]\033[0m Stale container name conflict(s), recreating project from scratch..."; \
+			docker compose down --remove-orphans; \
+			docker compose up -d --build; \
 		else \
 			rm -f /tmp/auditix_upgrade_up.err; exit 1; \
 		fi; \
