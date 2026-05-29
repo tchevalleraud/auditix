@@ -182,17 +182,19 @@ upgrade: ## Upgrade in place (BRANCH=name or TAG=vX.Y.Z to switch refs, SKIP_BAC
 
 _upgrade_apply:
 	@echo "\033[36m[4/7]\033[0m Rebuilding containers..."
-	@if ! docker compose up -d --build --remove-orphans 2>/tmp/auditix_upgrade_up.err; then \
-		cat /tmp/auditix_upgrade_up.err; \
-		if grep -q 'is already in use by container' /tmp/auditix_upgrade_up.err; then \
-			echo "\033[33m[4/7]\033[0m Stale container name conflict(s), recreating project from scratch..."; \
-			docker compose down --remove-orphans; \
-			docker compose up -d --build; \
-		else \
-			rm -f /tmp/auditix_upgrade_up.err; exit 1; \
-		fi; \
-	fi; \
-	rm -f /tmp/auditix_upgrade_up.err
+	@docker compose up -d --build --remove-orphans 2>/tmp/auditix_upgrade_up.err; rc=$$?; \
+	cat /tmp/auditix_upgrade_up.err >&2; \
+	if grep -q 'is already in use by container' /tmp/auditix_upgrade_up.err; then \
+		echo "\033[33m[4/7]\033[0m Stale container name conflict(s), recreating project from scratch..."; \
+		rm -f /tmp/auditix_upgrade_up.err; \
+		docker compose down --remove-orphans; \
+		docker ps -aq --filter "name=auditix-" | xargs -r docker rm -f; \
+		docker compose up -d --build; \
+	elif [ $$rc -ne 0 ]; then \
+		rm -f /tmp/auditix_upgrade_up.err; exit $$rc; \
+	else \
+		rm -f /tmp/auditix_upgrade_up.err; \
+	fi
 	@echo "\033[36m[5/7]\033[0m Installing PHP dependencies and applying migrations..."
 	docker compose exec -T php composer install --no-interaction --optimize-autoloader
 	docker compose exec -T php php bin/console cache:clear --no-interaction
