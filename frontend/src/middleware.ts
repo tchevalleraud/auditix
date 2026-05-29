@@ -38,5 +38,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|apple-icon.svg).*)"],
+  // `api` is excluded on purpose: those routes are rewrites proxied straight to
+  // the backend, which already authenticates every request via the session
+  // cookie. Running the `/api/me` guard in front of each one only added a
+  // redundant, blocking round-trip per API call (562 call sites) and saturated
+  // the backend workers. The middleware now only guards page navigations.
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.svg).*)"],
 };

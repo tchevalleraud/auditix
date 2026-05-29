@@ -102,6 +102,8 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
+        // Keep the spinner up: a full reload is about to happen, so we must NOT
+        // flip the button back to its idle state in the meantime.
         window.location.href = "/";
         return;
       }
@@ -113,14 +115,15 @@ export default function LoginPage() {
           setCode("");
           setUseBackupCode(false);
           setStep("totp");
+          setLoading(false);
           return;
         }
       }
 
       setError(t("auth.invalidCredentials"));
+      setLoading(false);
     } catch {
       setError(t("auth.serverError"));
-    } finally {
       setLoading(false);
     }
   };
@@ -138,13 +141,15 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
+        // Keep the spinner up through the full reload (see handleCredentialsSubmit).
         window.location.href = "/";
-      } else {
-        setError(t("auth.invalidTotpCode"));
+        return;
       }
+
+      setError(t("auth.invalidTotpCode"));
+      setLoading(false);
     } catch {
       setError(t("auth.serverError"));
-    } finally {
       setLoading(false);
     }
   };
