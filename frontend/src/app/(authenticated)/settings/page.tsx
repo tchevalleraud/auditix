@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
+import AclSettings from "@/components/AclSettings";
 import { useAppContext } from "@/components/ContextProvider";
 import {
   BookOpen,
@@ -68,12 +69,12 @@ interface ApiTokenItem {
   expired: boolean;
 }
 
-type TabKey = "general" | "monitoring" | "vulnerability" | "systemUpdates" | "vendorPlugins" | "nodeColumns" | "members" | "lab" | "aiAssistant" | "apiTokens";
+type TabKey = "general" | "acl" | "monitoring" | "vulnerability" | "systemUpdates" | "vendorPlugins" | "nodeColumns" | "members" | "lab" | "aiAssistant" | "apiTokens";
 
 const inputClass = "w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20 transition-colors";
 const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
-const VALID_TABS = ["general", "monitoring", "vulnerability", "systemUpdates", "vendorPlugins", "nodeColumns", "members", "lab", "aiAssistant", "apiTokens"] as const;
+const VALID_TABS = ["general", "acl", "monitoring", "vulnerability", "systemUpdates", "vendorPlugins", "nodeColumns", "members", "lab", "aiAssistant", "apiTokens"] as const;
 const isValidTab = (v: string | null): v is TabKey => !!v && (VALID_TABS as readonly string[]).includes(v);
 
 export default function SettingsPage() {
@@ -97,6 +98,9 @@ export default function SettingsPage() {
   // General — render switch for the floating "Suggest a feature" button.
   // The flag is part of the General save payload, alongside name/description.
   const [feedbackButtonEnabled, setFeedbackButtonEnabled] = useState(true);
+  const [aclEnabled, setAclEnabled] = useState(false);
+  const [aclSaving, setAclSaving] = useState(false);
+  const [aclSaved, setAclSaved] = useState(false);
 
   // Data Retention & Poll intervals
   const [snmpRetentionMinutes, setSnmpRetentionMinutes] = useState(120);
@@ -158,6 +162,7 @@ export default function SettingsPage() {
       setDescription(current.description ?? "");
       setMonitoringEnabled(current.monitoringEnabled);
       setFeedbackButtonEnabled(current.feedbackButtonEnabled ?? true);
+      setAclEnabled(current.aclEnabled ?? false);
       setSnmpRetentionMinutes(current.snmpRetentionMinutes ?? 120);
       setSnmpPollIntervalSeconds(current.snmpPollIntervalSeconds ?? 60);
       setIcmpPollIntervalSeconds(current.icmpPollIntervalSeconds ?? 60);
@@ -287,7 +292,7 @@ export default function SettingsPage() {
       const res = await fetch(`/api/contexts/${current.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description: description || null, monitoringEnabled, feedbackButtonEnabled }),
+        body: JSON.stringify({ name, description: description || null, monitoringEnabled, feedbackButtonEnabled, aclEnabled }),
       });
       if (res.ok) {
         await reload();
@@ -462,6 +467,7 @@ export default function SettingsPage() {
 
   const tabs: { key: TabKey; label: string }[] = [
     { key: "general", label: t("settings.tabGeneral") },
+    ...(current?.aclEnabled ? [{ key: "acl" as TabKey, label: t("settings.tabAcl") }] : []),
     { key: "monitoring", label: t("settings.tabMonitoring") },
     { key: "vulnerability", label: t("settings.tabVulnerability") },
     { key: "systemUpdates", label: t("settings.tabSystemUpdates") },
@@ -491,6 +497,7 @@ export default function SettingsPage() {
   // without a save action (nodeColumns, apiTokens) get null.
   const SAVE_ACTIONS: Partial<Record<TabKey, { formId: string; saving: boolean; saved: boolean; disabled?: boolean }>> = {
     general: { formId: "settings-form-general", saving, saved, disabled: !name.trim() },
+    acl: { formId: "settings-form-acl", saving: aclSaving, saved: aclSaved },
     monitoring: { formId: "settings-form-monitoring", saving: retentionSaving, saved: retentionSaved },
     vulnerability: { formId: "settings-form-vulnerability", saving: vulnSaving, saved: vulnSaved },
     systemUpdates: { formId: "settings-form-systemUpdates", saving: suSaving, saved: suSaved },
@@ -522,6 +529,19 @@ export default function SettingsPage() {
       </div>
 
       {/* General tab */}
+      {tab === "acl" && current && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm p-6">
+          <AclSettings
+            formId="settings-form-acl"
+            onSavingChange={setAclSaving}
+            onSaved={() => {
+              setAclSaved(true);
+              setTimeout(() => setAclSaved(false), 2000);
+            }}
+          />
+        </div>
+      )}
+
       {tab === "general" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
           <form id="settings-form-general" onSubmit={handleSaveGeneral} className="p-6 space-y-5">
@@ -566,6 +586,32 @@ export default function SettingsPage() {
                 <span
                   className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
                     feedbackButtonEnabled ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  {t("settings.aclLabel")}
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {t("settings.aclHelp")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={aclEnabled}
+                onClick={() => setAclEnabled((v) => !v)}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-slate-400/20 focus:ring-offset-2 dark:focus:ring-offset-slate-900 ${
+                  aclEnabled ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-700"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-in-out ${
+                    aclEnabled ? "translate-x-5" : "translate-x-0"
                   }`}
                 />
               </button>

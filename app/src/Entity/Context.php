@@ -80,6 +80,17 @@ class Context
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $nodeColumnsConfig = null;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $aclEnabled = false;
+
+    /**
+     * Mapping describing where ACL/ACE data lives in the collected inventory
+     * (which InventoryCategory + column labels hold each ACL/ACE field). The ACL
+     * content itself is never stored: it is derived on the fly from the inventory.
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $aclConfig = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -234,4 +245,8 @@ class Context
     public function setLastVulnerabilitySyncStatus(?string $v): static { $this->lastVulnerabilitySyncStatus = $v; return $this; }
     public function getNodeColumnsConfig(): ?array { return $this->nodeColumnsConfig; }
     public function setNodeColumnsConfig(?array $v): static { $this->nodeColumnsConfig = $v; return $this; }
+    public function isAclEnabled(): bool { return $this->aclEnabled; }
+    public function setAclEnabled(bool $v): static { $this->aclEnabled = $v; return $this; }
+    public function getAclConfig(): ?array { return $this->aclConfig; }
+    public function setAclConfig(?array $v): static { $this->aclConfig = $v; return $this; }
 }

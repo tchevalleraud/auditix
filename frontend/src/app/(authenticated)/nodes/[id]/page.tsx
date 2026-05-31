@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import AclTab from "@/components/AclTab";
 import { ArrowLeft, Loader2, Play, Tag, CheckCircle2, XCircle, Clock, FileText, Eye, Trash2, X, FolderOpen, FolderClosed, ChevronRight, ChevronDown, Plus, Table2, ShieldCheck, Ban, Minus, Save, AlertTriangle, Download, Activity, Cpu, MemoryStick, HardDrive, Thermometer, ArrowDownToLine, ArrowUpFromLine, Gauge, Upload, Copy, Wifi, ScanSearch, Lightbulb, Terminal } from "lucide-react";
 
 interface Manufacturer { id: number; name: string; logo: string | null }
@@ -73,7 +74,7 @@ interface SnmpMonitoringResponse {
   oidConfig: { category: string; oid: string }[];
 }
 
-type TabKey = "summary" | "settings" | "collections" | "inventory" | "compliance" | "monitoring" | "vulnerabilities" | "system-updates";
+type TabKey = "summary" | "settings" | "collections" | "inventory" | "acl" | "compliance" | "monitoring" | "vulnerabilities" | "system-updates";
 
 interface ComplianceResultEntry {
   ruleId: number;
@@ -662,6 +663,7 @@ export default function NodeDetailPage() {
     { key: "vulnerabilities", label: t("vulnerabilities.title") },
     { key: "system-updates", label: t("systemUpdates.title") },
     { key: "inventory", label: t("nodes.tabInventory") },
+    ...(current?.aclEnabled ? [{ key: "acl" as TabKey, label: t("nodes.tabAcl") }] : []),
     { key: "collections", label: t("nodes.tabCollections") },
   ];
   const rightTabs: { key: TabKey; label: string }[] = [
@@ -1341,6 +1343,8 @@ export default function NodeDetailPage() {
           </div>
         </div>
       )}
+
+      {tab === "acl" && <AclTab nodeId={nodeId} />}
 
       {tab === "inventory" && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden flex-1 min-h-0 flex flex-col">

@@ -521,7 +521,8 @@
     "confirmDeleteCollections": "Eliminare {count} raccolta/e e tutti i loro file?",
     "downloadCollection": "Scarica file",
     "deleteSelected": "Elimina ({count})",
-    "collectionError": "Errore"
+    "collectionError": "Errore",
+    "tabAcl": "ACL"
   },
   "admin_health": {
     "title": "Salute",
@@ -932,7 +933,10 @@
     "apiTokenNeverUsed": "Mai utilizzato",
     "apiTokenExpiredAt": "Scaduto",
     "apiTokenExpiresAt": "Scade: {date}",
-    "apiTokenNoTokens": "Nessun token API"
+    "apiTokenNoTokens": "Nessun token API",
+    "tabAcl": "ACL",
+    "aclLabel": "ACL management",
+    "aclHelp": "Enable Access Control List visualization for nodes in this context."
   },
   "apiDocs": {
     "title": "Documentazione API",
@@ -975,7 +979,7 @@
     "colActions": "Azioni",
     "fieldNameLabel": "Nome",
     "fieldDescriptionLabel": "Descrizione",
-    "namePlaceholder": "es. Topologia principale",
+    "namePlaceholder": "es. Rete core, MDF, Sito A...",
     "isPrimary": "Topologia principale",
     "setPrimary": "Imposta come principale",
     "notPrimaryHint": "Questa topologia non e principale. Usa la stella nella lista per impostarla.",
@@ -1007,7 +1011,7 @@
     "filterManual": "Solo manuali",
     "openMap": "Apri mappa",
     "delete": "Elimina",
-    "confirmDelete": "Eliminare la topologia \"{name}\" ?",
+    "confirmDelete": "Eliminare la mappa \"{name}\"?",
     "configureSubtitle": "Membri, design dei nodi e impostazioni.",
     "tabSettings": "Impostazioni",
     "tabMembers": "Nodi",
@@ -1246,8 +1250,6 @@
     "searchDevice": "Cerca un dispositivo...",
     "noMaps": "Nessuna mappa di topologia",
     "noResult": "Nessun risultato",
-    "colName": "Nome",
-    "namePlaceholder": "es. Rete core, MDF, Sito A...",
     "description": "Descrizione",
     "descriptionPlaceholder": "Descrizione opzionale",
     "defaultProtocol": "Protocollo predefinito",
@@ -1260,7 +1262,6 @@
     "protocolIsis": "ISIS",
     "devices": "dispositivi",
     "links": "collegamenti",
-    "confirmDelete": "Eliminare la mappa \"{name}\"?",
     "emptyMap": "Questa mappa non ha ancora dispositivi",
     "emptyMapHint": "Configura le regole di raccolta della topologia e aggiorna la mappa per popolarla.",
     "legend": "Legenda",
@@ -2885,5 +2886,51 @@
     "lastSync": "Ultima sincronizzazione",
     "syncNow": "Sincronizza ora",
     "syncing": "Sincronizzazione…"
+  },
+  "acl": {
+    "tab": "ACL",
+    "title": "Access Control Lists",
+    "empty": "No ACL data found for this node.",
+    "notConfigured": "ACL inventory mapping is not configured yet.",
+    "configureLink": "Configure in Settings",
+    "permit": "permit",
+    "deny": "deny",
+    "disabled": "disabled",
+    "noAces": "No ACE",
+    "matrixSourceDest": "Source ＼ Destination",
+    "view": {
+      "table": "Table",
+      "matrix": "Matrix"
+    },
+    "fields": {
+      "name": "Name",
+      "type": "Type",
+      "defaultAction": "Default action",
+      "action": "Action",
+      "etherType": "Ether-type",
+      "source": "Source",
+      "destination": "Destination",
+      "enabled": "Enabled",
+      "id": "Identifier",
+      "ports": "Ports",
+      "vlans": "VLANs",
+      "vni": "VNI (VxLAN)"
+    },
+    "settings": {
+      "title": "Inventory mapping",
+      "description": "Tell Auditix where ACL and ACE data lives in the collected inventory.",
+      "aclSource": "ACL source",
+      "aceSource": "ACE source",
+      "category": "Inventory category",
+      "selectCategory": "Select a category…",
+      "selectColumn": "Select a column…",
+      "parentRef": "Parent ACL column",
+      "idModeKey": "Inventory entry key",
+      "idModeColumn": "Value column",
+      "actionDelimiter": "Action delimiter",
+      "actionDelimiterPlaceholder": "e.g. space or ,",
+      "qualifierCols": "Action qualifiers",
+      "qualifierColsHint": "Extra columns shown as 'label: value' badges next to the action (e.g. remark-dscp, redirect-next-hop)."
+    }
   }
 }

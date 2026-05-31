@@ -66,6 +66,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       { label: t("settings.tabVendorPlugins"), tab: "vendorPlugins", icon: Package },
       { label: t("settings.tabNodeColumns"), tab: "nodeColumns", icon: Columns3 },
     ];
+    if (current?.aclEnabled) {
+      // Surface the ACL mapping config right after General when the feature is on.
+      contextItems.splice(1, 0, { label: t("settings.tabAcl"), tab: "acl", icon: ShieldCheck });
+    }
     if (current && !current.isDefault) {
       contextItems.push({ label: t("settings.tabMembers"), tab: "members", icon: Users });
     }

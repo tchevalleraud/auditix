@@ -293,6 +293,16 @@ class NodeController extends AbstractController
         rmdir($dir);
     }
 
+    #[Route('/{id}/acl', methods: ['GET'])]
+    public function acl(Node $node, \App\Service\AclExtractor $aclExtractor): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
+
+        $acls = $aclExtractor->extractForNode($node, $node->getContext()?->getAclConfig());
+
+        return $this->json(['acls' => $acls]);
+    }
+
     #[Route('/{id}/inventory/tags', methods: ['GET'])]
     public function inventoryTags(Node $node, EntityManagerInterface $em): JsonResponse
     {

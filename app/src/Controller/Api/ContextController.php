@@ -40,6 +40,8 @@ class ContextController extends AbstractController
             'systemUpdateScoreWeight' => $c->getSystemUpdateScoreWeight(),
             'lastVulnerabilitySyncAt' => $c->getLastVulnerabilitySyncAt()?->format('c'),
             'lastVulnerabilitySyncStatus' => $c->getLastVulnerabilitySyncStatus(),
+            'aclEnabled' => $c->isAclEnabled(),
+            'aclConfig' => $c->getAclConfig(),
             'userCount' => $c->getUsers()->count(),
             'createdAt' => $c->getCreatedAt()->format('c'),
         ];
@@ -108,13 +110,21 @@ class ContextController extends AbstractController
     {
         $data = json_decode($request->getContent(), true);
 
-        if (empty($data['name'])) {
-            return $this->json(['error' => 'Le nom est requis'], Response::HTTP_BAD_REQUEST);
+        // Partial updates are allowed: only touch the fields that were sent so a
+        // tab persisting just its own settings (e.g. ACL mapping) doesn't wipe
+        // name/description/monitoring or trip the "name required" guard.
+        if (array_key_exists('name', $data)) {
+            if (empty($data['name'])) {
+                return $this->json(['error' => 'Le nom est requis'], Response::HTTP_BAD_REQUEST);
+            }
+            $context->setName($data['name']);
         }
-
-        $context->setName($data['name']);
-        $context->setDescription($data['description'] ?? null);
-        $context->setMonitoringEnabled($data['monitoringEnabled'] ?? false);
+        if (array_key_exists('description', $data)) {
+            $context->setDescription($data['description']);
+        }
+        if (array_key_exists('monitoringEnabled', $data)) {
+            $context->setMonitoringEnabled((bool) $data['monitoringEnabled']);
+        }
         if (array_key_exists('snmpRetentionMinutes', $data)) {
             $context->setSnmpRetentionMinutes(max(1, (int) $data['snmpRetentionMinutes']));
         }
@@ -132,6 +142,12 @@ class ContextController extends AbstractController
         }
         if (array_key_exists('feedbackButtonEnabled', $data)) {
             $context->setFeedbackButtonEnabled((bool) $data['feedbackButtonEnabled']);
+        }
+        if (array_key_exists('aclEnabled', $data)) {
+            $context->setAclEnabled((bool) $data['aclEnabled']);
+        }
+        if (array_key_exists('aclConfig', $data)) {
+            $context->setAclConfig($data['aclConfig']);
         }
         if (isset($data['regenerateToken']) && $data['regenerateToken']) {
             $context->generatePublicToken();

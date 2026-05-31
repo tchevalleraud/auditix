@@ -521,7 +521,8 @@
     "confirmDeleteCollections": "{count}件の収集とすべてのファイルを削除しますか？",
     "downloadCollection": "ファイルをダウンロード",
     "deleteSelected": "削除 ({count})",
-    "collectionError": "エラー"
+    "collectionError": "エラー",
+    "tabAcl": "ACL"
   },
   "admin_health": {
     "title": "ヘルス",
@@ -932,7 +933,10 @@
     "apiTokenNeverUsed": "未使用",
     "apiTokenExpiredAt": "期限切れ",
     "apiTokenExpiresAt": "期限: {date}",
-    "apiTokenNoTokens": "APIトークンはまだありません"
+    "apiTokenNoTokens": "APIトークンはまだありません",
+    "tabAcl": "ACL",
+    "aclLabel": "ACL management",
+    "aclHelp": "Enable Access Control List visualization for nodes in this context."
   },
   "apiDocs": {
     "title": "APIドキュメント",
@@ -975,7 +979,7 @@
     "colActions": "アクション",
     "fieldNameLabel": "名前",
     "fieldDescriptionLabel": "説明",
-    "namePlaceholder": "例: メイントポロジー",
+    "namePlaceholder": "例: コアネットワーク、MDF、サイトA...",
     "isPrimary": "メイントポロジー",
     "setPrimary": "メインに設定",
     "notPrimaryHint": "このトポロジーはメインではありません。一覧のスターでメインに設定できます。",
@@ -1007,7 +1011,7 @@
     "filterManual": "手動のみ",
     "openMap": "マップを開く",
     "delete": "削除",
-    "confirmDelete": "トポロジー \"{name}\" を削除しますか？",
+    "confirmDelete": "マップ「{name}」を削除しますか？",
     "configureSubtitle": "メンバー、ノードデザイン、設定。",
     "tabSettings": "設定",
     "tabMembers": "ノード",
@@ -1246,8 +1250,6 @@
     "searchDevice": "デバイスを検索...",
     "noMaps": "トポロジーマップなし",
     "noResult": "結果なし",
-    "colName": "名前",
-    "namePlaceholder": "例: コアネットワーク、MDF、サイトA...",
     "description": "説明",
     "descriptionPlaceholder": "オプションの説明",
     "defaultProtocol": "デフォルトプロトコル",
@@ -1260,7 +1262,6 @@
     "protocolIsis": "ISIS",
     "devices": "デバイス",
     "links": "リンク",
-    "confirmDelete": "マップ「{name}」を削除しますか？",
     "emptyMap": "このマップにはまだデバイスがありません",
     "emptyMapHint": "トポロジー収集ルールを設定してマップを更新してください。",
     "legend": "凡例",
@@ -2885,5 +2886,51 @@
     "lastSync": "前回の同期",
     "syncNow": "今すぐ同期",
     "syncing": "同期中…"
+  },
+  "acl": {
+    "tab": "ACL",
+    "title": "Access Control Lists",
+    "empty": "No ACL data found for this node.",
+    "notConfigured": "ACL inventory mapping is not configured yet.",
+    "configureLink": "Configure in Settings",
+    "permit": "permit",
+    "deny": "deny",
+    "disabled": "disabled",
+    "noAces": "No ACE",
+    "matrixSourceDest": "Source ＼ Destination",
+    "view": {
+      "table": "Table",
+      "matrix": "Matrix"
+    },
+    "fields": {
+      "name": "Name",
+      "type": "Type",
+      "defaultAction": "Default action",
+      "action": "Action",
+      "etherType": "Ether-type",
+      "source": "Source",
+      "destination": "Destination",
+      "enabled": "Enabled",
+      "id": "Identifier",
+      "ports": "Ports",
+      "vlans": "VLANs",
+      "vni": "VNI (VxLAN)"
+    },
+    "settings": {
+      "title": "Inventory mapping",
+      "description": "Tell Auditix where ACL and ACE data lives in the collected inventory.",
+      "aclSource": "ACL source",
+      "aceSource": "ACE source",
+      "category": "Inventory category",
+      "selectCategory": "Select a category…",
+      "selectColumn": "Select a column…",
+      "parentRef": "Parent ACL column",
+      "idModeKey": "Inventory entry key",
+      "idModeColumn": "Value column",
+      "actionDelimiter": "Action delimiter",
+      "actionDelimiterPlaceholder": "e.g. space or ,",
+      "qualifierCols": "Action qualifiers",
+      "qualifierColsHint": "Extra columns shown as 'label: value' badges next to the action (e.g. remark-dscp, redirect-next-hop)."
+    }
   }
 }

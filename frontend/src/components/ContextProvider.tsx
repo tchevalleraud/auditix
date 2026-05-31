@@ -4,6 +4,45 @@ import { createContext, useContext, useEffect, useRef, useState, useCallback } f
 import { useTheme, type ThemeMode } from "@/components/ThemeProvider";
 import { useI18n, type Locale } from "@/components/I18nProvider";
 
+/** How an ACL/ACE identifier is resolved from the inventory. */
+export type AclIdMode = "key" | "column";
+
+export interface AclSourceConfig {
+  categoryId: number | null;
+  /** "key" = use the inventory entry key, "column" = use a value column. */
+  idMode?: AclIdMode;
+  idCol?: string | null;
+  nameCol?: string | null;
+  typeCol?: string | null;
+  defaultActionCol?: string | null;
+  portsCol?: string | null;
+  vlansCol?: string | null;
+  vniCol?: string | null;
+}
+
+export interface AceSourceConfig {
+  categoryId: number | null;
+  idMode?: AclIdMode;
+  idCol?: string | null;
+  parentRefCol?: string | null;
+  nameCol?: string | null;
+  /** Primary action column (drives permit/deny colouring). */
+  actionCol?: string | null;
+  /** Optional delimiter to split a single action cell into several actions. */
+  actionDelimiter?: string | null;
+  /** Extra columns, each surfaced as a "label: value" action qualifier badge. */
+  qualifierCols?: string[];
+  etherTypeCol?: string | null;
+  sourceCol?: string | null;
+  destinationCol?: string | null;
+  enabledCol?: string | null;
+}
+
+export interface AclConfig {
+  aclSource?: AclSourceConfig;
+  aceSource?: AceSourceConfig;
+}
+
 export interface AppContext {
   id: number;
   name: string;
@@ -27,6 +66,8 @@ export interface AppContext {
   systemUpdateScoreWeight: number;
   lastVulnerabilitySyncAt: string | null;
   lastVulnerabilitySyncStatus: string | null;
+  aclEnabled: boolean;
+  aclConfig: AclConfig | null;
 }
 
 export interface UserInfo {

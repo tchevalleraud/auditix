@@ -521,7 +521,8 @@
     "confirmDeleteCollections": "{count} Sammlung(en) und alle zugehorigen Dateien loschen?",
     "downloadCollection": "Dateien herunterladen",
     "deleteSelected": "Loschen ({count})",
-    "collectionError": "Fehler"
+    "collectionError": "Fehler",
+    "tabAcl": "ACL"
   },
   "admin_health": {
     "title": "Gesundheit",
@@ -932,7 +933,10 @@
     "apiTokenNeverUsed": "Nie verwendet",
     "apiTokenExpiredAt": "Abgelaufen",
     "apiTokenExpiresAt": "Laeuft ab: {date}",
-    "apiTokenNoTokens": "Noch keine API-Token"
+    "apiTokenNoTokens": "Noch keine API-Token",
+    "tabAcl": "ACL",
+    "aclLabel": "ACL management",
+    "aclHelp": "Enable Access Control List visualization for nodes in this context."
   },
   "apiDocs": {
     "title": "API-Dokumentation",
@@ -975,7 +979,7 @@
     "colActions": "Aktionen",
     "fieldNameLabel": "Name",
     "fieldDescriptionLabel": "Beschreibung",
-    "namePlaceholder": "z. B. Haupttopologie",
+    "namePlaceholder": "z.B. Kernnetz, MDF, Standort A...",
     "isPrimary": "Haupttopologie",
     "setPrimary": "Als Haupt festlegen",
     "notPrimaryHint": "Diese Topologie ist nicht primar. Verwenden Sie den Stern in der Liste, um sie festzulegen.",
@@ -1007,7 +1011,7 @@
     "filterManual": "Nur manuelle",
     "openMap": "Karte offnen",
     "delete": "Loschen",
-    "confirmDelete": "Topologie \"{name}\" loschen?",
+    "confirmDelete": "Karte \"{name}\" loschen?",
     "configureSubtitle": "Mitglieder, Knotendesign und Einstellungen.",
     "tabSettings": "Einstellungen",
     "tabMembers": "Knoten",
@@ -1246,8 +1250,6 @@
     "searchDevice": "Gerat suchen...",
     "noMaps": "Noch keine Topologiekarten",
     "noResult": "Keine Ergebnisse",
-    "colName": "Name",
-    "namePlaceholder": "z.B. Kernnetz, MDF, Standort A...",
     "description": "Beschreibung",
     "descriptionPlaceholder": "Optionale Beschreibung",
     "defaultProtocol": "Standardprotokoll",
@@ -1260,7 +1262,6 @@
     "protocolIsis": "ISIS",
     "devices": "Gerate",
     "links": "Verbindungen",
-    "confirmDelete": "Karte \"{name}\" loschen?",
     "emptyMap": "Diese Karte enthalt noch keine Gerate",
     "emptyMapHint": "Konfigurieren Sie Topologie-Sammelregeln und aktualisieren Sie die Karte.",
     "legend": "Legende",
@@ -2885,5 +2886,51 @@
     "lastSync": "Letzte Synchronisierung",
     "syncNow": "Jetzt synchronisieren",
     "syncing": "Synchronisiere…"
+  },
+  "acl": {
+    "tab": "ACL",
+    "title": "Access Control Lists",
+    "empty": "No ACL data found for this node.",
+    "notConfigured": "ACL inventory mapping is not configured yet.",
+    "configureLink": "Configure in Settings",
+    "permit": "permit",
+    "deny": "deny",
+    "disabled": "disabled",
+    "noAces": "No ACE",
+    "matrixSourceDest": "Source ＼ Destination",
+    "view": {
+      "table": "Table",
+      "matrix": "Matrix"
+    },
+    "fields": {
+      "name": "Name",
+      "type": "Type",
+      "defaultAction": "Default action",
+      "action": "Action",
+      "etherType": "Ether-type",
+      "source": "Source",
+      "destination": "Destination",
+      "enabled": "Enabled",
+      "id": "Identifier",
+      "ports": "Ports",
+      "vlans": "VLANs",
+      "vni": "VNI (VxLAN)"
+    },
+    "settings": {
+      "title": "Inventory mapping",
+      "description": "Tell Auditix where ACL and ACE data lives in the collected inventory.",
+      "aclSource": "ACL source",
+      "aceSource": "ACE source",
+      "category": "Inventory category",
+      "selectCategory": "Select a category…",
+      "selectColumn": "Select a column…",
+      "parentRef": "Parent ACL column",
+      "idModeKey": "Inventory entry key",
+      "idModeColumn": "Value column",
+      "actionDelimiter": "Action delimiter",
+      "actionDelimiterPlaceholder": "e.g. space or ,",
+      "qualifierCols": "Action qualifiers",
+      "qualifierColsHint": "Extra columns shown as 'label: value' badges next to the action (e.g. remark-dscp, redirect-next-hop)."
+    }
   }
 }
