@@ -2914,7 +2914,9 @@
       "id": "Identifier",
       "ports": "Ports",
       "vlans": "VLANs",
-      "vni": "VNI (VxLAN)"
+      "vni": "VNI (VxLAN)",
+      "match": "Match parameters",
+      "service": "Service"
     },
     "settings": {
       "title": "Inventory mapping",
@@ -2930,7 +2932,39 @@
       "actionDelimiter": "Action delimiter",
       "actionDelimiterPlaceholder": "e.g. space or ,",
       "qualifierCols": "Action qualifiers",
-      "qualifierColsHint": "Extra columns shown as 'label: value' badges next to the action (e.g. remark-dscp, redirect-next-hop)."
+      "qualifierColsHint": "Extra columns shown as 'label: value' badges next to the action (e.g. remark-dscp, redirect-next-hop).",
+      "matchParamsHint": "Any other ACE column is shown automatically as 'type: value', grouped by layer (Ethernet, IP, IPv6, ARP, Protocol, Policer). No mapping needed.",
+      "displayCols": "Displayed match parameters",
+      "displayColsHint": "Extra columns shown (grouped by layer) in the expandable detail. Empty shows every remaining column.",
+      "sourceCols": "Source columns",
+      "destinationCols": "Destination columns",
+      "serviceCols": "Service columns",
+      "roleColsHint": "Columns aggregated into this cell (e.g. an IP and a MAC). Empty shows \"all\".",
+      "serviceColsHint": "Columns describing the service (e.g. destination port, protocol). Empty shows \"all\".",
+      "entries": "Field entries",
+      "entriesHint": "Add one entry per inventory column you want to show. Pick its role (Source, Destination, Service, Action qualifier, Detail). The row key is dynamic — one rule per ACE. Add several Source entries to combine (e.g. IP + MAC).",
+      "addEntry": "Add an entry"
+    },
+    "details": "Details",
+    "groups": {
+      "action": "Action",
+      "arp": "ARP",
+      "ethernet": "Ethernet",
+      "ip": "IP",
+      "ipv6": "IPv6",
+      "policer": "Policer",
+      "protocol": "Protocol",
+      "other": "Other"
+    },
+    "all": "all",
+    "roles": {
+      "source": "Source",
+      "destination": "Destination",
+      "service": "Service",
+      "qualifier": "Action qualifier",
+      "detail": "Detail",
+      "protocol": "Protocol (L3)",
+      "port": "Port (L3)"
     }
   }
 }

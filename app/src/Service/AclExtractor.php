@@ -20,10 +20,16 @@ use App\Repository\NodeInventoryEntryRepository;
  *                     'portsCol' => string, 'vlansCol' => string, 'vniCol' => string],
  *     'aceSource' => ['categoryId' => int, 'idMode' => 'key'|'column', 'idCol' => string,
  *                     'parentRefCol' => string, 'nameCol' => string,
- *                     'actionCol' => string, 'actionDelimiter' => string, 'qualifierCols' => string[],
- *                     'etherTypeCol' => string, 'sourceCol' => string,
- *                     'destinationCol' => string, 'enabledCol' => string],
+ *                     'actionCol' => string, 'actionDelimiter' => string, 'enabledCol' => string,
+ *                     'entries' => [['role' => 'source'|'destination'|'service'|'protocol'|'port'|'qualifier'|'detail',
+ *                                    'column' => string], ...]],
  *   ]
+ *
+ * ACEs are rendered firewall-style. Each ACE row (dynamic key) yields one rule.
+ * `entries` is an ordered add/remove list: every entry maps a role to a single
+ * inventory column. Several "source" entries aggregate into the Source cell, etc.
+ * Empty role -> "all". Roles: source / destination / service (firewall cells),
+ * qualifier (action badge), detail (grouped extra parameters).
  *
  * idMode controls how an ACL/ACE id is resolved: 'key' uses the inventory entry
  * key, 'column' reads it from a value column. ACEs link to their parent ACL when
@@ -92,16 +98,28 @@ class AclExtractor
                     'aces' => [],
                 ];
             }
-            [$action, $actions] = $this->resolveActions($aceSrc, $cols);
+            [$primaryAction, $inlineActions] = $this->resolveActions($aceSrc, $cols);
+            $roles = $this->resolveEntries($aceSrc['entries'] ?? null, $cols);
+
             $acls[$parent]['aces'][] = [
                 'id' => $aceId,
                 'name' => $this->col($cols, $aceSrc['nameCol'] ?? null) ?? $aceId,
-                'action' => $action,
-                'actions' => $actions,
-                'etherType' => $this->col($cols, $aceSrc['etherTypeCol'] ?? null),
-                'source' => $this->col($cols, $aceSrc['sourceCol'] ?? null),
-                'destination' => $this->col($cols, $aceSrc['destinationCol'] ?? null),
+                'action' => $primaryAction,
+                // Inline actions split from the action cell, plus columns flagged
+                // as the "qualifier" role.
+                'actions' => array_merge($inlineActions, $roles['qualifier']),
                 'enabled' => $this->parseBool($this->col($cols, $aceSrc['enabledCol'] ?? null)),
+                // Firewall-style aggregated cells; each role may gather several
+                // columns (e.g. src-ip + src-mac -> source). Empty -> UI shows "all".
+                'source' => $roles['source'],
+                'destination' => $roles['destination'],
+                // L2 / standalone service columns (e.g. ARP-Request).
+                'service' => $roles['service'],
+                // L3 service split across two columns: protocol (tcp/udp) + port.
+                'protocol' => $roles['protocol'],
+                'port' => $roles['port'],
+                // "detail" role columns, surfaced grouped by layer in the UI.
+                'fields' => $roles['detail'],
             ];
         }
 
@@ -125,10 +143,8 @@ class AclExtractor
     }
 
     /**
-     * Resolve an ACE's actions in hybrid mode:
-     *   - the primary action column (optionally split on a delimiter) yields the
-     *     primary action plus any extra inline actions;
-     *   - each configured qualifier column adds a label/value badge.
+     * Resolve an ACE's primary action plus any extra inline actions obtained by
+     * splitting the action cell on the configured delimiter.
      *
      * @param array<string, mixed>|null $src
      * @param array<string, ?string>    $cols
@@ -153,18 +169,39 @@ class AclExtractor
             }
         }
 
-        // Qualifier columns: a non-empty cell becomes a "colLabel: value" badge.
-        foreach (($src['qualifierCols'] ?? []) as $qc) {
-            if (!is_string($qc) || $qc === '') {
+        return [$primary, $actions];
+    }
+
+    /**
+     * Resolve the add/remove `entries` list into per-role {label, value} buckets.
+     * Each entry maps a role to a single column; the row key is dynamic. Several
+     * entries with the same role aggregate (e.g. src-ip + src-mac -> source).
+     *
+     * @param mixed                  $entries the configured entry list
+     * @param array<string, ?string> $cols    the ACE row
+     * @return array{source: array, destination: array, service: array, qualifier: array, detail: array}
+     */
+    private function resolveEntries(mixed $entries, array $cols): array
+    {
+        $out = ['source' => [], 'destination' => [], 'service' => [], 'protocol' => [], 'port' => [], 'qualifier' => [], 'detail' => []];
+        if (!is_array($entries)) {
+            return $out;
+        }
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
                 continue;
             }
-            $v = $this->col($cols, $qc);
+            $role = $entry['role'] ?? null;
+            $column = $entry['column'] ?? null;
+            if (!isset($out[$role]) || !is_string($column) || $column === '') {
+                continue;
+            }
+            $v = $this->col($cols, $column);
             if ($v !== null) {
-                $actions[] = ['label' => $qc, 'value' => $v];
+                $out[$role][] = ['label' => $column, 'value' => $v];
             }
         }
-
-        return [$primary, $actions];
+        return $out;
     }
 
     /** Split an inline action token like "remark-dscp 46" or "name:value". */

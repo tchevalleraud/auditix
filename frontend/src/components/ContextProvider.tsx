@@ -20,6 +20,22 @@ export interface AclSourceConfig {
   vniCol?: string | null;
 }
 
+/** Role of a configured field entry in the firewall-style ACE display. */
+export type AclEntryRole =
+  | "source"
+  | "destination"
+  | "service"
+  | "protocol"
+  | "port"
+  | "qualifier"
+  | "detail";
+
+/** One add/remove config entry: a role pointing at a single inventory column. */
+export interface AclFieldEntry {
+  role: AclEntryRole;
+  column: string;
+}
+
 export interface AceSourceConfig {
   categoryId: number | null;
   idMode?: AclIdMode;
@@ -30,12 +46,13 @@ export interface AceSourceConfig {
   actionCol?: string | null;
   /** Optional delimiter to split a single action cell into several actions. */
   actionDelimiter?: string | null;
-  /** Extra columns, each surfaced as a "label: value" action qualifier badge. */
-  qualifierCols?: string[];
-  etherTypeCol?: string | null;
-  sourceCol?: string | null;
-  destinationCol?: string | null;
   enabledCol?: string | null;
+  /**
+   * Ordered list of field entries. Each maps a role (source/destination/service
+   * /qualifier/detail) to a single column; the row key is dynamic (one ACE per
+   * inventory row). Add several source entries to aggregate (e.g. src-ip + src-mac).
+   */
+  entries?: AclFieldEntry[];
 }
 
 export interface AclConfig {

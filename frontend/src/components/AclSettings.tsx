@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
-import type { AclConfig } from "@/components/ContextProvider";
+import type { AclConfig, AclEntryRole, AclFieldEntry } from "@/components/ContextProvider";
+
+const ENTRY_ROLES: AclEntryRole[] = ["source", "destination", "protocol", "port", "service", "qualifier", "detail"];
 
 interface Category {
   id: number;
@@ -73,12 +76,16 @@ export default function AclSettings({ formId, onSavingChange, onSaved }: AclSett
   const setAceField = (field: string, value: string | number | string[] | null) =>
     setConfig((c) => ({ ...c, aceSource: { ...c.aceSource, categoryId: c.aceSource?.categoryId ?? null, [field]: value } }));
 
-  const toggleQualifier = (col: string) =>
-    setConfig((c) => {
-      const cur = c.aceSource?.qualifierCols ?? [];
-      const next = cur.includes(col) ? cur.filter((x) => x !== col) : [...cur, col];
-      return { ...c, aceSource: { ...c.aceSource, categoryId: c.aceSource?.categoryId ?? null, qualifierCols: next } };
-    });
+  // Add / remove / edit the ordered list of field entries (role -> column).
+  const entries: AclFieldEntry[] = config.aceSource?.entries ?? [];
+
+  const setEntries = (next: AclFieldEntry[]) =>
+    setConfig((c) => ({ ...c, aceSource: { ...c.aceSource, categoryId: c.aceSource?.categoryId ?? null, entries: next } }));
+
+  const addEntry = () => setEntries([...entries, { role: "source", column: aceCols[0] ?? "" }]);
+  const removeEntry = (i: number) => setEntries(entries.filter((_, idx) => idx !== i));
+  const updateEntry = (i: number, patch: Partial<AclFieldEntry>) =>
+    setEntries(entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -213,7 +220,8 @@ export default function AclSettings({ formId, onSavingChange, onSaved }: AclSett
             ))}
           </select>
         )}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Structure: how each ACE row is identified and linked to its ACL. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {idField(
             config.aceSource?.idMode,
             config.aceSource?.idCol,
@@ -223,6 +231,10 @@ export default function AclSettings({ formId, onSavingChange, onSaved }: AclSett
             (v) => setAceField("idCol", v)
           )}
           {field(t("acl.settings.parentRef"), colSelect(aceCols, config.aceSource?.parentRefCol, (v) => setAceField("parentRefCol", v), !!aceCatId))}
+        </div>
+
+        {/* Name + action. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           {field(t("acl.fields.name"), colSelect(aceCols, config.aceSource?.nameCol, (v) => setAceField("nameCol", v), !!aceCatId))}
           {field(t("acl.fields.action"), colSelect(aceCols, config.aceSource?.actionCol, (v) => setAceField("actionCol", v), !!aceCatId))}
           {field(
@@ -236,42 +248,71 @@ export default function AclSettings({ formId, onSavingChange, onSaved }: AclSett
               onChange={(e) => setAceField("actionDelimiter", e.target.value || null)}
             />
           )}
-          {field(t("acl.fields.etherType"), colSelect(aceCols, config.aceSource?.etherTypeCol, (v) => setAceField("etherTypeCol", v), !!aceCatId))}
-          {field(t("acl.fields.source"), colSelect(aceCols, config.aceSource?.sourceCol, (v) => setAceField("sourceCol", v), !!aceCatId))}
-          {field(t("acl.fields.destination"), colSelect(aceCols, config.aceSource?.destinationCol, (v) => setAceField("destinationCol", v), !!aceCatId))}
-          {field(t("acl.fields.enabled"), colSelect(aceCols, config.aceSource?.enabledCol, (v) => setAceField("enabledCol", v), !!aceCatId))}
         </div>
 
-        {/* Qualifier columns: each selected column becomes a "label: value" action badge. */}
+        {/* Field entries: add/remove rows mapping a role to one inventory column.
+            The row key is dynamic (one ACE per inventory row); several "source"
+            entries aggregate into the Source cell, etc. */}
         {field(
-          t("acl.settings.qualifierCols"),
+          t("acl.settings.entries"),
           <>
-            <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">{t("acl.settings.qualifierColsHint")}</p>
-            {aceCols.length === 0 ? (
+            <p className="mb-2 text-xs text-slate-400 dark:text-slate-500">{t("acl.settings.entriesHint")}</p>
+            {!aceCatId ? (
               <p className="text-xs text-slate-400 dark:text-slate-500">{t("acl.settings.selectCategory")}</p>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                {aceCols.map((c) => {
-                  const checked = (config.aceSource?.qualifierCols ?? []).includes(c);
-                  return (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => toggleQualifier(c)}
-                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
-                        checked
-                          ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
-                          : "border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      }`}
+              <div className="space-y-2">
+                {entries.map((entry, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <select
+                      className={`${selectClass} sm:w-44`}
+                      value={entry.role}
+                      onChange={(e) => updateEntry(i, { role: e.target.value as AclEntryRole })}
                     >
-                      {c}
+                      {ENTRY_ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {t(`acl.roles.${r}`)}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className={selectClass}
+                      value={entry.column}
+                      onChange={(e) => updateEntry(i, { column: e.target.value })}
+                    >
+                      <option value="">{t("acl.settings.selectColumn")}</option>
+                      {aceCols.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeEntry(i)}
+                      aria-label={t("common.delete")}
+                      className="shrink-0 rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-400 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </button>
-                  );
-                })}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addEntry}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t("acl.settings.addEntry")}
+                </button>
               </div>
             )}
           </>
         )}
+
+        {/* Enabled flag — shown last. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {field(t("acl.fields.enabled"), colSelect(aceCols, config.aceSource?.enabledCol, (v) => setAceField("enabledCol", v), !!aceCatId))}
+        </div>
       </div>
 
     </form>

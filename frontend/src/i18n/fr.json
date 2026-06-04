@@ -4117,7 +4117,9 @@
       "id": "Identifiant",
       "ports": "Ports",
       "vlans": "VLANs",
-      "vni": "VNI (VxLAN)"
+      "vni": "VNI (VxLAN)",
+      "match": "Paramètres de match",
+      "service": "Service"
     },
     "settings": {
       "title": "Mapping de l'inventaire",
@@ -4133,7 +4135,39 @@
       "actionDelimiter": "Délimiteur d'actions",
       "actionDelimiterPlaceholder": "ex. espace ou ,",
       "qualifierCols": "Qualificateurs d'action",
-      "qualifierColsHint": "Colonnes supplémentaires affichées en badges « label : valeur » à côté de l'action (ex. remark-dscp, redirect-next-hop)."
+      "qualifierColsHint": "Colonnes supplémentaires affichées en badges « label : valeur » à côté de l'action (ex. remark-dscp, redirect-next-hop).",
+      "matchParamsHint": "Toute autre colonne de l'ACE est affichée automatiquement en « type : valeur », groupée par couche (Ethernet, IP, IPv6, ARP, Protocole, Policer). Aucun mapping nécessaire.",
+      "displayCols": "Paramètres de match affichés",
+      "displayColsHint": "Colonnes supplémentaires affichées (groupées par couche) dans le détail dépliable. Vide affiche toutes les colonnes restantes.",
+      "sourceCols": "Colonnes Source",
+      "destinationCols": "Colonnes Destination",
+      "serviceCols": "Colonnes Service",
+      "roleColsHint": "Colonnes agrégées dans cette cellule (ex. une IP et une MAC). Vide affiche « tous ».",
+      "serviceColsHint": "Colonnes décrivant le service (ex. port de destination, protocole). Vide affiche « tous ».",
+      "entries": "Entrées de champs",
+      "entriesHint": "Ajoutez une entrée par colonne d'inventaire à afficher, en choisissant son rôle (Source, Destination, Service, Qualificateur d'action, Détail). La clef est dynamique — une règle par ACE. Ajoutez plusieurs entrées Source pour les combiner (ex. IP + MAC).",
+      "addEntry": "Ajouter une entrée"
+    },
+    "details": "Détails",
+    "groups": {
+      "action": "Action",
+      "arp": "ARP",
+      "ethernet": "Ethernet",
+      "ip": "IP",
+      "ipv6": "IPv6",
+      "policer": "Policer",
+      "protocol": "Protocole",
+      "other": "Autres"
+    },
+    "all": "tous",
+    "roles": {
+      "source": "Source",
+      "destination": "Destination",
+      "service": "Service",
+      "qualifier": "Qualificateur d'action",
+      "detail": "Détail",
+      "protocol": "Protocole (L3)",
+      "port": "Port (L3)"
     }
   }
 }
