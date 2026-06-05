@@ -2485,7 +2485,11 @@
     "cliConditionalEmpty": "Nessuna regola condizionale. Il blocco verra sempre visualizzato.",
     "cliConditionalPattern": "Espressione regolare...",
     "cliConditionalShow": "Mostra",
-    "cliConditionalHide": "Nascondi"
+    "cliConditionalHide": "Nascondi",
+    "addAclTable": "ACL table",
+    "aclTable": "ACL / ACE table",
+    "aclTableHint": "Renders the firewall-style ACL/ACE table for the selected node(s), derived from the inventory.",
+    "aclShowDisabled": "Show disabled ACEs"
   },
   "status": {
     "completed": "Completato",
@@ -2964,7 +2968,9 @@
       "qualifier": "Action qualifier",
       "detail": "Detail",
       "protocol": "Protocol (L3)",
-      "port": "Port (L3)"
+      "port": "Port (L3)",
+      "portSrc": "Source port (L3)",
+      "portDst": "Destination port (L3)"
     }
   }
 }

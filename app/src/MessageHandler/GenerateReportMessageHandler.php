@@ -37,6 +37,7 @@ class GenerateReportMessageHandler
         private readonly \App\Service\ReportSchemaSvgRenderer $reportSchemaRenderer,
         private readonly \App\Service\SvgRasterizer $svgRasterizer,
         private readonly NodeTagResolver $tagResolver,
+        private readonly \App\Service\AclExtractor $aclExtractor,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -311,6 +312,51 @@ class GenerateReportMessageHandler
             'sev_info' => '情報', 'sev_low' => '低', 'sev_medium' => '中',
             'sev_high' => '高', 'sev_critical' => '重大',
         ],
+    ];
+
+    /** Column headers for the firewall-style ACL table block (ASCII, EN fallback). */
+    private const ACL_LABELS = [
+        'fr' => [
+            'name' => 'Nom', 'source' => 'Source', 'destination' => 'Destination',
+            'service' => 'Service', 'action' => 'Action', 'enabled' => 'Actif',
+            'default_action' => 'Action par defaut', 'all' => 'tous',
+            'no_data' => 'Aucune ACL disponible.', 'no_aces' => 'Aucune ACE',
+        ],
+        'en' => [
+            'name' => 'Name', 'source' => 'Source', 'destination' => 'Destination',
+            'service' => 'Service', 'action' => 'Action', 'enabled' => 'Enabled',
+            'default_action' => 'Default action', 'all' => 'all',
+            'no_data' => 'No ACL available.', 'no_aces' => 'No ACE',
+        ],
+    ];
+
+    /** Badge palette for the ACL table — [bgRGB, textRGB], mirrors the web UI. */
+    private const ACL_KIND_RGB = [
+        'mac'      => [[243, 232, 255], [126, 34, 206]],
+        'ipv4'     => [[219, 234, 254], [29, 78, 216]],
+        'ipv6'     => [[207, 250, 254], [14, 116, 144]],
+        'port'     => [[254, 243, 199], [180, 83, 9]],
+        'protocol' => [[224, 231, 255], [67, 56, 202]],
+        'any'      => [[241, 245, 249], [100, 116, 139]],
+        'text'     => [[241, 245, 249], [71, 85, 105]],
+    ];
+
+    /** Well-known TCP/UDP port -> service name (22 -> SSH). */
+    private const ACL_PORT_NAMES = [
+        '20' => 'FTP-DATA', '21' => 'FTP', '22' => 'SSH', '23' => 'Telnet', '25' => 'SMTP', '53' => 'DNS',
+        '67' => 'DHCP', '68' => 'DHCP', '69' => 'TFTP', '80' => 'HTTP', '110' => 'POP3', '123' => 'NTP',
+        '143' => 'IMAP', '161' => 'SNMP', '162' => 'SNMP-Trap', '179' => 'BGP', '389' => 'LDAP',
+        '443' => 'HTTPS', '445' => 'SMB', '465' => 'SMTPS', '514' => 'Syslog', '587' => 'SMTP',
+        '636' => 'LDAPS', '993' => 'IMAPS', '995' => 'POP3S', '1812' => 'RADIUS', '1813' => 'RADIUS',
+        '3306' => 'MySQL', '3389' => 'RDP', '5060' => 'SIP', '5432' => 'PostgreSQL', '8080' => 'HTTP-Alt', '8443' => 'HTTPS-Alt',
+    ];
+
+    /** Known protocol keywords (separators stripped before matching). */
+    private const ACL_PROTOCOLS = [
+        'tcp', 'udp', 'icmp', 'icmpv6', 'igmp', 'gre', 'esp', 'ah', 'ospf', 'pim', 'sctp', 'ip', 'ipv6',
+        'arp', 'arprequest', 'arpresponse', 'arpreply',
+        'echorequest', 'echoreply', 'destinationunreachable', 'timeexceeded',
+        'redirect', 'routeradvertisement', 'routersolicitation',
     ];
 
     private const COMPLIANCE_STATUS_RGB = [
@@ -3190,6 +3236,191 @@ class GenerateReportMessageHandler
 
                 $prevType = 'compliance_matrix';
 
+            } elseif ($type === 'acl_table') {
+                $aclNodes = $this->resolveRepeatNodes($block, $forNode, $report);
+                if (empty($aclNodes)) continue;
+
+                $aclConfig = $report?->getContext()?->getAclConfig();
+                $showDisabled = ($block['showDisabled'] ?? true) !== false;
+                $aclFontSize = !empty($block['fontSize']) ? (float) $block['fontSize'] : 6.0;
+                $pageBreak = !empty($block['pageBreakBefore']);
+
+                $reportLocale = $report ? $report->getLocale() : 'en';
+                $al = self::ACL_LABELS[$reportLocale] ?? self::ACL_LABELS['en'];
+
+                $aclTableStyle = $styles['table'] ?? ReportTheme::DEFAULT_STYLES['table'];
+                $aclHeaderBg = $this->hexToRgb($aclTableStyle['headerBg'] ?? '#1e293b');
+                $aclHeaderColor = $this->hexToRgb($aclTableStyle['headerColor'] ?? '#ffffff');
+                $aclBorderColor = $this->hexToRgb($aclTableStyle['borderColor'] ?? '#e2e8f0');
+                $aclAlternate = $aclTableStyle['alternateRows'] ?? true;
+                $aclAlternateBg = $this->hexToRgb($aclTableStyle['alternateBg'] ?? '#f8fafc');
+
+                if ($pageBreak || $firstBlock) {
+                    $pdf->SetMargins($mLeft, $mTop, $mRight);
+                    $pdf->SetAutoPageBreak(true, $mBottom);
+                    $pdf->AddPage();
+                    $firstBlock = false;
+                } else {
+                    $pdf->Ln($pSpaceBefore > 0 ? $pSpaceBefore : 4);
+                }
+
+                $aclContentW = $pdf->getPageWidth() - $mLeft - $mRight;
+                $aclCols = [
+                    ['key' => 'enabled', 'label' => '', 'w' => 5, 'align' => 'C'],
+                    ['key' => 'name', 'label' => $al['name'], 'w' => 26, 'align' => 'L'],
+                    ['key' => 'source', 'label' => $al['source'], 'w' => 22, 'align' => 'L'],
+                    ['key' => 'destination', 'label' => $al['destination'], 'w' => 22, 'align' => 'L'],
+                    ['key' => 'service', 'label' => $al['service'], 'w' => 22, 'align' => 'L'],
+                    ['key' => 'action', 'label' => $al['action'], 'w' => 20, 'align' => 'L'],
+                ];
+                $aclTotalW = array_sum(array_column($aclCols, 'w'));
+                foreach ($aclCols as $ci => $c) {
+                    $aclCols[$ci]['mm'] = $aclContentW * ($c['w'] / $aclTotalW);
+                }
+
+                $pdf->SetDrawColor($aclBorderColor[0], $aclBorderColor[1], $aclBorderColor[2]);
+                $pdf->SetLineWidth(0.2);
+
+                foreach ($aclNodes as $aclNode) {
+                    $acls = $this->aclExtractor->extractForNode($aclNode, $aclConfig);
+
+                    // Per-node title (hostname / name / ip).
+                    $nodeTitle = $aclNode->getHostname() ?: ($aclNode->getName() ?: $aclNode->getIpAddress());
+                    $pdf->SetFont($bodyFont, 'B', $aclFontSize + 2);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    $pdf->MultiCell(0, ($aclFontSize + 2) * 0.3528 + 1, (string) $nodeTitle, 0, 'L');
+                    $pdf->Ln(0.5);
+
+                    if (empty($acls)) {
+                        $pdf->SetFont($bodyFont, 'I', $aclFontSize);
+                        $pdf->MultiCell($aclContentW, 0, $al['no_data'], 1, 'C', false, 1, $mLeft);
+                        $pdf->Ln(2);
+                        continue;
+                    }
+
+                    foreach ($acls as $acl) {
+                        // ACL sub-heading: name, type, default action.
+                        $aclHead = (string) ($acl['name'] ?? $acl['id'] ?? '');
+                        if (!empty($acl['type'])) $aclHead .= '  [' . $acl['type'] . ']';
+                        if (!empty($acl['defaultAction'])) $aclHead .= '  ' . $al['default_action'] . ': ' . $acl['defaultAction'];
+                        $pdf->SetFont($bodyFont, 'B', $aclFontSize + 0.5);
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                        $pdf->MultiCell(0, ($aclFontSize + 0.5) * 0.3528 + 1, $aclHead, 0, 'L');
+
+                        // Header row — restore the theme border colour (icon/dot
+                        // drawing on previous rows changed the current draw colour).
+                        $pdf->SetDrawColor($aclBorderColor[0], $aclBorderColor[1], $aclBorderColor[2]);
+                        $pdf->SetLineWidth(0.2);
+                        $pdf->SetFont($bodyFont, 'B', $aclFontSize);
+                        $pdf->SetFillColor($aclHeaderBg[0], $aclHeaderBg[1], $aclHeaderBg[2]);
+                        $pdf->SetTextColor($aclHeaderColor[0], $aclHeaderColor[1], $aclHeaderColor[2]);
+                        $headerH = $aclFontSize * 0.3528 + 2.5;
+                        $startY = $pdf->GetY();
+                        $startX = $mLeft;
+                        foreach ($aclCols as $c) {
+                            $pdf->MultiCell($c['mm'], $headerH, $c['label'], 1, 'C', true, 0, $startX, $startY, true, 0, false, true, $headerH, 'M');
+                            $startX += $c['mm'];
+                        }
+                        $pdf->SetXY($mLeft, $startY + $headerH);
+
+                        $aces = $acl['aces'] ?? [];
+                        if (!$showDisabled) {
+                            $aces = array_values(array_filter($aces, fn($a) => ($a['enabled'] ?? true) !== false));
+                        }
+
+                        if (empty($aces)) {
+                            $pdf->SetFont($bodyFont, 'I', $aclFontSize);
+                            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                            $pdf->MultiCell($aclContentW, 0, $al['no_aces'], 1, 'C', false, 1, $mLeft);
+                        } else {
+                            $rowI = 0;
+                            foreach ($aces as $ace) {
+                                $disabled = ($ace['enabled'] ?? true) === false;
+                                // Per-cell badge lists (enabled/name are plain text).
+                                $badges = [
+                                    'source' => $this->aclCellBadges($ace['source'] ?? [], $al['all'], 'source'),
+                                    'destination' => $this->aclCellBadges($ace['destination'] ?? [], $al['all'], 'destination'),
+                                    'service' => $this->aclServiceBadges($ace, $al['all']),
+                                    'action' => $this->aclActionBadges($ace),
+                                ];
+
+                                // Row height: tallest of badge cells and text cells.
+                                $rowH = $aclFontSize * 0.3528 + 3;
+                                foreach (['source', 'destination', 'service', 'action'] as $bk) {
+                                    $col = null;
+                                    foreach ($aclCols as $c) { if ($c['key'] === $bk) { $col = $c; break; } }
+                                    if ($col === null) continue;
+                                    $h = $this->aclRenderBadges($pdf, $badges[$bk], 0, 0, $col['mm'], $bodyFont, $aclFontSize, true);
+                                    $rowH = max($rowH, $h);
+                                }
+                                $nameCol = null;
+                                foreach ($aclCols as $c) { if ($c['key'] === 'name') { $nameCol = $c; break; } }
+                                if ($nameCol) {
+                                    $pdf->SetFont($bodyFont, '', $aclFontSize);
+                                    $rowH = max($rowH, $pdf->getStringHeight($nameCol['mm'], (string) ($ace['name'] ?? '')) + 1.5);
+                                }
+
+                                $startY = $pdf->GetY();
+                                if ($startY + $rowH > $pdf->getPageHeight() - $mBottom) {
+                                    $pdf->AddPage();
+                                    $startY = $pdf->GetY();
+                                }
+
+                                $rowBg = ($aclAlternate && ($rowI % 2 === 1)) ? $aclAlternateBg : [255, 255, 255];
+
+                                // 1) Cell backgrounds + borders, in the theme's
+                                // table border colour (reset here since icon/dot
+                                // drawing below changes the current draw colour).
+                                $pdf->SetDrawColor($aclBorderColor[0], $aclBorderColor[1], $aclBorderColor[2]);
+                                $pdf->SetLineWidth(0.2);
+                                $startX = $mLeft;
+                                foreach ($aclCols as $c) {
+                                    $pdf->SetFillColor($rowBg[0], $rowBg[1], $rowBg[2]);
+                                    $pdf->Rect($startX, $startY, $c['mm'], $rowH, 'DF');
+                                    $startX += $c['mm'];
+                                }
+
+                                // 2) Cell contents.
+                                $startX = $mLeft;
+                                foreach ($aclCols as $c) {
+                                    if ($c['key'] === 'enabled') {
+                                        // Font-independent status dot: filled green = enabled, hollow grey = disabled.
+                                        $dotR = 0.9;
+                                        $dotCx = $startX + $c['mm'] / 2;
+                                        $dotCy = $startY + $rowH / 2;
+                                        if ($disabled) {
+                                            $pdf->SetDrawColor(148, 163, 184);
+                                            $pdf->SetLineWidth(0.15);
+                                            $pdf->Circle($dotCx, $dotCy, $dotR, 0, 360, 'D', ['width' => 0.15, 'color' => [148, 163, 184]]);
+                                        } else {
+                                            $pdf->SetFillColor(22, 163, 74);
+                                            $pdf->Circle($dotCx, $dotCy, $dotR, 0, 360, 'F', [], [22, 163, 74]);
+                                        }
+                                    } elseif ($c['key'] === 'name') {
+                                        $pdf->SetFont($bodyFont, '', $aclFontSize);
+                                        $pdf->SetTextColor($disabled ? 148 : $bodyRgb[0], $disabled ? 163 : $bodyRgb[1], $disabled ? 184 : $bodyRgb[2]);
+                                        $pdf->SetXY($startX + 0.6, $startY);
+                                        $pdf->MultiCell($c['mm'] - 1.2, $rowH, (string) ($ace['name'] ?? ''), 0, 'L', false, 0, $startX + 0.6, $startY, true, 0, false, true, $rowH, 'M');
+                                    } else {
+                                        $this->aclRenderBadges($pdf, $badges[$c['key']], $startX, $startY, $c['mm'], $bodyFont, $aclFontSize, false, $rowH);
+                                    }
+                                    $startX += $c['mm'];
+                                }
+                                $pdf->SetXY($mLeft, $startY + $rowH);
+                                $rowI++;
+                            }
+                        }
+                        $pdf->Ln(2);
+                    }
+                    $pdf->Ln(1);
+                }
+
+                if ($pSpaceAfter > 0) {
+                    $pdf->Ln($pSpaceAfter);
+                }
+
+                $prevType = 'acl_table';
+
             } elseif ($type === 'rule_non_compliant' || $type === 'rule_nodes_table') {
                 $policyId = $block['policyId'] ?? null;
                 $ruleId = $block['ruleId'] ?? null;
@@ -5378,6 +5609,393 @@ class GenerateReportMessageHandler
         }
 
         return $block;
+    }
+
+    /**
+     * Join the {label,value} parts of an ACL firewall cell, or the "all"
+     * fallback when empty. Used for the source / destination columns.
+     *
+     * @param array<int, array{label?: string, value?: string}> $parts
+     */
+    /**
+     * Badges for a source/destination ACL cell. Returns an "any" badge with the
+     * "all" label when empty.
+     *
+     * @param array<int, array{label?: string, value?: string}> $parts
+     * @return array<int, array{text: string, kind: string}>
+     */
+    private function aclCellBadges(array $parts, string $allLabel, string $role): array
+    {
+        $out = [];
+        foreach ($parts as $p) {
+            $v = is_array($p) ? trim((string) ($p['value'] ?? '')) : '';
+            if ($v === '') continue;
+            $kind = $this->aclClassify($v, $role);
+            $out[] = ['text' => $this->aclBadgeText($v, $kind), 'kind' => $kind];
+        }
+        return $out === [] ? [['text' => $allLabel, 'kind' => 'any']] : $out;
+    }
+
+    /**
+     * Service badges, combining protocol + source/destination ports
+     * (TCP/22, TCP src:1024 -> dst:443) plus standalone L2 services.
+     *
+     * @return array<int, array{text: string, kind: string}>
+     */
+    private function aclServiceBadges(array $ace, string $allLabel): array
+    {
+        $protocol = $ace['protocol'] ?? [];
+        $portDst = !empty($ace['portDst']) ? $ace['portDst'] : ($ace['port'] ?? []);
+        $portSrc = $ace['portSrc'] ?? [];
+        $rows = max(count($protocol), count($portSrc), count($portDst));
+
+        $out = [];
+        for ($i = 0; $i < $rows; $i++) {
+            $proto = isset($protocol[$i]['value']) ? strtoupper(trim((string) $protocol[$i]['value'])) : '';
+            $src = isset($portSrc[$i]['value']) ? trim((string) $portSrc[$i]['value']) : '';
+            $dst = isset($portDst[$i]['value']) ? trim((string) $portDst[$i]['value']) : '';
+            if ($proto === '' && $src === '' && $dst === '') continue;
+
+            if ($src !== '' && $dst !== '') {
+                $text = trim(($proto !== '' ? $proto . ' ' : '') . 'src:' . $this->aclPortText($src) . ' -> dst:' . $this->aclPortText($dst));
+            } elseif ($src !== '') {
+                $text = trim(($proto !== '' ? $proto . ' ' : '') . 'src:' . $this->aclPortText($src));
+            } elseif ($dst !== '') {
+                $text = $proto !== '' ? $proto . '/' . $this->aclPortText($dst) : $this->aclPortText($dst);
+            } else {
+                $text = $proto;
+            }
+            $out[] = ['text' => $text, 'kind' => 'port'];
+        }
+        foreach (($ace['service'] ?? []) as $s) {
+            $v = is_array($s) ? trim((string) ($s['value'] ?? '')) : '';
+            if ($v === '') continue;
+            $kind = $this->aclClassify($v, 'service');
+            $out[] = ['text' => $this->aclBadgeText($v, $kind), 'kind' => $kind];
+        }
+        return $out === [] ? [['text' => $allLabel, 'kind' => 'any']] : $out;
+    }
+
+    /**
+     * Action badges: the primary action (colour by permit/deny) plus qualifiers.
+     *
+     * @return array<int, array{text: string, kind: string, action?: string}>
+     */
+    private function aclActionBadges(array $ace): array
+    {
+        $out = [];
+        if (!empty($ace['action'])) {
+            $out[] = ['text' => (string) $ace['action'], 'kind' => 'action', 'action' => (string) $ace['action']];
+        }
+        foreach (($ace['actions'] ?? []) as $q) {
+            if (!is_array($q)) continue;
+            $label = $q['label'] ?? null;
+            $value = $q['value'] ?? null;
+            if ($label === null || $label === '') continue;
+            // Qualifiers (count, remark-dscp, ...) render as neutral action badges
+            // with a small dot icon.
+            $out[] = [
+                'text' => $value !== null && $value !== '' ? $label . ': ' . $value : (string) $label,
+                'kind' => 'action',
+                'action' => (string) $label,
+            ];
+        }
+        return $out;
+    }
+
+    /** Classify a raw value into a badge kind (mac/ipv4/ipv6/port/protocol/any/text). */
+    private function aclClassify(string $value, string $role): string
+    {
+        $v = strtolower(trim($value));
+        if (in_array($v, ['any', 'all', '*', '0.0.0.0/0', '::/0'], true)) return 'any';
+        if (preg_match('/^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}/i', $v) || preg_match('/^([0-9a-f]{4}\.){2}[0-9a-f]{4}/i', $v)) return 'mac';
+        if (preg_match('/^\d{1,3}(\.\d{1,3}){3}/', $v)) return 'ipv4';
+        if ($role === 'service') {
+            if (preg_match('/^\d{1,5}/', $v)) return 'port';
+            if ($this->aclIsProtocol($v)) return 'protocol';
+        }
+        if (preg_match('/^[0-9a-f:]+:[0-9a-f:]*/i', $v) && str_contains($v, ':')) return 'ipv6';
+        if ($this->aclIsProtocol($v)) return 'protocol';
+        if (preg_match('/^\d{1,5}$/', $v)) return 'port';
+        return 'text';
+    }
+
+    private function aclIsProtocol(string $v): bool
+    {
+        return in_array(preg_replace('/[^a-z0-9]/i', '', strtolower($v)), self::ACL_PROTOCOLS, true);
+    }
+
+    /** Enriched badge text: known port names, CIDR for masked IPv4, MAC + mask. */
+    private function aclBadgeText(string $value, string $kind): string
+    {
+        $v = trim($value);
+        if ($kind === 'port') return $this->aclPortText($v);
+        if ($kind === 'ipv4') {
+            if (preg_match('/^(\d{1,3}(?:\.\d{1,3}){3})[\s\/]+(\d{1,3}(?:\.\d{1,3}){3})$/', $v, $m)) {
+                $cidr = $this->aclMaskToCidr($m[2]);
+                return $cidr !== null ? $m[1] . '/' . $cidr : $m[1] . ' ' . $m[2];
+            }
+        }
+        return $v;
+    }
+
+    /** Port text: known service name (22 -> "22 SSH") or masked range (20480 0xfc00 -> 20480-21503). */
+    private function aclPortText(string $raw): string
+    {
+        $v = trim($raw);
+        if (preg_match('/^(\d{1,5})[\s\/]+(0x[0-9a-f]+|\d{1,5})$/i', $v, $m)) {
+            $base = (int) $m[1];
+            $mask = str_starts_with(strtolower($m[2]), '0x') ? hexdec($m[2]) : (int) $m[2];
+            if ($base <= 0xffff && $mask <= 0xffff) {
+                $free = (~$mask) & 0xffff;
+                if ($free === 0) return (string) $base;
+                if ((($free + 1) & $free) === 0) {
+                    $lo = $base & $mask & 0xffff;
+                    return $lo . '-' . ($lo + $free);
+                }
+            }
+            return $m[1] . ' ' . $m[2];
+        }
+        $name = self::ACL_PORT_NAMES[$v] ?? null;
+        return $name ? $v . ' ' . $name : $v;
+    }
+
+    /** IPv4 wildcard/netmask -> CIDR prefix length, or null for non-contiguous. */
+    private function aclMaskToCidr(string $mask): ?int
+    {
+        $o = array_map('intval', explode('.', $mask));
+        if (count($o) !== 4) return null;
+        foreach ($o as $x) { if ($x < 0 || $x > 255) return null; }
+        $val = ($o[0] << 24) | ($o[1] << 16) | ($o[2] << 8) | $o[3];
+        $bits = 0;
+        for ($i = 0; $i < 32; $i++) { if (($val >> $i) & 1) $bits++; }
+        $prefix = (($val >> 31) & 1) ? $bits : 32 - $bits;
+        return ($prefix >= 0 && $prefix <= 32) ? $prefix : null;
+    }
+
+    /**
+     * Render a stack of coloured badges flowing within a fixed-width cell at
+     * (x, y). Returns the total height consumed. When $measureOnly is true,
+     * nothing is drawn — used to pre-compute the row height.
+     *
+     * @param array<int, array{text: string, kind: string, action?: string}> $badges
+     */
+    private function aclRenderBadges(
+        TCPDF $pdf,
+        array $badges,
+        float $x,
+        float $y,
+        float $cellW,
+        string $font,
+        float $fontSize,
+        bool $measureOnly = false,
+        float $cellH = 0.0,
+    ): float {
+        // Badge text is rendered smaller than the table font for a compact look.
+        $badgeFs = max(4.0, $fontSize - 1.5);
+        $padL = 1.0;          // left padding inside a badge
+        $padR = 1.3;          // right padding (slightly larger for breathing room)
+        $padY = 0.5;          // vertical padding inside a badge
+        $gap = 0.6;           // gap between badges
+        $iconGap = 0.15;      // gap between icon and text
+        // GetStringWidth slightly under-measures the rendered font, so pad the
+        // measured text width a touch to keep clear space before the right edge.
+        $textSlack = 0.4;
+        $lineH = $badgeFs * 0.3528 + 2 * $padY;
+        $iconSize = $lineH - 2 * $padY;  // square icon, fits the badge height
+        $marginX = 0.7;       // inset from the cell's left/right edges
+
+        // Cell uses its own padding, but badge text is drawn with raw Text() so
+        // it is never shifted by TCPDF's internal cell margin (which caused the
+        // earlier right-overflow).
+        $pdf->SetFont($font, '', $badgeFs);
+
+        $maxW = $cellW - 2 * $marginX;
+
+        // First pass: lay out badges into rows so we know the total height and
+        // can centre the whole block vertically within the cell.
+        $rows = [];                   // each row: list of [b, text, icon, iconW, bw]
+        $cur = [];
+        $curW = 0.0;
+        foreach ($badges as $b) {
+            $icon = $this->aclIconFor($b);
+            $iconW = $icon !== null ? $iconSize + $iconGap : 0.0;
+            $textMaxW = $maxW - $iconW - $padL - $padR - $textSlack;
+            $text = $this->aclFitText($pdf, (string) $b['text'], max(1.0, $textMaxW));
+            $bw = $iconW + $pdf->GetStringWidth($text) + $textSlack + $padL + $padR;
+            if ($bw > $maxW) $bw = $maxW;
+
+            if ($cur !== [] && $curW + $bw > $maxW + 0.01) {
+                $rows[] = $cur;
+                $cur = [];
+                $curW = 0.0;
+            }
+            $cur[] = ['b' => $b, 'text' => $text, 'icon' => $icon, 'iconW' => $iconW, 'bw' => $bw];
+            $curW += $bw + $gap;
+        }
+        if ($cur !== []) $rows[] = $cur;
+
+        $blockH = count($rows) * $lineH + max(0, count($rows) - 1) * $gap;
+        $totalH = $blockH + 2 * 0.6;
+        if ($measureOnly) {
+            return $totalH;
+        }
+
+        // Vertically centre the badge block within the cell (fallback to top
+        // padding when the cell height is unknown).
+        $startY = $cellH > 0 ? $y + max(0.6, ($cellH - $blockH) / 2) : $y + 0.6;
+
+        $curY = $startY;
+        foreach ($rows as $row) {
+            $curX = $x + $marginX;
+            foreach ($row as $item) {
+                $b = $item['b'];
+                $text = $item['text'];
+                $icon = $item['icon'];
+                $iconW = $item['iconW'];
+                $bw = $item['bw'];
+
+                [$bg, $fg] = $this->aclBadgeColors($b);
+                $pdf->SetFillColor($bg[0], $bg[1], $bg[2]);
+                $pdf->SetTextColor($fg[0], $fg[1], $fg[2]);
+                $pdf->RoundedRect($curX, $curY, $bw, $lineH, 0.4, '1111', 'F');
+                if ($icon !== null) {
+                    $this->aclDrawIcon($pdf, $icon, $curX + $padL, $curY + $padY, $iconSize, $fg);
+                }
+                // Raw text, vertically centred, no cell margin -> no right overflow.
+                $textY = $curY + ($lineH - $badgeFs * 0.3528) / 2;
+                $pdf->Text($curX + $padL + $iconW, $textY, $text);
+
+                $curX += $bw + $gap;
+            }
+            $curY += $lineH + $gap;
+        }
+
+        return $totalH;
+    }
+
+    /** Truncate text with a trailing ellipsis so it fits within $maxW mm. */
+    private function aclFitText(TCPDF $pdf, string $text, float $maxW): string
+    {
+        if ($pdf->GetStringWidth($text) <= $maxW) return $text;
+        $ell = "\u{2026}";
+        $out = $text;
+        while ($out !== '' && $pdf->GetStringWidth($out . $ell) > $maxW) {
+            $out = mb_substr($out, 0, mb_strlen($out) - 1);
+        }
+        return $out === '' ? $ell : $out . $ell;
+    }
+
+    /**
+     * Icon glyph name for a badge, or null when it has no icon. Actions map to
+     * permit/deny/qualifier glyphs based on the keyword.
+     *
+     * @param array{text?: string, kind?: string, action?: string} $b
+     */
+    private function aclIconFor(array $b): ?string
+    {
+        $kind = $b['kind'] ?? 'text';
+        if ($kind === 'action') {
+            $a = strtolower((string) ($b['action'] ?? $b['text'] ?? ''));
+            if (str_contains($a, 'permit') || str_contains($a, 'allow') || str_contains($a, 'accept')) return 'check';
+            if (str_contains($a, 'deny') || str_contains($a, 'drop') || str_contains($a, 'block') || str_contains($a, 'reject')) return 'ban';
+            return 'dot';
+        }
+        return match ($kind) {
+            'mac' => 'chip',
+            'ipv4' => 'network',
+            'ipv6' => 'globe',
+            'port' => 'plug',
+            'protocol' => 'layers',
+            'any' => 'asterisk',
+            default => null,
+        };
+    }
+
+    /**
+     * Draw a tiny vector icon (font-independent) inside a badge. Colour matches
+     * the badge text. Icons are simplified glyphs evoking the lucide set used
+     * in the web UI (chip/network/globe/plug/layers).
+     *
+     * @param array{0:int,1:int,2:int} $rgb
+     */
+    private function aclDrawIcon(TCPDF $pdf, string $icon, float $x, float $y, float $s, array $rgb): void
+    {
+        $line = ['width' => 0.12, 'color' => $rgb];
+        $cx = $x + $s / 2;
+        $cy = $y + $s / 2;
+        $pdf->SetDrawColor($rgb[0], $rgb[1], $rgb[2]);
+        $pdf->SetLineWidth(0.12);
+
+        switch ($icon) {
+            case 'network': // a node linked to two below
+                $pdf->Circle($cx, $y + $s * 0.22, $s * 0.16, 0, 360, 'D', $line);
+                $pdf->Circle($x + $s * 0.25, $y + $s * 0.82, $s * 0.14, 0, 360, 'D', $line);
+                $pdf->Circle($x + $s * 0.75, $y + $s * 0.82, $s * 0.14, 0, 360, 'D', $line);
+                $pdf->Line($cx, $y + $s * 0.38, $x + $s * 0.25, $y + $s * 0.68, $line);
+                $pdf->Line($cx, $y + $s * 0.38, $x + $s * 0.75, $y + $s * 0.68, $line);
+                break;
+            case 'globe': // circle + meridians
+                $pdf->Circle($cx, $cy, $s * 0.40, 0, 360, 'D', $line);
+                $pdf->Ellipse($cx, $cy, $s * 0.18, $s * 0.40, 0, 0, 360, 'D', $line);
+                $pdf->Line($x + $s * 0.10, $cy, $x + $s * 0.90, $cy, $line);
+                break;
+            case 'chip': // square + pins (MAC)
+                $pdf->Rect($x + $s * 0.28, $y + $s * 0.28, $s * 0.44, $s * 0.44, 'D', ['all' => $line]);
+                foreach ([0.40, 0.60] as $f) {
+                    $pdf->Line($x + $s * $f, $y + $s * 0.12, $x + $s * $f, $y + $s * 0.28, $line);
+                    $pdf->Line($x + $s * $f, $y + $s * 0.72, $x + $s * $f, $y + $s * 0.88, $line);
+                    $pdf->Line($x + $s * 0.12, $y + $s * $f, $x + $s * 0.28, $y + $s * $f, $line);
+                    $pdf->Line($x + $s * 0.72, $y + $s * $f, $x + $s * 0.88, $y + $s * $f, $line);
+                }
+                break;
+            case 'plug': // simple plug/port
+                $pdf->Rect($x + $s * 0.30, $y + $s * 0.20, $s * 0.40, $s * 0.40, 'D', ['all' => $line]);
+                $pdf->Line($x + $s * 0.40, $y + $s * 0.10, $x + $s * 0.40, $y + $s * 0.20, $line);
+                $pdf->Line($x + $s * 0.60, $y + $s * 0.10, $x + $s * 0.60, $y + $s * 0.20, $line);
+                $pdf->Line($cx, $y + $s * 0.60, $cx, $y + $s * 0.90, $line);
+                break;
+            case 'layers': // stacked diamonds (protocol)
+                $top = $y + $s * 0.18; $mid = $y + $s * 0.50; $bot = $y + $s * 0.74;
+                $lft = $x + $s * 0.12; $rgt = $x + $s * 0.88;
+                $pdf->PolyLine([$cx, $top, $rgt, $mid, $cx, $y + $s * 0.82, $lft, $mid, $cx, $top], 'D', $line);
+                $pdf->Line($lft, $bot, $cx, $y + $s * 0.96, $line);
+                $pdf->Line($rgt, $bot, $cx, $y + $s * 0.96, $line);
+                break;
+            case 'check': // permit — circle + check mark
+                $pdf->Circle($cx, $cy, $s * 0.42, 0, 360, 'D', $line);
+                $pdf->PolyLine([$x + $s * 0.30, $y + $s * 0.52, $x + $s * 0.45, $y + $s * 0.66, $x + $s * 0.72, $y + $s * 0.34], 'D', $line);
+                break;
+            case 'ban': // deny — circle + slash
+                $pdf->Circle($cx, $cy, $s * 0.42, 0, 360, 'D', $line);
+                $pdf->Line($x + $s * 0.24, $y + $s * 0.24, $x + $s * 0.76, $y + $s * 0.76, $line);
+                break;
+            case 'dot': // qualifier (e.g. count) — small filled dot
+                $pdf->SetFillColor($rgb[0], $rgb[1], $rgb[2]);
+                $pdf->Circle($cx, $cy, $s * 0.18, 0, 360, 'F', [], $rgb);
+                break;
+            case 'asterisk': // any / all — asterisk strokes
+                $pdf->Line($cx, $y + $s * 0.18, $cx, $y + $s * 0.82, $line);
+                $pdf->Line($x + $s * 0.22, $y + $s * 0.32, $x + $s * 0.78, $y + $s * 0.68, $line);
+                $pdf->Line($x + $s * 0.22, $y + $s * 0.68, $x + $s * 0.78, $y + $s * 0.32, $line);
+                break;
+        }
+    }
+
+    /** Resolve a badge's [bg, text] RGB, with permit/deny colours for actions. */
+    private function aclBadgeColors(array $b): array
+    {
+        if (($b['kind'] ?? '') === 'action') {
+            $a = strtolower((string) ($b['action'] ?? $b['text'] ?? ''));
+            if (str_contains($a, 'permit') || str_contains($a, 'allow') || str_contains($a, 'accept')) {
+                return [[220, 252, 231], [21, 128, 61]];
+            }
+            if (str_contains($a, 'deny') || str_contains($a, 'drop') || str_contains($a, 'block') || str_contains($a, 'reject')) {
+                return [[254, 226, 226], [185, 28, 28]];
+            }
+            return self::ACL_KIND_RGB['text'];
+        }
+        return self::ACL_KIND_RGB[$b['kind']] ?? self::ACL_KIND_RGB['text'];
     }
 
     /**

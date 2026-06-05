@@ -28,9 +28,13 @@ interface Ace {
   destination: AceField[];
   /** L2 / standalone services (e.g. ARP-Request). */
   service: AceField[];
-  /** L3 service split across two columns: protocol (tcp/udp) + port. */
+  /** L3 service split across columns: protocol (tcp/udp) + ports. */
   protocol: AceField[];
+  /** Generic / destination port (back-compat: treated as destination). */
   port: AceField[];
+  /** Explicit source / destination ports. */
+  portSrc: AceField[];
+  portDst: AceField[];
   /** Remaining match parameters for the expandable detail. */
   fields: AceField[];
 }
@@ -105,6 +109,8 @@ const RE_IPV4_MASKED = new RegExp(`^(${IPV4_BODY})[\\s/]+(${IPV4_BODY})$`);
 const RE_MAC_MASKED = new RegExp(`^(${MAC_BODY})[\\s/]+(0x[0-9a-f]+|${MAC_BODY})$`, "i");
 const RE_IPV6 = /^[0-9a-f:]+:[0-9a-f:]*(\/\d{1,3})?$/i;
 const RE_PORT = /^\d{1,5}$/;
+// Port value optionally followed by a match mask: "20480 0xfc00" or "80 65535".
+const RE_PORT_MASKED = /^(\d{1,5})[\s/]+(0x[0-9a-f]+|\d{1,5})$/i;
 
 /** Convert an IPv4 wildcard or netmask to a CIDR prefix length, or null. */
 function maskToCidr(mask: string): number | null {
@@ -127,6 +133,9 @@ const KNOWN_PROTOCOLS = new Set([
   "tcp", "udp", "icmp", "icmpv6", "igmp", "gre", "esp", "ah", "ospf", "pim", "sctp", "ip", "ipv6",
   // ARP and its L2 operations (compared with separators stripped).
   "arp", "arprequest", "arpresponse", "arpreply",
+  // ICMP message types.
+  "echorequest", "echoreply", "destinationunreachable", "timeexceeded",
+  "redirect", "routeradvertisement", "routersolicitation",
 ]);
 
 /** Match a protocol keyword, tolerant to case and separators (ARP-Request -> arprequest). */
@@ -153,7 +162,7 @@ function classifyValue(value: string, role: "source" | "destination" | "service"
   if (RE_MAC.test(v) || RE_MAC_MASKED.test(v)) return "mac";
   if (RE_IPV4.test(v) || RE_IPV4_MASKED.test(v)) return "ipv4";
   if (role === "service") {
-    if (RE_PORT.test(v)) return "port";
+    if (RE_PORT.test(v) || RE_PORT_MASKED.test(v)) return "port";
     if (isKnownProtocol(v)) return "protocol";
   }
   if (RE_IPV6.test(v) && v.includes(":")) return "ipv6";
@@ -188,8 +197,7 @@ const KIND_CLASS: Record<ValueKind, string> = {
 function badgeText(value: string, kind: ValueKind): string {
   const v = value.trim();
   if (kind === "port") {
-    const name = PORT_NAMES[v];
-    return name ? `${v} · ${name}` : v;
+    return portText(v);
   }
   if (kind === "ipv4") {
     const m = v.match(RE_IPV4_MASKED);
@@ -394,52 +402,88 @@ function FwCell({
   );
 }
 
-/** Short service summary (proto/port pairs + L2 services) for matrix cells/tooltips. */
+/** Short service summary (proto/port labels + L2 services) for matrix cells/tooltips. */
 function serviceSummary(ace: Ace): string[] {
-  const out: string[] = [];
-  const max = Math.max(ace.protocol.length, ace.port.length);
-  for (let i = 0; i < max; i++) {
-    const label = protoPortLabel(ace.protocol[i]?.value, ace.port[i]?.value);
-    if (label) out.push(label);
-  }
+  const out = serviceLabels(ace).map((s) => s.text);
   for (const s of ace.service) out.push(s.value);
   return out;
 }
 
-/** Combine an L3 protocol with a port into "TCP/22 · SSH" (port name when known). */
-function protoPortLabel(proto: string | undefined, port: string | undefined): string | null {
-  const p = proto?.trim();
-  const n = port?.trim();
-  if (!p && !n) return null;
-  const upper = p ? p.toUpperCase() : "";
-  if (p && n) {
-    const name = PORT_NAMES[n];
-    return name ? `${upper}/${n} · ${name}` : `${upper}/${n}`;
+/**
+ * Human label for a port value. A bare port shows its service name when known
+ * (22 -> "22 · SSH"). A masked port — where the mask's 1-bits are the
+ * significant ones — collapses to a range ("20480 0xfc00" -> "20480-21503").
+ * Falls back to "port mask" if the free bits are not low-contiguous.
+ */
+function portText(raw: string): string {
+  const v = raw.trim();
+  const m = v.match(RE_PORT_MASKED);
+  if (m) {
+    const base = Number(m[1]);
+    const mask = m[2].toLowerCase().startsWith("0x") ? parseInt(m[2], 16) : Number(m[2]);
+    if (Number.isFinite(base) && Number.isFinite(mask) && base <= 0xffff && mask <= 0xffff) {
+      const free = (~mask) & 0xffff; // bits NOT matched -> they may vary
+      // Only collapse to a range when the free bits are a low-contiguous block.
+      if (free === 0) return String(base);
+      if (((free + 1) & free) === 0) {
+        const lo = base & mask & 0xffff;
+        const hi = lo + free;
+        return `${lo}-${hi}`;
+      }
+    }
+    return `${m[1]} ${m[2]}`;
   }
-  if (p) return upper;
-  const name = n ? PORT_NAMES[n] : undefined;
-  return name ? `${n} · ${name}` : (n ?? null);
+  const name = PORT_NAMES[v];
+  return name ? `${v} · ${name}` : v;
+}
+
+/**
+ * Build the L3 service labels for an ACE, combining protocol with source and/or
+ * destination ports. Each row aligns positionally across the protocol/port lists.
+ *   TCP + dstPort 8443        -> "TCP/8443 · HTTPS-Alt"
+ *   TCP + srcPort 1024 + dst  -> "TCP src:1024 → dst:8443 · HTTPS-Alt"
+ */
+function serviceLabels(ace: Ace): { text: string; title: string }[] {
+  // Destination port falls back to the generic "port" role for back-compat.
+  const dstPorts = ace.portDst.length ? ace.portDst : ace.port;
+  const srcPorts = ace.portSrc;
+  const rows = Math.max(ace.protocol.length, srcPorts.length, dstPorts.length);
+  const out: { text: string; title: string }[] = [];
+
+  for (let i = 0; i < rows; i++) {
+    const proto = ace.protocol[i]?.value?.trim();
+    const src = srcPorts[i]?.value?.trim();
+    const dst = dstPorts[i]?.value?.trim();
+    if (!proto && !src && !dst) continue;
+
+    const upper = proto ? proto.toUpperCase() : "";
+    let text: string;
+    if (src && dst) {
+      text = `${upper ? upper + " " : ""}src:${portText(src)} → dst:${portText(dst)}`;
+    } else if (src) {
+      text = `${upper ? upper + " " : ""}src:${portText(src)}`;
+    } else if (dst) {
+      text = upper ? `${upper}/${portText(dst)}` : portText(dst);
+    } else {
+      text = upper;
+    }
+
+    const title = [
+      ace.protocol[i] && `${ace.protocol[i].label}: ${ace.protocol[i].value}`,
+      srcPorts[i] && `${srcPorts[i].label}: ${srcPorts[i].value}`,
+      dstPorts[i] && `${dstPorts[i].label}: ${dstPorts[i].value}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    out.push({ text, title });
+  }
+  return out;
 }
 
 /** Service cell: combined L3 protocol/port badge plus any standalone L2 services. */
 function ServiceCell({ ace, t }: { ace: Ace; t: (k: string) => string }) {
-  // Pair protocol entries with port entries positionally; surface leftovers too.
-  const protos = ace.protocol;
-  const ports = ace.port;
-  const pairs: { text: string; title: string }[] = [];
-  const max = Math.max(protos.length, ports.length);
-  for (let i = 0; i < max; i++) {
-    const proto = protos[i]?.value;
-    const port = ports[i]?.value;
-    const text = protoPortLabel(proto, port);
-    if (text) {
-      const title = [protos[i] && `${protos[i].label}: ${protos[i].value}`, ports[i] && `${ports[i].label}: ${ports[i].value}`]
-        .filter(Boolean)
-        .join(" · ");
-      pairs.push({ text, title });
-    }
-  }
-
+  const pairs = serviceLabels(ace);
   const hasL2 = ace.service.length > 0;
   if (pairs.length === 0 && !hasL2) {
     return (
@@ -491,13 +535,12 @@ function AclTableCard({ acl, t }: { acl: Acl; t: (k: string) => string }) {
         <div className="overflow-x-auto">
           <table className="w-full table-fixed">
             <colgroup>
-              <col className="w-[4%]" />
-              <col className="w-[20%]" />
-              <col className="w-[19%]" />
-              <col className="w-[19%]" />
-              <col className="w-[16%]" />
-              <col className="w-[16%]" />
-              <col className="w-[6%]" />
+              <col className="w-[3%]" />
+              <col className="w-[23%]" />
+              <col className="w-[18%]" />
+              <col className="w-[18%]" />
+              <col className="w-[17%]" />
+              <col className="w-[21%]" />
             </colgroup>
             <thead className="bg-slate-50 dark:bg-slate-800/50">
               <tr>
@@ -507,7 +550,6 @@ function AclTableCard({ acl, t }: { acl: Acl; t: (k: string) => string }) {
                 <th className={th}>{t("acl.fields.destination")}</th>
                 <th className={th}>{t("acl.fields.service")}</th>
                 <th className={th}>{t("acl.fields.action")}</th>
-                <th className={th}>{t("acl.fields.enabled")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -521,14 +563,28 @@ function AclTableCard({ acl, t }: { acl: Acl; t: (k: string) => string }) {
                       className={`${ace.enabled ? "" : "opacity-50"} ${hasDetail ? "cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40" : ""}`}
                       onClick={hasDetail ? () => toggle(i) : undefined}
                     >
-                      <td className={`${td} text-center`}>
-                        {hasDetail && (
-                          <ChevronRight
-                            className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? "rotate-90" : ""}`}
-                          />
+                      <td className={`${td} text-center`} title={ace.enabled ? t("acl.fields.enabled") : t("acl.disabled")}>
+                        {ace.enabled ? (
+                          <span className="text-green-600 dark:text-green-400">●</span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600">●</span>
                         )}
                       </td>
-                      <td className={`${td} font-medium text-slate-900 dark:text-slate-100`}>{ace.name}</td>
+                      <td className={`${td} font-medium text-slate-900 dark:text-slate-100`}>
+                        <span className="flex items-center gap-1">
+                          <ChevronRight
+                            className={`h-4 w-4 shrink-0 transition-transform ${
+                              hasDetail ? "text-slate-400" : "invisible"
+                            } ${isOpen ? "rotate-90" : ""}`}
+                          />
+                          <span>
+                            {ace.name}
+                            {ace.id && ace.id !== ace.name && (
+                              <span className="ml-1.5 font-normal text-xs text-slate-400 dark:text-slate-500">#{ace.id}</span>
+                            )}
+                          </span>
+                        </span>
+                      </td>
                       <td className={td}><FwCell parts={ace.source} role="source" t={t} /></td>
                       <td className={td}><FwCell parts={ace.destination} role="destination" t={t} /></td>
                       <td className={td}><ServiceCell ace={ace} t={t} /></td>
@@ -549,18 +605,11 @@ function AclTableCard({ acl, t }: { acl: Acl; t: (k: string) => string }) {
                           ))}
                         </div>
                       </td>
-                      <td className={td}>
-                        {ace.enabled ? (
-                          <span className="text-green-600 dark:text-green-400">●</span>
-                        ) : (
-                          <span className="text-slate-400">{t("acl.disabled")}</span>
-                        )}
-                      </td>
                     </tr>
                     {isOpen && hasDetail && (
                       <tr>
                         <td />
-                        <td colSpan={6} className="px-3 pb-4 pt-1">
+                        <td colSpan={5} className="px-3 pb-4 pt-1">
                           <AceDetail groups={groups} t={t} />
                         </td>
                       </tr>

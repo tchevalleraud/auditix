@@ -2485,7 +2485,11 @@
     "cliConditionalEmpty": "条件付きルールなし。ブロックは常に表示されます。",
     "cliConditionalPattern": "正規表現...",
     "cliConditionalShow": "表示",
-    "cliConditionalHide": "非表示"
+    "cliConditionalHide": "非表示",
+    "addAclTable": "ACL table",
+    "aclTable": "ACL / ACE table",
+    "aclTableHint": "Renders the firewall-style ACL/ACE table for the selected node(s), derived from the inventory.",
+    "aclShowDisabled": "Show disabled ACEs"
   },
   "status": {
     "completed": "完了",
@@ -2964,7 +2968,9 @@
       "qualifier": "Action qualifier",
       "detail": "Detail",
       "protocol": "Protocol (L3)",
-      "port": "Port (L3)"
+      "port": "Port (L3)",
+      "portSrc": "Source port (L3)",
+      "portDst": "Destination port (L3)"
     }
   }
 }

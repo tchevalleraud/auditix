@@ -3507,7 +3507,11 @@
     "condPickCategory": "Selectionnez une categorie",
     "condEntryAny": "Toute clef",
     "inheritOnHint": "Herite du scope du conditionnel parent (cliquer pour ne plus heriter)",
-    "inheritOffHint": "N'herite pas (cliquer pour reactiver l'heritage)"
+    "inheritOffHint": "N'herite pas (cliquer pour reactiver l'heritage)",
+    "addAclTable": "Tableau ACL",
+    "aclTable": "Tableau ACL / ACE",
+    "aclTableHint": "Affiche le tableau ACL/ACE de type pare-feu pour le(s) nœud(s) sélectionné(s), dérivé de l'inventaire.",
+    "aclShowDisabled": "Afficher les ACE désactivées"
   },
   "systemUpdates": {
     "title": "Mises a jour",
@@ -4167,7 +4171,9 @@
       "qualifier": "Qualificateur d'action",
       "detail": "Détail",
       "protocol": "Protocole (L3)",
-      "port": "Port (L3)"
+      "port": "Port (L3)",
+      "portSrc": "Port source (L3)",
+      "portDst": "Port destination (L3)"
     }
   }
 }

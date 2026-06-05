@@ -3536,7 +3536,11 @@
     "condPickCategory": "Select a category",
     "condEntryAny": "Any key",
     "inheritOnHint": "Inherits scope from the parent conditional (click to opt out)",
-    "inheritOffHint": "Does not inherit (click to re-enable inheritance)"
+    "inheritOffHint": "Does not inherit (click to re-enable inheritance)",
+    "addAclTable": "ACL table",
+    "aclTable": "ACL / ACE table",
+    "aclTableHint": "Renders the firewall-style ACL/ACE table for the selected node(s), derived from the inventory.",
+    "aclShowDisabled": "Show disabled ACEs"
   },
   "systemUpdates": {
     "title": "System Updates",
@@ -4196,7 +4200,9 @@
       "qualifier": "Action qualifier",
       "detail": "Detail",
       "protocol": "Protocol (L3)",
-      "port": "Port (L3)"
+      "port": "Port (L3)",
+      "portSrc": "Source port (L3)",
+      "portDst": "Destination port (L3)"
     }
   }
 }

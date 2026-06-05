@@ -46,6 +46,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldQuestion,
+  ShieldHalf,
   Lightbulb,
   BarChart3,
   PieChart,
@@ -782,12 +783,28 @@ function normalizeCell(cell: string | TableCell): TableCell {
   return cell;
 }
 
+// Firewall-style ACL/ACE table for the selected node(s). Selection mirrors
+// inventory_table (manual nodeIds[] + optional auto-rules); for node-type
+// reports the report's node wins. ACL data is derived from the inventory via
+// the context's aclConfig (see App\Service\AclExtractor).
+export interface AclTableBlock {
+  id: string;
+  type: "acl_table";
+  nodeIds: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+  showDisabled?: boolean;
+  fontSize?: number;
+  pageBreakBefore?: boolean;
+}
+
 export type ReportBlock = (
   | HeadingBlock
   | ParagraphBlock
   | ImageBlock
   | TableBlock
   | InventoryTableBlock
+  | AclTableBlock
   | CliCommandBlock
   | EquipmentListBlock
   | ActionListBlock
@@ -933,6 +950,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "topology", labelKey: "structure.addTopology", icon: <Network className="h-4 w-4 text-violet-500" /> },
       { type: "schema", labelKey: "schemas.addSchema", icon: <Workflow className="h-4 w-4 text-violet-500" /> },
       { type: "cli_command", labelKey: "structure.addCliCommand", icon: <span className="inline-flex items-center justify-center h-4 w-4 font-mono text-[10px] font-bold text-green-500">&gt;_</span> },
+      { type: "acl_table", labelKey: "structure.addAclTable", icon: <ShieldHalf className="h-4 w-4 text-blue-500" /> },
     ],
   },
   {
@@ -1071,6 +1089,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "inventory_table", mode: "multi_node_columns", columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any", showHeader: true };
     } else if (type === "cli_command") {
       block = { id, type: "cli_command", commandName: "", command: "", dataSource: "none", nodeIds: [], tagIds: [], showEllipsis: true };
+    } else if (type === "acl_table") {
+      block = { id, type: "acl_table", nodeIds: [], nodeRules: [], nodeRulesMatch: "any", showDisabled: true, pageBreakBefore: false };
     } else if (type === "equipment_list") {
       block = { id, type: "equipment_list", title: "", categories: [], nodeDisplayField: "name", nodeColor: "#7c3aed", showCount: true, titleStyle: { bold: true, size: 13, color: "#1e293b" }, categoryStyle: { bold: false, size: 11, color: "#1e293b" } } as EquipmentListBlock;
     } else if (type === "action_list") {
@@ -1398,6 +1418,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyComplianceMatrix")}</span>;
     }
+    if (block.type === "acl_table") {
+      return <span className="text-slate-500 text-xs">{t("structure.aclTable")}</span>;
+    }
     if (block.type === "rule_non_compliant") {
       if (block.ruleId) {
         return <span className="text-slate-500 text-xs">{t("structure.ruleNonCompliant")} — rule #{block.ruleId}</span>;
@@ -1585,6 +1608,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-green-100 dark:bg-green-500/15 px-2 py-0.5 text-[11px] font-bold text-green-600 dark:text-green-400">
           <ShieldCheck className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "acl_table") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-blue-100 dark:bg-blue-500/15 px-2 py-0.5 text-[11px] font-bold text-blue-600 dark:text-blue-400">
+          <ShieldHalf className="h-3 w-3" />
         </span>
       );
     }
@@ -1919,6 +1949,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "cli_command" && (
                 <CliCommandProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "acl_table" && (
+                <AclTableProperties block={editingBlock} updateBlock={updateBlock} t={t} reportType={reportType} />
               )}
               {editingBlock.type === "equipment_list" && (
                 <EquipmentListProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -7004,6 +7037,73 @@ function flattenRulesFromTree(folder: { rules?: ComplianceRuleOption[]; children
 }
 
 // --- Compliance matrix properties ---
+function AclTableProperties({
+  block,
+  updateBlock,
+  t,
+  reportType,
+}: {
+  block: AclTableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+  reportType?: "general" | "node";
+}) {
+  const isNodeReport = reportType === "node";
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-slate-500 dark:text-slate-400">{t("structure.aclTableHint")}</p>
+
+      {/* Node-type reports already bind a node; general reports pick node(s). */}
+      {!isNodeReport && (
+        <NodeSelectionPanel
+          nodeIds={block.nodeIds ?? []}
+          nodeRules={block.nodeRules ?? []}
+          nodeRulesMatch={block.nodeRulesMatch ?? "any"}
+          onChange={(patch) => updateBlock(block.id, patch)}
+          t={t}
+        />
+      )}
+
+      <div className="space-y-2">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.showDisabled ?? true}
+            onChange={(e) => updateBlock(block.id, { showDisabled: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.aclShowDisabled")}</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={block.pageBreakBefore ?? false}
+            onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+            className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+          />
+          <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+        </label>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={5}
+            max={12}
+            step={0.5}
+            value={block.fontSize ?? 6}
+            onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+            className="flex-1 accent-blue-600"
+          />
+          <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 6}pt</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ComplianceMatrixProperties({
   block,
   updateBlock,

@@ -6,7 +6,9 @@ import { useAppContext } from "@/components/ContextProvider";
 import { useI18n } from "@/components/I18nProvider";
 import type { AclConfig, AclEntryRole, AclFieldEntry } from "@/components/ContextProvider";
 
-const ENTRY_ROLES: AclEntryRole[] = ["source", "destination", "protocol", "port", "service", "qualifier", "detail"];
+const ENTRY_ROLES: AclEntryRole[] = [
+  "source", "destination", "protocol", "portSrc", "portDst", "port", "service", "qualifier", "detail",
+];
 
 interface Category {
   id: number;

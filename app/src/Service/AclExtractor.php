@@ -21,7 +21,8 @@ use App\Repository\NodeInventoryEntryRepository;
  *     'aceSource' => ['categoryId' => int, 'idMode' => 'key'|'column', 'idCol' => string,
  *                     'parentRefCol' => string, 'nameCol' => string,
  *                     'actionCol' => string, 'actionDelimiter' => string, 'enabledCol' => string,
- *                     'entries' => [['role' => 'source'|'destination'|'service'|'protocol'|'port'|'qualifier'|'detail',
+ *                     'entries' => [['role' => 'source'|'destination'|'service'|'protocol'
+ *                                              |'port'|'portSrc'|'portDst'|'qualifier'|'detail',
  *                                    'column' => string], ...]],
  *   ]
  *
@@ -115,13 +116,25 @@ class AclExtractor
                 'destination' => $roles['destination'],
                 // L2 / standalone service columns (e.g. ARP-Request).
                 'service' => $roles['service'],
-                // L3 service split across two columns: protocol (tcp/udp) + port.
+                // L3 service split across columns: protocol (tcp/udp) + ports.
+                // 'port' stays for back-compat (treated as destination port).
                 'protocol' => $roles['protocol'],
                 'port' => $roles['port'],
+                'portSrc' => $roles['portSrc'],
+                'portDst' => $roles['portDst'],
                 // "detail" role columns, surfaced grouped by layer in the UI.
                 'fields' => $roles['detail'],
             ];
         }
+
+        // Sort ACLs by id, then their ACEs by id, using natural ordering so
+        // numeric keys line up (100, 200, 1000 instead of 100, 1000, 200).
+        $byId = static fn(array $a, array $b): int => strnatcasecmp((string) $a['id'], (string) $b['id']);
+        usort($acls, $byId);
+        foreach ($acls as &$acl) {
+            usort($acl['aces'], $byId);
+        }
+        unset($acl);
 
         return array_values($acls);
     }
@@ -183,7 +196,11 @@ class AclExtractor
      */
     private function resolveEntries(mixed $entries, array $cols): array
     {
-        $out = ['source' => [], 'destination' => [], 'service' => [], 'protocol' => [], 'port' => [], 'qualifier' => [], 'detail' => []];
+        $out = [
+            'source' => [], 'destination' => [], 'service' => [],
+            'protocol' => [], 'port' => [], 'portSrc' => [], 'portDst' => [],
+            'qualifier' => [], 'detail' => [],
+        ];
         if (!is_array($entries)) {
             return $out;
         }

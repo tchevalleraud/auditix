@@ -27,6 +27,8 @@ export type AclEntryRole =
   | "service"
   | "protocol"
   | "port"
+  | "portSrc"
+  | "portDst"
   | "qualifier"
   | "detail";
 
