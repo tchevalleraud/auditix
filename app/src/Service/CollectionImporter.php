@@ -144,31 +144,23 @@ class CollectionImporter
     }
 
     /**
-     * Process a ZIP archive containing <ip>_output.log files and import each into a Collection.
+     * Process a .zip or .tar.gz archive containing <ip>_output.log files and import each into a Collection.
      *
      * @return array{dryRun: bool, totalFiles: int, imported: int, files: array<int, array<string, mixed>>, importedCollections: array<int, Collection>}
      */
-    public function importZipArchive(
-        string $zipPath,
+    public function importArchive(
+        string $archivePath,
         Context $context,
         array $extraTags,
         ?string $promptPattern,
         bool $dryRun,
         string $worker,
     ): array {
-        if (!class_exists(\ZipArchive::class)) {
-            throw new \RuntimeException('ZIP support is not available on the server');
-        }
-
-        $zip = new \ZipArchive();
-        if ($zip->open($zipPath) !== true) {
-            throw new \RuntimeException('Unable to open the ZIP archive');
-        }
+        $archiveEntries = $this->readArchiveEntries($archivePath);
 
         $tags = array_values(array_unique(array_merge(['latest', 'imported'], $extraTags)));
 
         if ($promptPattern !== null && $promptPattern !== '' && @preg_match($this->wrapPromptPattern($promptPattern), '') === false) {
-            $zip->close();
             throw new \RuntimeException('Invalid prompt regex pattern');
         }
 
@@ -177,11 +169,8 @@ class CollectionImporter
         $importedCollections = [];
         $imported = 0;
 
-        for ($i = 0; $i < $zip->numFiles; $i++) {
-            $stat = $zip->statIndex($i);
-            if ($stat === false) continue;
-            $entryName = $stat['name'];
-            if (str_ends_with($entryName, '/')) continue;
+        foreach ($archiveEntries as $archiveEntry) {
+            $entryName = $archiveEntry['name'];
             $basename = basename($entryName);
 
             $entry = [
@@ -225,8 +214,8 @@ class CollectionImporter
                 continue;
             }
 
-            $rawOutput = $zip->getFromIndex($i);
-            if ($rawOutput === false || $rawOutput === '') {
+            $rawOutput = $archiveEntry['content'];
+            if ($rawOutput === '') {
                 $entry['status'] = 'empty';
                 $entry['message'] = 'File is empty or unreadable';
                 $entries[] = $entry;
@@ -249,8 +238,6 @@ class CollectionImporter
             $imported++;
         }
 
-        $zip->close();
-
         return [
             'dryRun' => $dryRun,
             'totalFiles' => count($entries),
@@ -258,6 +245,93 @@ class CollectionImporter
             'files' => $entries,
             'importedCollections' => $importedCollections,
         ];
+    }
+
+    /**
+     * Read every file entry from a .zip or .tar.gz archive, detecting the format
+     * from its magic bytes (the uploaded temp file has no extension).
+     *
+     * @return array<int, array{name: string, content: string}>
+     */
+    private function readArchiveEntries(string $path): array
+    {
+        $handle = @fopen($path, 'rb');
+        $magic = $handle ? (string) fread($handle, 4) : '';
+        if ($handle) {
+            fclose($handle);
+        }
+
+        if (str_starts_with($magic, "PK\x03\x04") || str_starts_with($magic, "PK\x05\x06")) {
+            return $this->readZipEntries($path);
+        }
+        if (str_starts_with($magic, "\x1f\x8b")) {
+            return $this->readTarGzEntries($path);
+        }
+
+        throw new \RuntimeException('Unsupported archive format (expected .zip or .tar.gz)');
+    }
+
+    /**
+     * @return array<int, array{name: string, content: string}>
+     */
+    private function readZipEntries(string $path): array
+    {
+        if (!class_exists(\ZipArchive::class)) {
+            throw new \RuntimeException('ZIP support is not available on the server');
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            throw new \RuntimeException('Unable to open the ZIP archive');
+        }
+
+        $entries = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $stat = $zip->statIndex($i);
+            if ($stat === false) continue;
+            $name = $stat['name'];
+            if (str_ends_with($name, '/')) continue;
+            $content = $zip->getFromIndex($i);
+            $entries[] = ['name' => $name, 'content' => $content === false ? '' : $content];
+        }
+
+        $zip->close();
+
+        return $entries;
+    }
+
+    /**
+     * @return array<int, array{name: string, content: string}>
+     */
+    private function readTarGzEntries(string $path): array
+    {
+        if (!class_exists(\PharData::class)) {
+            throw new \RuntimeException('TAR.GZ support is not available on the server');
+        }
+
+        // PharData detects the gzip compression from the file extension, so the
+        // uploaded temp file (which has none) must be copied to a .tar.gz suffix first.
+        $tmp = sys_get_temp_dir() . '/col-import-' . bin2hex(random_bytes(8)) . '.tar.gz';
+        if (!@copy($path, $tmp)) {
+            throw new \RuntimeException('Unable to read the TAR.GZ archive');
+        }
+
+        $entries = [];
+        try {
+            $phar = new \PharData($tmp);
+            foreach (new \RecursiveIteratorIterator($phar) as $file) {
+                /** @var \PharFileInfo $file */
+                if (!$file->isFile()) continue;
+                $entries[] = ['name' => $file->getFilename(), 'content' => $file->getContent()];
+            }
+        } catch (\Throwable $e) {
+            @unlink($tmp);
+            throw new \RuntimeException('Unable to open the TAR.GZ archive');
+        }
+
+        @unlink($tmp);
+
+        return $entries;
     }
 
     public function wrapPromptPattern(string $pattern): string

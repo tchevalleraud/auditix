@@ -305,7 +305,7 @@ class OperationController extends AbstractController
 
     #[Route('/import-zip', methods: ['POST'])]
     #[OA\Post(
-        summary: 'Import a ZIP archive of collected outputs (one <ip>_output.log per node)',
+        summary: 'Import a .zip or .tar.gz archive of collected outputs (one <ip>_output.log per node)',
         parameters: [
             new OA\Parameter(name: 'dryRun', in: 'query', required: false, schema: new OA\Schema(type: 'boolean', default: false), description: 'Validate the archive without persisting collections'),
         ],
@@ -316,7 +316,7 @@ class OperationController extends AbstractController
                 schema: new OA\Schema(
                     required: ['file'],
                     properties: [
-                        new OA\Property(property: 'file', type: 'string', format: 'binary', description: 'ZIP archive containing <ip>_output.log files'),
+                        new OA\Property(property: 'file', type: 'string', format: 'binary', description: '.zip or .tar.gz archive containing <ip>_output.log files'),
                         new OA\Property(property: 'tags[]', type: 'array', items: new OA\Items(type: 'string'), description: 'Extra tags applied to imported collections'),
                         new OA\Property(property: 'promptPattern', type: 'string', description: 'Optional regex (no delimiters) whose first capture group isolates the typed command'),
                     ],
@@ -336,14 +336,14 @@ class OperationController extends AbstractController
         /** @var \Symfony\Component\HttpFoundation\File\UploadedFile|null $file */
         $file = $request->files->get('file');
         if (!$file || !$file->isValid()) {
-            return $this->json(['error' => 'A .zip file is required'], Response::HTTP_BAD_REQUEST);
+            return $this->json(['error' => 'A .zip or .tar.gz file is required'], Response::HTTP_BAD_REQUEST);
         }
 
         $extraTags = array_values(array_filter(array_map('trim', (array) $request->request->all('tags'))));
         $promptPattern = trim((string) $request->request->get('promptPattern', '')) ?: null;
 
         try {
-            $result = $this->importer->importZipArchive($file->getPathname(), $context, $extraTags, $promptPattern, $dryRun, 'zip-import');
+            $result = $this->importer->importArchive($file->getPathname(), $context, $extraTags, $promptPattern, $dryRun, 'zip-import');
         } catch (\RuntimeException $e) {
             return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
         }

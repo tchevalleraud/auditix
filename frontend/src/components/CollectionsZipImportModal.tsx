@@ -83,7 +83,10 @@ export default function CollectionsZipImportModal({ open, onClose, onImported, c
 
   const ingestFile = async (selected: File) => {
     setError(null);
-    if (!selected.name.toLowerCase().endsWith(".zip") && selected.type !== "application/zip" && selected.type !== "application/x-zip-compressed") {
+    const lowerName = selected.name.toLowerCase();
+    const isZip = lowerName.endsWith(".zip") || selected.type === "application/zip" || selected.type === "application/x-zip-compressed";
+    const isTarGz = lowerName.endsWith(".tar.gz") || lowerName.endsWith(".tgz") || selected.type === "application/gzip" || selected.type === "application/x-gzip";
+    if (!isZip && !isTarGz) {
       setError(t("collections.zipImportNotZip"));
       return;
     }
@@ -201,7 +204,7 @@ export default function CollectionsZipImportModal({ open, onClose, onImported, c
                   {analyzing ? t("collections.zipImportAnalyzing") : t("collections.zipImportDrop")}
                 </p>
                 <p className="text-xs text-slate-400 dark:text-slate-500">{t("collections.zipImportFormats")}</p>
-                <input ref={fileInputRef} type="file" accept=".zip,application/zip" onChange={onFileChange} className="hidden" />
+                <input ref={fileInputRef} type="file" accept=".zip,.tar.gz,.tgz,application/zip,application/gzip" onChange={onFileChange} className="hidden" />
               </div>
               {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
             </div>

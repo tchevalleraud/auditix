@@ -440,14 +440,14 @@ class CollectionController extends AbstractController
         /** @var \Symfony\Component\HttpFoundation\File\UploadedFile|null $file */
         $file = $request->files->get('file');
         if (!$file || !$file->isValid()) {
-            return $this->json(['error' => 'A .zip file is required'], Response::HTTP_BAD_REQUEST);
+            return $this->json(['error' => 'A .zip or .tar.gz file is required'], Response::HTTP_BAD_REQUEST);
         }
 
         $extraTags = array_values(array_filter(array_map('trim', (array) $request->request->all('tags'))));
         $promptPattern = trim((string) $request->request->get('promptPattern', '')) ?: null;
 
         try {
-            $result = $this->importer->importZipArchive($file->getPathname(), $context, $extraTags, $promptPattern, $dryRun, 'zip-import');
+            $result = $this->importer->importArchive($file->getPathname(), $context, $extraTags, $promptPattern, $dryRun, 'zip-import');
         } catch (\RuntimeException $e) {
             return $this->json(['error' => $e->getMessage()], Response::HTTP_BAD_REQUEST);
         }
