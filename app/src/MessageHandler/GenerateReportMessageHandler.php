@@ -8070,7 +8070,37 @@ class GenerateReportMessageHandler
 
     private function sanitizeParagraphHtml(string $html): string
     {
-        return strip_tags($html, ['p', 'br', 'b', 'strong', 'i', 'em', 'ul', 'ol', 'li']);
+        $html = strip_tags($html, ['p', 'br', 'b', 'strong', 'i', 'em', 'ul', 'ol', 'li']);
+
+        // TCPDF's HTML parser only understands a handful of named entities
+        // (&nbsp; &amp; &lt; &gt; &quot;) plus numeric ones. Named spacing
+        // entities like &emsp;/&ensp;/&thinsp; are otherwise printed verbatim.
+        // Their numeric code points (U+2003, …) have no glyph in the bundled
+        // fonts, so they render zero-width — we therefore expand them into
+        // non-breaking spaces, which TCPDF never collapses nor trims at the
+        // start of a paragraph.
+        //
+        // The editor stores literal "&emsp;" text double-encoded as
+        // "&amp;emsp;"; TCPDF then decodes "&amp;" back to "&" and prints the
+        // entity verbatim, so we handle both the single- and double-encoded
+        // forms here.
+        $em = str_repeat('&nbsp;', 4);
+        $en = str_repeat('&nbsp;', 2);
+        $thin = '&nbsp;';
+        $html = strtr($html, [
+            '&amp;emsp;' => $em,
+            '&amp;ensp;' => $en,
+            '&amp;thinsp;' => $thin,
+            '&emsp;' => $em,
+            '&ensp;' => $en,
+            '&thinsp;' => $thin,
+            '&amp;zwnj;' => '',
+            '&amp;zwj;' => '',
+            '&zwnj;' => '',
+            '&zwj;' => '',
+        ]);
+
+        return $html;
     }
 
     private function sanitizeHtml(string $html): string
