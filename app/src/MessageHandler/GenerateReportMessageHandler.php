@@ -1542,6 +1542,37 @@ class GenerateReportMessageHandler
                         continue;
                     }
 
+                    // Conditional remark columns (appended after the data columns).
+                    // Each rule is evaluated on the current row's value at rule.colLabel
+                    // within the single category; texts of all matching rules are concatenated.
+                    $remarkCols = [];
+                    foreach (($block['columns'] ?? []) as $rc) {
+                        if (is_array($rc) && ($rc['aggregation'] ?? '') === 'remark') {
+                            $remarkCols[] = $rc;
+                        }
+                    }
+                    $remarkValues = []; // rowKey => [remarkColIndex => text]
+                    foreach ($rowKeys as $k) {
+                        foreach ($remarkCols as $rci => $rc) {
+                            $sep = (string) ($rc['remarkSeparator'] ?? ', ');
+                            $rules = is_array($rc['remarkRules'] ?? null) ? $rc['remarkRules'] : [];
+                            $texts = [];
+                            foreach ($rules as $rule) {
+                                if (!is_array($rule)) continue;
+                                $rCol = (string) ($rule['colLabel'] ?? '');
+                                $rOp = (string) ($rule['operator'] ?? 'eq');
+                                $rVal = (string) ($rule['value'] ?? '');
+                                $rText = (string) ($rule['text'] ?? '');
+                                if ($rCol === '' || $rText === '') continue;
+                                $cellVal = (string) ($rowMap[$k][$rCol] ?? '');
+                                if ($this->evaluateInventoryOperator($cellVal, $rOp, $rVal)) {
+                                    $texts[] = $rText;
+                                }
+                            }
+                            $remarkValues[$k][$rci] = implode($sep, array_values(array_unique($texts)));
+                        }
+                    }
+
                     $pageW = $pdf->getPageWidth();
                     $contentW = $pageW - $mLeft - $mRight;
                     $tableW = $this->resolveInventoryTableWidth($block, $contentW);
@@ -1550,6 +1581,10 @@ class GenerateReportMessageHandler
 
                     $headers = [$hostnameHeaderLabel ?: 'Cle'];
                     foreach ($colLabels as $cl) $headers[] = $cl;
+                    $remarkBaseIdx = count($headers); // first remark column header index
+                    foreach ($remarkCols as $rc) {
+                        $headers[] = (string) ($rc['headerLabel'] ?? $rc['label'] ?? 'Remarque');
+                    }
                     $colCountInv = count($headers);
                     $maxWidths = array_fill(0, $colCountInv, 0);
 
@@ -1564,6 +1599,11 @@ class GenerateReportMessageHandler
                             $v = $rowMap[$k][$cl] ?? '';
                             $maxWidths[$ci + 1] = max($maxWidths[$ci + 1], $pdf->GetStringWidth($v) + $cellPadding);
                         }
+                        foreach ($remarkCols as $rci => $rc) {
+                            $v = (string) ($remarkValues[$k][$rci] ?? '');
+                            $idx = $remarkBaseIdx + $rci;
+                            $maxWidths[$idx] = max($maxWidths[$idx], $pdf->GetStringWidth($v) + $cellPadding);
+                        }
                     }
                     $columnWidthsMap = is_array($block['columnWidths'] ?? null) ? $block['columnWidths'] : [];
                     $explicitWidthPcts = [
@@ -1571,6 +1611,10 @@ class GenerateReportMessageHandler
                     ];
                     foreach ($colLabels as $cl) {
                         $w = $columnWidthsMap[$cl] ?? null;
+                        $explicitWidthPcts[] = ($w !== null && $w > 0) ? (float) $w : null;
+                    }
+                    foreach ($remarkCols as $rc) {
+                        $w = $rc['width'] ?? null;
                         $explicitWidthPcts[] = ($w !== null && $w > 0) ? (float) $w : null;
                     }
                     $colWidthsInv = $this->distributeInventoryColumnWidths($maxWidths, $explicitWidthPcts, $tableW);
@@ -1601,6 +1645,9 @@ class GenerateReportMessageHandler
                         $values = [$k];
                         foreach ($colLabels as $cl) {
                             $values[] = $rowMap[$k][$cl] ?? '';
+                        }
+                        foreach ($remarkCols as $rci => $rc) {
+                            $values[] = (string) ($remarkValues[$k][$rci] ?? '');
                         }
                         $maxH = $minLineH;
                         foreach ($values as $vi => $v) {
@@ -1796,6 +1843,49 @@ class GenerateReportMessageHandler
                             }
                             $invData[$nid][$colId] = implode($listSeparator, $items);
                         }
+                    } elseif ($aggregation === 'remark') {
+                        // Conditional remark column: evaluate each rule against the
+                        // referenced inventory datum (category/entryKey/colLabel) per node;
+                        // concatenate the texts of all matching rules.
+                        if ($colId === '') continue;
+                        $remarkRules = is_array($colDef['remarkRules'] ?? null) ? $colDef['remarkRules'] : [];
+                        $remarkSep = (string) ($colDef['remarkSeparator'] ?? ', ');
+                        foreach ($nodeIds as $nid) {
+                            $invData[$nid][$colId] = '';
+                        }
+                        $acc = []; // nodeId => list of matched texts
+                        foreach ($remarkRules as $rule) {
+                            if (!is_array($rule)) continue;
+                            $rCat = (string) ($rule['category'] ?? '');
+                            $rKey = (string) ($rule['entryKey'] ?? '');
+                            $rCol = (string) ($rule['colLabel'] ?? '');
+                            $rOp = (string) ($rule['operator'] ?? 'eq');
+                            $rVal = (string) ($rule['value'] ?? '');
+                            $rText = (string) ($rule['text'] ?? '');
+                            if ($rCat === '' || $rCol === '' || $rText === '') continue;
+
+                            $qb = $invRepo->createQueryBuilder('e')
+                                ->where('e.node IN (:nodes)')
+                                ->andWhere('e.categoryName = :cat')
+                                ->andWhere('e.colLabel = :col')
+                                ->setParameter('nodes', $nodeIds)
+                                ->setParameter('cat', $rCat)
+                                ->setParameter('col', $rCol);
+                            if ($rKey !== '') {
+                                $qb->andWhere('e.entryKey = :key')->setParameter('key', $rKey);
+                            }
+                            $entries = $qb->getQuery()->getResult();
+                            foreach ($entries as $entry) {
+                                $nid = $entry->getNode()->getId();
+                                $cellVal = (string) ($entry->getValue() ?? '');
+                                if ($this->evaluateInventoryOperator($cellVal, $rOp, $rVal)) {
+                                    $acc[$nid][] = $rText;
+                                }
+                            }
+                        }
+                        foreach ($acc as $nid => $texts) {
+                            $invData[$nid][$colId] = implode($remarkSep, array_values(array_unique($texts)));
+                        }
                     } else {
                         $key = $colDef['entryKey'] ?? '';
                         if ($colId === '' || $cat === '' || $key === '' || $col === '') continue;
@@ -1961,38 +2051,7 @@ class GenerateReportMessageHandler
                         if ($cellStyles[$targetIdx] !== null) continue;
 
                         $cellVal = $allValues[$targetIdx] ?? '';
-                        $match = false;
-                        $numCell = is_numeric($cellVal) ? (float) $cellVal : null;
-                        $numRule = is_numeric($ruleVal) ? (float) $ruleVal : null;
-
-                        switch ($ruleOp) {
-                            case 'eq':
-                                $match = ($numCell !== null && $numRule !== null) ? $numCell == $numRule : $cellVal === $ruleVal;
-                                break;
-                            case 'neq':
-                                $match = ($numCell !== null && $numRule !== null) ? $numCell != $numRule : $cellVal !== $ruleVal;
-                                break;
-                            case 'gt':
-                                $match = ($numCell !== null && $numRule !== null) && $numCell > $numRule;
-                                break;
-                            case 'gte':
-                                $match = ($numCell !== null && $numRule !== null) && $numCell >= $numRule;
-                                break;
-                            case 'lt':
-                                $match = ($numCell !== null && $numRule !== null) && $numCell < $numRule;
-                                break;
-                            case 'lte':
-                                $match = ($numCell !== null && $numRule !== null) && $numCell <= $numRule;
-                                break;
-                            case 'contains':
-                                $match = str_contains(mb_strtolower($cellVal), mb_strtolower($ruleVal));
-                                break;
-                            case 'not_contains':
-                                $match = !str_contains(mb_strtolower($cellVal), mb_strtolower($ruleVal));
-                                break;
-                        }
-
-                        if ($match) {
+                        if ($this->evaluateInventoryOperator((string) $cellVal, (string) $ruleOp, (string) $ruleVal)) {
                             $cellStyles[$targetIdx] = $rule;
                         }
                     }
@@ -8106,6 +8165,39 @@ class GenerateReportMessageHandler
     private function sanitizeHtml(string $html): string
     {
         return strip_tags($html, ['b', 'i', 'br']);
+    }
+
+    /**
+     * Evaluate a comparison operator between a cell value and a rule value,
+     * with numeric-aware comparison when both sides look numeric.
+     * Shared by inventory style rules and conditional remark columns.
+     * Operators: eq, neq, gt, gte, lt, lte, contains, not_contains.
+     */
+    private function evaluateInventoryOperator(string $cellVal, string $op, string $ruleVal): bool
+    {
+        $numCell = is_numeric($cellVal) ? (float) $cellVal : null;
+        $numRule = is_numeric($ruleVal) ? (float) $ruleVal : null;
+
+        switch ($op) {
+            case 'eq':
+                return ($numCell !== null && $numRule !== null) ? $numCell == $numRule : $cellVal === $ruleVal;
+            case 'neq':
+                return ($numCell !== null && $numRule !== null) ? $numCell != $numRule : $cellVal !== $ruleVal;
+            case 'gt':
+                return ($numCell !== null && $numRule !== null) && $numCell > $numRule;
+            case 'gte':
+                return ($numCell !== null && $numRule !== null) && $numCell >= $numRule;
+            case 'lt':
+                return ($numCell !== null && $numRule !== null) && $numCell < $numRule;
+            case 'lte':
+                return ($numCell !== null && $numRule !== null) && $numCell <= $numRule;
+            case 'contains':
+                return str_contains(mb_strtolower($cellVal), mb_strtolower($ruleVal));
+            case 'not_contains':
+                return !str_contains(mb_strtolower($cellVal), mb_strtolower($ruleVal));
+            default:
+                return false;
+        }
     }
 
     private function matchCountValue(string $cellVal, string $matchVal, string $op): bool

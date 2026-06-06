@@ -151,9 +151,13 @@ export interface InventoryTableColumn {
   headerLabel?: string;
   align?: "left" | "center" | "right";
   valign?: "top" | "middle" | "bottom";
-  aggregation?: "value" | "count" | "list";
+  aggregation?: "value" | "count" | "list" | "remark";
   matchValue?: string;
   matchOperator?: InventoryCountOperator;
+  /** remark aggregation: conditional rules; texts of all matching rules are concatenated. */
+  remarkRules?: InventoryRemarkRule[];
+  /** remark aggregation: separator inserted between concatenated remark texts (default ", "). */
+  remarkSeparator?: string;
   /** list aggregation: source of items (keys = entryKey, values = value). */
   listSource?: "keys" | "values";
   /** list aggregation: separator inserted between items (default ", "). */
@@ -179,6 +183,31 @@ export interface InventoryCountColumn {
   valign?: "top" | "middle" | "bottom";
   /** Fixed column width as a percentage of the table width (1-100). Undefined = auto. */
   width?: number;
+}
+
+export type InventoryRemarkOperator =
+  | "eq"
+  | "neq"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "contains"
+  | "not_contains";
+
+export interface InventoryRemarkRule {
+  id: string;
+  /** Inventory category to evaluate (multi_node_columns). Ignored in single_node_full (uses singleCategory). */
+  category?: string;
+  /** Optional entry key (multi_node_columns). Empty = any entry matching category + colLabel. Ignored in single_node_full (uses the row's key). */
+  entryKey?: string;
+  /** Column label whose value is tested. */
+  colLabel: string;
+  operator: InventoryRemarkOperator;
+  /** Value compared against the cell value. */
+  value: string;
+  /** Remark text shown when the condition matches, e.g. "PS DOWN". */
+  text: string;
 }
 
 export interface InventoryStyleRule {
@@ -3560,6 +3589,182 @@ function ColumnWidthInput({
   );
 }
 
+function RemarkRulesEditor({
+  col,
+  structure,
+  mode,
+  singleCategory,
+  update,
+  t,
+}: {
+  col: InventoryTableColumn;
+  structure: InvStructureCategory[];
+  mode: "multi" | "single";
+  singleCategory: string | null;
+  update: (patch: Partial<InventoryTableColumn>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const rules = col.remarkRules ?? [];
+  const setRules = (next: InventoryRemarkRule[]) => update({ remarkRules: next });
+  const addRule = () =>
+    setRules([
+      ...rules,
+      {
+        id: uid(),
+        category: mode === "single" ? singleCategory ?? "" : "",
+        entryKey: "",
+        colLabel: "",
+        operator: "lt",
+        value: "",
+        text: "",
+      },
+    ]);
+  const updateRule = (id: string, patch: Partial<InventoryRemarkRule>) =>
+    setRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const removeRule = (id: string) => setRules(rules.filter((r) => r.id !== id));
+
+  const entryKeysFor = (category: string): string[] => {
+    const cat = structure.find((c) => c.categoryName === category);
+    return cat ? cat.entries.map((e) => e.key) : [];
+  };
+  const colLabelsFor = (category: string, entryKey?: string): string[] => {
+    const cat = structure.find((c) => c.categoryName === category);
+    if (!cat) return [];
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => {
+      if (entryKey && e.key !== entryKey) return;
+      e.columns.forEach((c) => labels.add(c));
+    });
+    return Array.from(labels);
+  };
+
+  const opLabel: Record<InventoryRemarkOperator, string> = {
+    eq: "=",
+    neq: "!=",
+    gt: ">",
+    gte: ">=",
+    lt: "<",
+    lte: "<=",
+    contains: t("structure.ruleContains"),
+    not_contains: t("structure.ruleNotContains"),
+  };
+
+  const selectCls =
+    "shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-1 focus:outline-none focus:border-amber-400";
+  const inputCls =
+    "min-w-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-1 focus:outline-none focus:border-amber-400 placeholder:text-slate-400";
+
+  return (
+    <div className="space-y-1.5 rounded-md border border-amber-200 dark:border-amber-700/50 bg-amber-50/40 dark:bg-amber-900/10 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wide">
+          {t("structure.invRemarkRulesTitle")}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 shrink-0">{t("structure.invListSeparator")}</span>
+          <input
+            type="text"
+            value={col.remarkSeparator ?? ", "}
+            onChange={(e) => update({ remarkSeparator: e.target.value })}
+            placeholder=", "
+            className="w-12 shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-0.5 focus:outline-none focus:border-amber-400 font-mono"
+          />
+          <button
+            type="button"
+            onClick={addRule}
+            className="flex items-center gap-1 rounded-md bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <Plus className="h-2.5 w-2.5" />
+            {t("structure.invRemarkAddRule")}
+          </button>
+        </div>
+      </div>
+      {rules.length === 0 && (
+        <p className="text-[10px] text-slate-400 italic">{t("structure.invRemarkRulesEmpty")}</p>
+      )}
+      {rules.map((rule) => {
+        const cat = mode === "single" ? singleCategory ?? "" : rule.category ?? "";
+        return (
+          <div key={rule.id} className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-1 space-y-1">
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[10px] text-slate-500 shrink-0">{t("structure.ruleIf")}</span>
+              {mode === "multi" && (
+                <>
+                  <select
+                    value={rule.category ?? ""}
+                    onChange={(e) => updateRule(rule.id, { category: e.target.value, entryKey: "", colLabel: "" })}
+                    className={selectCls}
+                  >
+                    <option value="">{t("structure.inventoryPickCategory")}</option>
+                    {structure.map((c) => (
+                      <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={rule.entryKey ?? ""}
+                    onChange={(e) => updateRule(rule.id, { entryKey: e.target.value, colLabel: "" })}
+                    className={selectCls}
+                    disabled={!cat}
+                  >
+                    <option value="">{t("structure.invRemarkAnyKey")}</option>
+                    {entryKeysFor(cat).map((k) => (
+                      <option key={k} value={k}>{k}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              <select
+                value={rule.colLabel}
+                onChange={(e) => updateRule(rule.id, { colLabel: e.target.value })}
+                className={selectCls}
+                disabled={!cat}
+              >
+                <option value="">{t("structure.invRemarkPickColumn")}</option>
+                {colLabelsFor(cat, mode === "multi" ? rule.entryKey || undefined : undefined).map((cl) => (
+                  <option key={cl} value={cl}>{cl}</option>
+                ))}
+              </select>
+              <select
+                value={rule.operator}
+                onChange={(e) => updateRule(rule.id, { operator: e.target.value as InventoryRemarkOperator })}
+                className={selectCls}
+              >
+                {(Object.keys(opLabel) as InventoryRemarkOperator[]).map((op) => (
+                  <option key={op} value={op}>{opLabel[op]}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={rule.value}
+                onChange={(e) => updateRule(rule.id, { value: e.target.value })}
+                placeholder={t("structure.ruleValue")}
+                className={`${inputCls} w-20`}
+              />
+              <button
+                type="button"
+                onClick={() => removeRule(rule.id)}
+                className="shrink-0 p-0.5 text-slate-400 hover:text-red-500 ml-auto"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            <div className="flex items-center gap-1">
+              <span className="text-[10px] text-slate-500 shrink-0">{t("structure.invRemarkThenShow")}</span>
+              <input
+                type="text"
+                value={rule.text}
+                onChange={(e) => updateRule(rule.id, { text: e.target.value })}
+                placeholder={t("structure.invRemarkTextPlaceholder")}
+                className={`${inputCls} flex-1`}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function InventoryTableProperties({
   block,
   updateBlock,
@@ -3616,7 +3821,7 @@ function InventoryTableProperties({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerCat, setPickerCat] = useState<string | null>(null);
   const [pickerKey, setPickerKey] = useState<string | null>(null);
-  const [pickerMode, setPickerMode] = useState<"value" | "count" | "list">("value");
+  const [pickerMode, setPickerMode] = useState<"value" | "count" | "list" | "remark">("value");
   const [pickerCountCol, setPickerCountCol] = useState<string | null>(null);
   const [pickerMatchValue, setPickerMatchValue] = useState("");
   const [pickerMatchOp, setPickerMatchOp] = useState<InventoryCountOperator>("eq");
@@ -3771,6 +3976,22 @@ function InventoryTableProperties({
         return { ...c, listFilters: filters };
       }),
     });
+  };
+
+  const addRemarkColumn = () => {
+    const col: InventoryTableColumn = {
+      id: uid(),
+      category: "",
+      entryKey: "",
+      colLabel: "",
+      label: t("structure.invRemarkDefaultHeader"),
+      headerLabel: t("structure.invRemarkDefaultHeader"),
+      aggregation: "remark",
+      remarkRules: [],
+      remarkSeparator: ", ",
+    };
+    updateBlock(block.id, { columns: [...block.columns, col] });
+    resetPicker();
   };
 
   const removeColumn = (colId: string) => {
@@ -4146,11 +4367,14 @@ function InventoryTableProperties({
           {block.columns.map((col, idx) => {
             const isCount = col.aggregation === "count";
             const isList = col.aggregation === "list";
+            const isRemark = col.aggregation === "remark";
             const colTitle = isCount
               ? `${col.category} > ${col.colLabel} (count)`
               : isList
                 ? `${col.category} > ${col.colLabel} (list)`
-                : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
+                : isRemark
+                  ? col.headerLabel || col.label || t("structure.invRemarkDefaultHeader")
+                  : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
             return (
             <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
               <div className="flex items-center gap-2">
@@ -4165,8 +4389,15 @@ function InventoryTableProperties({
                     {t("structure.invListBadge")}
                   </span>
                 )}
+                {isRemark && (
+                  <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 rounded px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                    {t("structure.invRemarkBadge")}
+                  </span>
+                )}
                 <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={colTitle}>
-                  {isCount || isList ? (
+                  {isRemark ? (
+                    <>{col.headerLabel || col.label || t("structure.invRemarkDefaultHeader")}</>
+                  ) : isCount || isList ? (
                     <>{col.category} &gt; {col.colLabel}</>
                   ) : (
                     <>{col.category} &gt; {col.entryKey} &gt; {col.colLabel}</>
@@ -4316,6 +4547,16 @@ function InventoryTableProperties({
                   ))}
                 </div>
               )}
+              {isRemark && (
+                <RemarkRulesEditor
+                  col={col}
+                  structure={structure}
+                  mode="multi"
+                  singleCategory={null}
+                  update={(patch) => updateColumnProp(col.id, patch)}
+                  t={t}
+                />
+              )}
               <div className="flex items-center gap-1.5">
                 <input
                   type="text"
@@ -4366,7 +4607,9 @@ function InventoryTableProperties({
             <div className="rounded-lg border border-violet-200 dark:border-violet-700 bg-violet-50 dark:bg-violet-900/20 p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-violet-700 dark:text-violet-300">
-                  {!pickerCat
+                  {pickerMode === "remark"
+                    ? t("structure.invRemarkPanelTitle")
+                    : !pickerCat
                     ? t("structure.inventoryPickCategory")
                     : pickerMode === "count"
                       ? (!pickerCountCol ? t("structure.invCountPickColumn") : t("structure.invCountConfigure"))
@@ -4419,6 +4662,17 @@ function InventoryTableProperties({
                 >
                   {t("structure.invModeList")}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => { setPickerMode("remark"); setPickerKey(null); setPickerCountCol(null); setPickerListCol(null); }}
+                  className={`flex-1 px-2 py-1 text-[11px] font-medium rounded transition-colors ${
+                    pickerMode === "remark"
+                      ? "bg-amber-500 text-white"
+                      : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t("structure.invModeRemark")}
+                </button>
               </div>
 
               {/* Breadcrumb */}
@@ -4461,7 +4715,7 @@ function InventoryTableProperties({
               )}
 
               {/* Level 1: Categories */}
-              {!pickerCat && (
+              {!pickerCat && pickerMode !== "remark" && (
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {structure.length === 0 && (
                     <p className="text-xs text-slate-400 italic py-2">{t("structure.inventoryNoData")}</p>
@@ -4592,6 +4846,21 @@ function InventoryTableProperties({
                       <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* REMARK MODE — add a conditional remark column */}
+              {pickerMode === "remark" && (
+                <div className="space-y-2 rounded-md bg-white dark:bg-slate-800 p-2 border border-amber-200 dark:border-amber-700/50">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invRemarkHint")}</p>
+                  <button
+                    type="button"
+                    onClick={addRemarkColumn}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-md bg-amber-500 text-white px-3 py-1.5 text-xs font-medium hover:bg-amber-600 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {t("structure.invRemarkAdd")}
+                  </button>
                 </div>
               )}
 
@@ -4922,6 +5191,66 @@ function InventoryTableProperties({
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Conditional remark columns */}
+          {block.singleCategory && (
+            <div className="rounded-lg border border-amber-200 dark:border-amber-700/50 bg-amber-50/40 dark:bg-amber-900/10 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className={labelClass}>{t("structure.invRemarkSectionTitle")}</label>
+                  <p className="text-[10px] text-slate-400">{t("structure.invRemarkSectionHint")}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={addRemarkColumn}
+                  className="flex items-center gap-1.5 rounded-md bg-amber-500 text-white px-2.5 py-1.5 text-xs font-medium hover:bg-amber-600 transition-colors"
+                >
+                  <Plus className="h-3 w-3" />
+                  {t("structure.invRemarkAdd")}
+                </button>
+              </div>
+
+              {block.columns.filter((c) => c.aggregation === "remark").length === 0 && (
+                <p className="text-[11px] text-slate-400 italic">{t("structure.invRemarkSectionEmpty")}</p>
+              )}
+
+              {block.columns
+                .filter((c) => c.aggregation === "remark")
+                .map((col) => (
+                  <div key={col.id} className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-2 space-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-100 dark:bg-amber-500/20 rounded px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                        {t("structure.invRemarkBadge")}
+                      </span>
+                      <input
+                        type="text"
+                        value={col.headerLabel ?? ""}
+                        onChange={(e) => updateColumnHeaderLabel(col.id, e.target.value)}
+                        placeholder={t("structure.invRemarkDefaultHeader")}
+                        className="flex-1 bg-slate-50 dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 px-2 py-1 focus:outline-none focus:border-amber-400 placeholder:text-slate-400 dark:placeholder:text-slate-500"
+                        title={t("structure.inventoryHeaderLabel")}
+                      />
+                      <ColumnWidthInput
+                        value={col.width}
+                        onChange={(v) => updateColumnProp(col.id, { width: v })}
+                        t={t}
+                      />
+                      <button onClick={() => removeColumn(col.id)} className="p-1 text-slate-400 hover:text-red-500 transition-colors">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <RemarkRulesEditor
+                      col={col}
+                      structure={structure}
+                      mode="single"
+                      singleCategory={block.singleCategory ?? null}
+                      update={(patch) => updateColumnProp(col.id, patch)}
+                      t={t}
+                    />
+                  </div>
+                ))}
             </div>
           )}
         </div>
