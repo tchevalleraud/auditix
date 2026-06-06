@@ -103,6 +103,11 @@ interface ConditionItem {
   inventoryCategoryId: number | null;
   inventoryKey: string;
   inventoryColumn: string;
+  // "single" (default): test the exact (key, column) cell.
+  // "all": test the column across every entry of the category, aggregated
+  // with `inventoryMatch` ("all" = every value must satisfy, "any" = one).
+  inventoryKeyMode?: "single" | "all";
+  inventoryMatch?: "all" | "any";
   operator: string;
   value: string;
   nodeManufacturerId?: number | null;
@@ -3229,10 +3234,12 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
                             INV
                           </span>
                           <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
-                            {`${catName || "?"} / ${cond.inventoryKey || "?"}`}
+                            {`${catName || "?"} / ${(cond.inventoryKeyMode ?? "single") === "all" ? "∗" : (cond.inventoryKey || "?")}`}
                             {cond.inventoryColumn && cond.inventoryColumn !== "Value#1" ? ` [${cond.inventoryColumn}]` : ""}
                           </span>
-                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">{opLabel(cond.operator)}</span>
+                          <span className="text-[10px] font-semibold text-slate-400 uppercase shrink-0">
+                            {(cond.inventoryKeyMode ?? "single") === "all" ? `${(cond.inventoryMatch ?? "all") === "any" ? "ANY" : "ALL"} ` : ""}{opLabel(cond.operator)}
+                          </span>
                           {!noValue && (
                             <span className="text-xs font-mono text-emerald-700 dark:text-emerald-400 truncate">&quot;{cond.value}&quot;</span>
                           )}
@@ -3263,7 +3270,7 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
                                 value={cond.inventoryCategoryId ?? ""}
                                 onChange={(e) => {
                                   const next = [...conditions];
-                                  next[ci] = { ...cond, inventoryCategoryId: e.target.value ? Number(e.target.value) : null, inventoryKey: "", inventoryColumn: "Value#1" };
+                                  next[ci] = { ...cond, inventoryCategoryId: e.target.value ? Number(e.target.value) : null, inventoryKey: "", inventoryColumn: "" };
                                   updateBlock(idx, { ...block, conditions: next });
                                 }}
                                 className={`${smallInput} max-w-[180px]`}
@@ -3274,19 +3281,59 @@ function ConditionBlockEditor({ blocks, onChange, categories, tags, inventoryStr
                             </div>
                             <div className="flex items-center gap-1.5">
                               <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionKey")}</span>
-                              <SuggestField
-                                value={cond.inventoryKey}
-                                options={keyOptions}
-                                placeholder="--"
-                                onChange={(v) => {
+                              <select
+                                value={cond.inventoryKeyMode ?? "single"}
+                                onChange={(e) => {
+                                  const mode = e.target.value as "single" | "all";
                                   const next = [...conditions];
-                                  next[ci] = { ...cond, inventoryKey: v };
+                                  next[ci] = {
+                                    ...cond,
+                                    inventoryKeyMode: mode,
+                                    inventoryKey: mode === "all" ? "" : cond.inventoryKey,
+                                    // "Value#1" is the legacy default and rarely a real column on
+                                    // multi-column categories; clear it so the column dropdown shows.
+                                    inventoryColumn: mode === "all" && cond.inventoryColumn === "Value#1" ? "" : cond.inventoryColumn,
+                                  };
                                   updateBlock(idx, { ...block, conditions: next });
                                 }}
-                                className="max-w-[180px]"
-                              />
+                                className={`${smallInput} max-w-[170px]`}
+                                title={t("collection_rules.conditionKeyMode")}
+                              >
+                                <option value="single">{t("collection_rules.conditionKeyModeSingle")}</option>
+                                <option value="all">{t("collection_rules.conditionKeyModeAllKeys")}</option>
+                              </select>
+                              {(cond.inventoryKeyMode ?? "single") === "single" && (
+                                <SuggestField
+                                  value={cond.inventoryKey}
+                                  options={keyOptions}
+                                  placeholder="--"
+                                  onChange={(v) => {
+                                    const next = [...conditions];
+                                    next[ci] = { ...cond, inventoryKey: v };
+                                    updateBlock(idx, { ...block, conditions: next });
+                                  }}
+                                  className="max-w-[180px]"
+                                />
+                              )}
                             </div>
-                            {(columnOptions.length > 1 || (cond.inventoryColumn && cond.inventoryColumn !== "Value#1")) && (
+                            {(cond.inventoryKeyMode ?? "single") === "all" && (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">{t("collection_rules.conditionMatch")}</span>
+                                <select
+                                  value={cond.inventoryMatch ?? "all"}
+                                  onChange={(e) => {
+                                    const next = [...conditions];
+                                    next[ci] = { ...cond, inventoryMatch: e.target.value as "all" | "any" };
+                                    updateBlock(idx, { ...block, conditions: next });
+                                  }}
+                                  className={`${smallInput} max-w-[170px]`}
+                                >
+                                  <option value="all">{t("collection_rules.conditionMatchAll")}</option>
+                                  <option value="any">{t("collection_rules.conditionMatchAny")}</option>
+                                </select>
+                              </div>
+                            )}
+                            {((cond.inventoryKeyMode ?? "single") === "all" || columnOptions.length > 1 || (cond.inventoryColumn && cond.inventoryColumn !== "Value#1")) && (
                               <div className="flex items-center gap-1.5">
                                 <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Col.</span>
                                 <SuggestField

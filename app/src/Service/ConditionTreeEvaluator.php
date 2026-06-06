@@ -101,6 +101,22 @@ class ConditionTreeEvaluator
             $col = $cond['inventoryColumn'] ?? null;
             $tag = $cond['inventoryTag'] ?? 'latest';
 
+            // "all keys" mode: apply the operator to every entry of the
+            // category/column and aggregate. `inventoryMatch` is "all" (every
+            // value must satisfy the operator) or "any" (at least one).
+            if (($cond['inventoryKeyMode'] ?? 'single') === 'all') {
+                $match = $cond['inventoryMatch'] ?? 'all';
+                $compareValue = $cond['value'] ?? null;
+                $values = $this->getAllInventoryValues($catId, $col, $node, $tag);
+                if (empty($values)) return false;
+                foreach ($values as $val) {
+                    $ok = $this->compareValue($val, $operator, $compareValue);
+                    if ($match === 'all' && !$ok) return false;
+                    if ($match === 'any' && $ok) return true;
+                }
+                return $match === 'all';
+            }
+
             $fieldValue = $this->getInventoryValue($catId, $key, $col, $node, $tag);
 
             if ($operator === 'compare_inventory_equals' || $operator === 'compare_inventory_not_equals') {
@@ -196,5 +212,44 @@ class ConditionTreeEvaluator
 
         $values = array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
         return empty($values) ? null : (count($values) === 1 ? $values[0] : implode(', ', $values));
+    }
+
+    /**
+     * Return the value of every inventory entry for the given category/column
+     * (across all keys), used by the "all keys" condition mode.
+     */
+    public function getAllInventoryValues(?int $categoryId, ?string $column, Node $node, string $tagName = 'latest'): array
+    {
+        if (!$categoryId) return [];
+
+        $category = $this->em->getRepository(InventoryCategory::class)->find($categoryId);
+        if (!$category) return [];
+
+        $col = $column ?: 'Value#1';
+
+        $filters = $this->em->getFilters();
+        $hadFilter = $tagName !== 'latest' && $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+        try {
+            $entries = $this->em->createQueryBuilder()
+                ->select('e')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
+                ->where('e.node = :node')
+                ->andWhere('e.category = :cat')
+                ->andWhere('e.colLabel = :col')
+                ->andWhere('t.name = :tag')
+                ->setParameter('node', $node)
+                ->setParameter('cat', $category)
+                ->setParameter('col', $col)
+                ->setParameter('tag', $tagName)
+                ->getQuery()
+                ->getResult();
+        } finally {
+            if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+        }
+
+        return array_map(fn(NodeInventoryEntry $e) => $e->getValue(), $entries);
     }
 }
