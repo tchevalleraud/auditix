@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
+import { usePersistedExpanded } from "@/hooks/usePersistedExpanded";
 import {
   Loader2,
   ClipboardCheck,
@@ -62,7 +63,9 @@ export default function ComplianceRulesPage() {
   const router = useRouter();
   const [tree, setTree] = useState<TreeData>({ folders: [], rootRules: [] });
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = usePersistedExpanded(
+    `compliance-rules:expanded:${current?.id ?? "none"}`,
+  );
 
   // Rule modal
   const [ruleModal, setRuleModal] = useState(false);

@@ -5,6 +5,7 @@ import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import FolderPicker from "@/components/FolderPicker";
 import { PluginManagedBanner } from "@/components/PluginManagedBanner";
+import { usePersistedExpanded } from "@/hooks/usePersistedExpanded";
 import {
   Loader2,
   Terminal,
@@ -59,7 +60,9 @@ export default function CollectionCommandsPage() {
   const { current } = useAppContext();
   const [tree, setTree] = useState<TreeData>({ folders: [], rootCommands: [] });
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = usePersistedExpanded(
+    `collection-commands:expanded:${current?.id ?? "none"}`,
+  );
 
   // Command modal
   const [cmdModal, setCmdModal] = useState(false);

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useI18n } from "@/components/I18nProvider";
 import { useAppContext } from "@/components/ContextProvider";
 import FolderPicker from "@/components/FolderPicker";
+import { usePersistedExpanded } from "@/hooks/usePersistedExpanded";
 import {
   Loader2,
   FileSearch,
@@ -68,7 +69,9 @@ export default function CollectionRulesPage() {
   const router = useRouter();
   const [tree, setTree] = useState<TreeData>({ folders: [], rootRules: [] });
   const [loading, setLoading] = useState(true);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = usePersistedExpanded(
+    `collection-rules:expanded:${current?.id ?? "none"}`,
+  );
 
   // Rule modal
   const [ruleModal, setRuleModal] = useState(false);
