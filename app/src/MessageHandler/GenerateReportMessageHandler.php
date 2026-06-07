@@ -8129,7 +8129,22 @@ class GenerateReportMessageHandler
 
     private function sanitizeParagraphHtml(string $html): string
     {
-        $html = strip_tags($html, ['p', 'br', 'b', 'strong', 'i', 'em', 'ul', 'ol', 'li']);
+        // <span> is kept so the rich-text editor's inline color and
+        // font-family marks survive into TCPDF's HTML parser.
+        $html = strip_tags($html, ['p', 'br', 'b', 'strong', 'i', 'em', 'ul', 'ol', 'li', 'span']);
+
+        // TCPDF cannot resolve arbitrary CSS family names (e.g. "Consolas"); it
+        // only ships the core fonts helvetica/times/courier. Translate every
+        // inline font-family declaration to the matching core font so the
+        // chosen typeface (notably monospace) actually renders.
+        $html = preg_replace_callback(
+            '/font-family\s*:\s*([^;"\']+)/i',
+            function (array $m): string {
+                $first = trim(explode(',', $m[1])[0], " '\"");
+                return 'font-family:' . $this->mapFont($first);
+            },
+            $html
+        );
 
         // TCPDF's HTML parser only understands a handful of named entities
         // (&nbsp; &amp; &lt; &gt; &quot;) plus numeric ones. Named spacing
@@ -8430,6 +8445,10 @@ class GenerateReportMessageHandler
             'consolas' => 'courier',
             'courier new' => 'courier',
             'courier' => 'courier',
+            // Generic CSS families, used as fallbacks for inline font-family.
+            'monospace' => 'courier',
+            'serif' => 'times',
+            'sans-serif' => 'helvetica',
         ];
         return $map[strtolower($font)] ?? 'helvetica';
     }
@@ -8707,6 +8726,10 @@ class GenerateReportMessageHandler
             $args = [];
             preg_match_all('/"([^"]*)"/', $rawArgs, $argMatches);
             $args = $argMatches[1] ?? [];
+            // Rich-text blocks store the content as HTML, so operators like ">"
+            // and "<" arrive encoded ("&gt;", "&lt;"). Decode every argument so
+            // comparisons and category/key lookups match the raw values.
+            $args = array_map(static fn(string $a): string => html_entity_decode($a, ENT_QUOTES | ENT_HTML5), $args);
 
             $contextNodes = $nodeRepo->findBy(['context' => $context]);
 

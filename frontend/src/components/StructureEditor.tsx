@@ -77,7 +77,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import UnderlineExt from "@tiptap/extension-underline";
 import SubscriptExt from "@tiptap/extension-subscript";
 import SuperscriptExt from "@tiptap/extension-superscript";
-import { TextStyle, Color } from "@tiptap/extension-text-style";
+import { TextStyle, Color, FontFamily, FontSize } from "@tiptap/extension-text-style";
 import { Highlight } from "@tiptap/extension-highlight";
 
 // --- Block types ---
@@ -2425,6 +2425,25 @@ interface InvStructure {
   entries: { key: string; columns: string[] }[];
 }
 
+// A "tab" is a fixed run of real non-breaking-space characters (U+00A0), NOT
+// the "&nbsp;" entity: insertContent() would otherwise store the entity as
+// literal text ("&nbsp;"/"&emsp;"). Real U+00A0 characters render as a visible
+// indent in the editor and serialize to &nbsp; for the PDF (TCPDF renders the
+// same run), so the width matches on screen and in the export.
+const PARAGRAPH_TAB = "\u00A0".repeat(8);
+
+// Older content inserted tabs as literal entity text, which serializes
+// double-encoded (e.g. "&amp;emsp;") and then shows up verbatim in the editor.
+// Convert those legacy sequences to real non-breaking spaces on load so they
+// display as a proper indent instead of "&emsp;".
+function normalizeLegacyTabs(html: string): string {
+  return html
+    .replace(/&amp;emsp;/g, "\u00A0\u00A0\u00A0\u00A0")
+    .replace(/&amp;ensp;/g, "\u00A0\u00A0")
+    .replace(/&amp;thinsp;/g, "\u00A0")
+    .replace(/&amp;nbsp;/g, "\u00A0");
+}
+
 function ParagraphProperties({
   block,
   updateBlock,
@@ -2501,6 +2520,10 @@ function ParagraphProperties({
 
   const editor = useEditor({
     immediatelyRender: false,
+    // Re-render the component on every transaction so the toolbar reflects the
+    // current selection (active bold/italic, the effective font size, etc.).
+    // Without this, @tiptap/react v3 never re-renders on selection changes.
+    shouldRerenderOnTransaction: true,
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false, code: false, blockquote: false, horizontalRule: false }),
       TextAlign.configure({ types: ["paragraph"] }),
@@ -2509,9 +2532,11 @@ function ParagraphProperties({
       SuperscriptExt,
       TextStyle,
       Color,
+      FontFamily,
+      FontSize,
       Highlight.configure({ multicolor: true }),
     ],
-    content: block.content || "<p></p>",
+    content: normalizeLegacyTabs(block.content || "<p></p>"),
     onUpdate: ({ editor: ed }) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = setTimeout(() => {
@@ -2540,8 +2565,22 @@ function ParagraphProperties({
     },
     editorProps: {
       attributes: { class: "prose prose-sm dark:prose-invert max-w-none focus:outline-none min-h-[80px] px-3.5 py-2.5 text-sm" },
-      handleKeyDown: (_view, event) => {
+      handleKeyDown: (view, event) => {
         if (acOpen && event.key === "Escape") { setAcOpen(false); return true; }
+        // Tab inserts a fixed-width indentation, except inside lists where Tab
+        // must keep its native behaviour (sink/lift the list item).
+        if (event.key === "Tab" && !event.shiftKey) {
+          const { $from } = view.state.selection;
+          let inList = false;
+          for (let d = $from.depth; d > 0; d--) {
+            const n = $from.node(d).type.name;
+            if (n === "listItem" || n === "bulletList" || n === "orderedList") { inList = true; break; }
+          }
+          if (!inList) {
+            editor?.chain().focus().insertContent(PARAGRAPH_TAB).run();
+            return true;
+          }
+        }
         return false;
       },
     },
@@ -2688,6 +2727,29 @@ function ParagraphProperties({
   const btnClass = (active: boolean) =>
     `p-1.5 rounded-md transition-colors ${active ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"}`;
 
+  // Font size shown in the size input: the size actually rendered for the
+  // selection, in pt. For a range we sample a position INSIDE the selection —
+  // the boundary position (from) often resolves to the parent block and would
+  // report the wrong (default) size. For an empty selection we prefer the
+  // explicit font-size mark, then fall back to the DOM-computed size.
+  const { from: selFrom, to: selTo, empty: selEmpty } = editor.state.selection;
+  const explicitFontSize = ((editor.getAttributes("textStyle").fontSize as string | undefined) || "").replace(/[^0-9.]/g, "");
+  let displayFontSize = selEmpty ? explicitFontSize : "";
+  if (!displayFontSize && typeof window !== "undefined") {
+    try {
+      const pos = selEmpty ? selFrom : Math.min(selFrom + 1, selTo);
+      const { node, offset } = editor.view.domAtPos(pos);
+      let el: Element | null = node.nodeType === Node.TEXT_NODE ? node.parentElement : (node as Element);
+      if (node.nodeType !== Node.TEXT_NODE) {
+        const child = node.childNodes[offset] ?? node.childNodes[offset - 1];
+        if (child) el = child.nodeType === Node.TEXT_NODE ? child.parentElement : (child as Element);
+      }
+      const px = el ? parseFloat(window.getComputedStyle(el).fontSize) : NaN;
+      if (px) displayFontSize = String(Math.round((px * 72) / 96));
+    } catch { /* selection not resolvable yet */ }
+    if (!displayFontSize && explicitFontSize) displayFontSize = explicitFontSize;
+  }
+
   const stepLabels: Record<string, string> = { root: "Type", node: "Noeud", category: "Categorie", key: "Cle", column: "Colonne", fn: "Fonction", fn_param: fnDefs.find((f) => f.id === acFn)?.params[acFnArgs.length] || "Parametre" };
 
   return (
@@ -2735,11 +2797,46 @@ function ParagraphProperties({
           </div>
           <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
           {/* Tab / Indent */}
-          <button type="button" onClick={() => editor.chain().focus().insertContent("&emsp;&emsp;").run()} className={btnClass(false)} title={t("structure.tab")}><IndentIncrease className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => editor.chain().focus().insertContent(PARAGRAPH_TAB).run()} className={btnClass(false)} title={t("structure.tab")}><IndentIncrease className="h-3.5 w-3.5" /></button>
           <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
           {/* Lists */}
           <button type="button" onClick={() => editor.chain().focus().toggleBulletList().run()} className={btnClass(editor.isActive("bulletList"))} title={t("structure.bulletList")}><List className="h-3.5 w-3.5" /></button>
           <button type="button" onClick={() => editor.chain().focus().toggleOrderedList().run()} className={btnClass(editor.isActive("orderedList"))} title={t("structure.numberedList")}><ListOrdered className="h-3.5 w-3.5" /></button>
+          <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          {/* Font family */}
+          <select
+            value={editor.getAttributes("textStyle").fontFamily || ""}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v) editor.chain().focus().setFontFamily(v).run();
+              else editor.chain().focus().unsetFontFamily().run();
+            }}
+            className="h-7 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-[11px] px-1.5 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 focus:outline-none"
+            title={t("structure.fontFamily")}
+          >
+            <option value="">{t("structure.fontDefault")}</option>
+            <option value="Consolas" style={{ fontFamily: "Consolas, monospace" }}>{t("structure.fontMonospace")}</option>
+            <option value="Times New Roman" style={{ fontFamily: "'Times New Roman', serif" }}>{t("structure.fontSerif")}</option>
+            <option value="Arial" style={{ fontFamily: "Arial, sans-serif" }}>{t("structure.fontSansSerif")}</option>
+          </select>
+          {/* Font size (free input, in pt) */}
+          <div className="flex items-center gap-0.5 ml-0.5">
+            <input
+              type="number"
+              min={6}
+              max={96}
+              value={displayFontSize}
+              onChange={(e) => {
+                const v = e.target.value.trim();
+                if (v) editor.chain().focus().setFontSize(`${v}pt`).run();
+                else editor.chain().focus().unsetFontSize().run();
+              }}
+              placeholder="–"
+              title={t("structure.fontSize")}
+              className="h-7 w-12 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 text-[11px] px-1.5 focus:outline-none"
+            />
+            <span className="text-[10px] text-slate-400">pt</span>
+          </div>
           {inRepeatContainer && (
             <>
               <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
@@ -8719,6 +8816,8 @@ function StaticRecLongEditor({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editor = useEditor({
     immediatelyRender: false,
+    // Keep the toolbar's active states in sync with the selection.
+    shouldRerenderOnTransaction: true,
     extensions: [
       StarterKit.configure({ heading: false, codeBlock: false, code: false, blockquote: false, horizontalRule: false }),
       UnderlineExt,
