@@ -2168,6 +2168,8 @@ class GenerateReportMessageHandler
                 $commandName = $block['commandName'] ?? '';
                 $cliNodeIds = $forNode ? [$forNode->getId()] : ($block['nodeIds'] ?? []);
                 $cliTagIds = $forNode ? [] : ($block['tagIds'] ?? []);
+                $cliManufacturerIds = $forNode ? [] : array_values(array_filter(array_map('intval', (array) ($block['manufacturerIds'] ?? [])), fn($x) => $x > 0));
+                $cliModelIds = $forNode ? [] : array_values(array_filter(array_map('intval', (array) ($block['modelIds'] ?? [])), fn($x) => $x > 0));
                 $conditionalRules = $block['conditionalRules'] ?? [];
                 $lineFilter = $block['lineFilter'] ?? '';
                 $showEllipsis = !empty($block['showEllipsis']);
@@ -2203,24 +2205,59 @@ class GenerateReportMessageHandler
                     // local or remote: resolve all target nodes from nodeIds + tagIds
                     $resolvedNodeIds = $cliNodeIds;
 
-                    // Resolve nodes from tags
+                    // Resolve nodes from tags (STATIC tags only — manual node_node_tag
+                    // assignments. Dynamic tags applied by collection rules, stored in
+                    // NodeDynamicTag, are intentionally excluded here.)
                     if (!empty($cliTagIds)) {
-                        foreach ($cliTagIds as $tagId) {
-                            $tag = $this->em->getRepository(NodeTag::class)->find($tagId);
-                            if (!$tag) continue;
-                            // Find all nodes with this tag in the same context
-                            $nodesWithTag = $this->em->getRepository(Node::class)->createQueryBuilder('n')
-                                ->innerJoin('n.tags', 't')
-                                ->where('t.id = :tagId')
-                                ->andWhere('n.context = :ctx')
-                                ->setParameter('tagId', $tagId)
-                                ->setParameter('ctx', $report->getContext())
-                                ->getQuery()
-                                ->getResult();
-                            foreach ($nodesWithTag as $n) {
-                                if (!in_array($n->getId(), $resolvedNodeIds, true)) {
-                                    $resolvedNodeIds[] = $n->getId();
-                                }
+                        $staticTagNodeIds = $this->em->getRepository(Node::class)->createQueryBuilder('n')
+                            ->select('n.id')
+                            ->innerJoin('n.tags', 't')
+                            ->where('t.id IN (:tagIds)')
+                            ->andWhere('n.context = :ctx')
+                            ->setParameter('tagIds', $cliTagIds)
+                            ->setParameter('ctx', $report->getContext())
+                            ->getQuery()
+                            ->getResult();
+                        foreach ($staticTagNodeIds as $row) {
+                            $nid = (int) $row['id'];
+                            if (!in_array($nid, $resolvedNodeIds, true)) {
+                                $resolvedNodeIds[] = $nid;
+                            }
+                        }
+                    }
+
+                    // Resolve nodes by manufacturer
+                    if (!empty($cliManufacturerIds)) {
+                        $manNodeIds = $this->em->getRepository(Node::class)->createQueryBuilder('n')
+                            ->select('n.id')
+                            ->where('n.manufacturer IN (:manIds)')
+                            ->andWhere('n.context = :ctx')
+                            ->setParameter('manIds', $cliManufacturerIds)
+                            ->setParameter('ctx', $report->getContext())
+                            ->getQuery()
+                            ->getResult();
+                        foreach ($manNodeIds as $row) {
+                            $nid = (int) $row['id'];
+                            if (!in_array($nid, $resolvedNodeIds, true)) {
+                                $resolvedNodeIds[] = $nid;
+                            }
+                        }
+                    }
+
+                    // Resolve nodes by model
+                    if (!empty($cliModelIds)) {
+                        $modelNodeIds = $this->em->getRepository(Node::class)->createQueryBuilder('n')
+                            ->select('n.id')
+                            ->where('n.model IN (:modelIds)')
+                            ->andWhere('n.context = :ctx')
+                            ->setParameter('modelIds', $cliModelIds)
+                            ->setParameter('ctx', $report->getContext())
+                            ->getQuery()
+                            ->getResult();
+                        foreach ($modelNodeIds as $row) {
+                            $nid = (int) $row['id'];
+                            if (!in_array($nid, $resolvedNodeIds, true)) {
+                                $resolvedNodeIds[] = $nid;
                             }
                         }
                     }
@@ -2390,188 +2427,216 @@ class GenerateReportMessageHandler
                     $lineNumDigits = $maxLineNum > 0 ? strlen((string) $maxLineNum) : 1;
                     $lineNumW = $cliShowLineNum ? ($lineNumDigits * $cliFontSz * 0.2) + 4 : 0;
 
-                    // Calculate total box height: header + padding + lines + padding
-                    $bodyH = ($cliPadding * 2) + (count($outputLines) * $lineH);
-                    $totalBoxH = $headerH + $bodyH;
-
-                    // Check page break
-                    $startY = $pdf->GetY();
-                    if ($startY + $totalBoxH > $pdf->getPageHeight() - $mBottom) {
-                        $pdf->AddPage();
-                        $startY = $pdf->GetY();
-                    }
-
-                    // Draw the full outer box: body background + border (single rounded rect)
-                    $pdf->SetDrawColor($cliBorder[0], $cliBorder[1], $cliBorder[2]);
-                    $pdf->SetLineWidth(0.3);
-                    $pdf->SetFillColor($cliBg[0], $cliBg[1], $cliBg[2]);
-                    if ($cliBorderRadius > 0) {
-                        $pdf->RoundedRect($mLeft, $startY, $contentW, $totalBoxH, $cliBorderRadius, '1111', 'DF');
-                    } else {
-                        $pdf->Rect($mLeft, $startY, $contentW, $totalBoxH, 'DF');
-                    }
-
-                    // --- Header bar overlay ---
-                    if ($cliShowHeader) {
-                        // Fill header area on top (no border, top corners rounded)
-                        $pdf->SetFillColor($cliHeaderBg[0], $cliHeaderBg[1], $cliHeaderBg[2]);
-                        if ($cliBorderRadius > 0) {
-                            $pdf->RoundedRect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, $cliBorderRadius, '1001', 'F');
-                        } else {
-                            $pdf->Rect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, 'F');
-                        }
-
-                        // Header text: command name on left, device name on right
-                        $pdf->SetFont($cliFont, 'B', $cliHeaderFontSz);
-                        $pdf->SetTextColor($cliHeaderText[0], $cliHeaderText[1], $cliHeaderText[2]);
-                        $headerTextY = $startY + ($headerH - $headerBaseLineH) / 2;
-                        $headerTextW = $contentW - ($cliPadding * 2);
-
-                        // Command name (left)
-                        $cmdTitle = !empty($commandName) ? $commandName : '';
-                        if (!empty($cmdTitle)) {
-                            $pdf->MultiCell($headerTextW * 0.7, $headerBaseLineH, $cmdTitle, 0, 'L', false, 0, $mLeft + $cliPadding, $headerTextY, true, 0, false, true, 0, 'M');
-                        }
-
-                        // Device name (right)
-                        if ($entryLabel) {
-                            $pdf->SetFont($cliFont, '', $cliHeaderFontSz - 1);
-                            $pdf->MultiCell($headerTextW * 0.3, $headerBaseLineH, $entryLabel, 0, 'R', false, 0, $mLeft + $cliPadding + $headerTextW * 0.7, $headerTextY, true, 0, false, true, 0, 'M');
-                        }
-                    }
-
-                    // Render lines
-                    $curY = $startY + $headerH + $cliPadding;
+                    // Paginate the output: each page segment draws its own self-contained
+                    // box (background, border, repeated header) and only as many lines as
+                    // fit on the page, so long command output flows cleanly across pages
+                    // instead of overflowing past the bottom margin.
                     $textX = $mLeft + $cliPadding + $lineNumW;
                     $textW = $contentW - ($cliPadding * 2) - $lineNumW;
+                    $pageBottom = $pdf->getPageHeight() - $mBottom;
 
-                    // Clip content to the box area with padding so text doesn't touch the border
-                    $pdf->StartTransform();
-                    $pdf->Rect($mLeft + $cliPadding, $startY, $contentW - ($cliPadding * 2), $totalBoxH, 'CNZ');
+                    $lineCount = count($outputLines);
+                    $lineIdx = 0;
+                    $isFirstSegment = true;
 
-                    foreach ($outputLines as $ol) {
-                        if ($ol['type'] === 'ellipsis') {
-                            $pdf->SetFont($cliFont, 'I', $cliFontSz);
-                            $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
-                            $pdf->SetXY($textX, $curY);
-                            $pdf->Cell($textW, $lineH, '[...]', 0, 0, 'L');
-                            $curY += $lineH;
-                            continue;
+                    while ($lineIdx < $lineCount) {
+                        if ($isFirstSegment) {
+                            $startY = $pdf->GetY();
+                        } else {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
                         }
 
-                        $lineText = $ol['text'];
-                        $lineNum = $ol['num'];
+                        // If not even the header plus one line fits here, start a new page.
+                        $minSegH = $headerH + ($cliPadding * 2) + $lineH;
+                        if ($startY + $minSegH > $pageBottom) {
+                            $pdf->AddPage();
+                            $startY = $pdf->GetY();
+                        }
 
-                        // Evaluate style rules for this line (first match wins)
-                        $matchedRule = null;
-                        $matchedSegments = null;
-                        foreach ($cliRules as $rule) {
-                            $ruleOp = $rule['operator'] ?? 'matches';
-                            $pattern = $rule['pattern'] ?? '';
-                            if (empty($pattern)) continue;
+                        // How many lines fit in the remaining space on this page.
+                        $availForLines = $pageBottom - $startY - $headerH - ($cliPadding * 2);
+                        $maxLinesThisPage = (int) floor($availForLines / $lineH);
+                        if ($maxLinesThisPage < 1) $maxLinesThisPage = 1;
+                        $linesThisPage = min($maxLinesThisPage, $lineCount - $lineIdx);
 
-                            $match = false;
-                            $segments = null;
-                            switch ($ruleOp) {
-                                case 'matches':
-                                    if (@preg_match('/' . $pattern . '/', $lineText, $m, PREG_OFFSET_CAPTURE)) {
-                                        $match = true;
-                                        $segments = $m;
+                        $segBodyH = ($cliPadding * 2) + ($linesThisPage * $lineH);
+                        $segBoxH = $headerH + $segBodyH;
+
+                        // Draw the outer box for this segment: body background + border
+                        $pdf->SetDrawColor($cliBorder[0], $cliBorder[1], $cliBorder[2]);
+                        $pdf->SetLineWidth(0.3);
+                        $pdf->SetFillColor($cliBg[0], $cliBg[1], $cliBg[2]);
+                        if ($cliBorderRadius > 0) {
+                            $pdf->RoundedRect($mLeft, $startY, $contentW, $segBoxH, $cliBorderRadius, '1111', 'DF');
+                        } else {
+                            $pdf->Rect($mLeft, $startY, $contentW, $segBoxH, 'DF');
+                        }
+
+                        // --- Header bar overlay (repeated on every page segment) ---
+                        if ($cliShowHeader) {
+                            // Fill header area on top (no border, top corners rounded)
+                            $pdf->SetFillColor($cliHeaderBg[0], $cliHeaderBg[1], $cliHeaderBg[2]);
+                            if ($cliBorderRadius > 0) {
+                                $pdf->RoundedRect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, $cliBorderRadius, '1001', 'F');
+                            } else {
+                                $pdf->Rect($mLeft + 0.15, $startY + 0.15, $contentW - 0.3, $headerH - 0.15, 'F');
+                            }
+
+                            // Header text: command name on left, device name on right
+                            $pdf->SetFont($cliFont, 'B', $cliHeaderFontSz);
+                            $pdf->SetTextColor($cliHeaderText[0], $cliHeaderText[1], $cliHeaderText[2]);
+                            $headerTextY = $startY + ($headerH - $headerBaseLineH) / 2;
+                            $headerTextW = $contentW - ($cliPadding * 2);
+
+                            // Command name (left)
+                            $cmdTitle = !empty($commandName) ? $commandName : '';
+                            if (!empty($cmdTitle)) {
+                                $pdf->MultiCell($headerTextW * 0.7, $headerBaseLineH, $cmdTitle, 0, 'L', false, 0, $mLeft + $cliPadding, $headerTextY, true, 0, false, true, 0, 'M');
+                            }
+
+                            // Device name (right)
+                            if ($entryLabel) {
+                                $pdf->SetFont($cliFont, '', $cliHeaderFontSz - 1);
+                                $pdf->MultiCell($headerTextW * 0.3, $headerBaseLineH, $entryLabel, 0, 'R', false, 0, $mLeft + $cliPadding + $headerTextW * 0.7, $headerTextY, true, 0, false, true, 0, 'M');
+                            }
+                        }
+
+                        // Render the lines belonging to this segment
+                        $curY = $startY + $headerH + $cliPadding;
+
+                        // Clip content to the box area with padding so text doesn't touch the border
+                        $pdf->StartTransform();
+                        $pdf->Rect($mLeft + $cliPadding, $startY, $contentW - ($cliPadding * 2), $segBoxH, 'CNZ');
+
+                        for ($k = 0; $k < $linesThisPage; $k++) {
+                            $ol = $outputLines[$lineIdx + $k];
+                            if ($ol['type'] === 'ellipsis') {
+                                $pdf->SetFont($cliFont, 'I', $cliFontSz);
+                                $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
+                                $pdf->SetXY($textX, $curY);
+                                $pdf->Cell($textW, $lineH, '[...]', 0, 0, 'L');
+                                $curY += $lineH;
+                                continue;
+                            }
+
+                            $lineText = $ol['text'];
+                            $lineNum = $ol['num'];
+
+                            // Evaluate style rules for this line (first match wins)
+                            $matchedRule = null;
+                            $matchedSegments = null;
+                            foreach ($cliRules as $rule) {
+                                $ruleOp = $rule['operator'] ?? 'matches';
+                                $pattern = $rule['pattern'] ?? '';
+                                if (empty($pattern)) continue;
+
+                                $match = false;
+                                $segments = null;
+                                switch ($ruleOp) {
+                                    case 'matches':
+                                        if (@preg_match('/' . $pattern . '/', $lineText, $m, PREG_OFFSET_CAPTURE)) {
+                                            $match = true;
+                                            $segments = $m;
+                                        }
+                                        break;
+                                    case 'not_matches':
+                                        $match = !@preg_match('/' . $pattern . '/', $lineText);
+                                        break;
+                                    case 'contains':
+                                        $match = str_contains(mb_strtolower($lineText), mb_strtolower($pattern));
+                                        break;
+                                    case 'not_contains':
+                                        $match = !str_contains(mb_strtolower($lineText), mb_strtolower($pattern));
+                                        break;
+                                    case 'eq':
+                                        $match = trim($lineText) === $pattern;
+                                        break;
+                                    case 'neq':
+                                        $match = trim($lineText) !== $pattern;
+                                        break;
+                                }
+
+                                if ($match) {
+                                    $matchedRule = $rule;
+                                    if ($ruleOp === 'matches' && $segments) {
+                                        $matchedSegments = $segments;
                                     }
                                     break;
-                                case 'not_matches':
-                                    $match = !@preg_match('/' . $pattern . '/', $lineText);
-                                    break;
-                                case 'contains':
-                                    $match = str_contains(mb_strtolower($lineText), mb_strtolower($pattern));
-                                    break;
-                                case 'not_contains':
-                                    $match = !str_contains(mb_strtolower($lineText), mb_strtolower($pattern));
-                                    break;
-                                case 'eq':
-                                    $match = trim($lineText) === $pattern;
-                                    break;
-                                case 'neq':
-                                    $match = trim($lineText) !== $pattern;
-                                    break;
-                            }
-
-                            if ($match) {
-                                $matchedRule = $rule;
-                                if ($ruleOp === 'matches' && $segments) {
-                                    $matchedSegments = $segments;
                                 }
-                                break;
                             }
-                        }
 
-                        // Draw line number
-                        if ($cliShowLineNum) {
-                            $pdf->SetFont($cliFont, '', $cliFontSz);
-                            $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
-                            $pdf->SetXY($mLeft + $cliPadding, $curY);
-                            $pdf->Cell($lineNumW - 2, $lineH, (string) $lineNum, 0, 0, 'R');
-                        }
+                            // Draw line number
+                            if ($cliShowLineNum) {
+                                $pdf->SetFont($cliFont, '', $cliFontSz);
+                                $pdf->SetTextColor($cliLineNumColor[0], $cliLineNumColor[1], $cliLineNumColor[2]);
+                                $pdf->SetXY($mLeft + $cliPadding, $curY);
+                                $pdf->Cell($lineNumW - 2, $lineH, (string) $lineNum, 0, 0, 'R');
+                            }
 
-                        // Determine line style from rule
-                        $fontStyle = '';
-                        $lineTextColor = $cliText;
-                        $lineBgColor = null;
-                        $highlightColor = null;
-                        $highlightMode = 'match';
+                            // Determine line style from rule
+                            $fontStyle = '';
+                            $lineTextColor = $cliText;
+                            $lineBgColor = null;
+                            $highlightColor = null;
+                            $highlightMode = 'match';
 
-                        if ($matchedRule) {
-                            if (!empty($matchedRule['bold'])) $fontStyle .= 'B';
-                            if (!empty($matchedRule['italic'])) $fontStyle .= 'I';
-                            if (!empty($matchedRule['textColor'])) $lineTextColor = $this->hexToRgb($matchedRule['textColor']);
-                            if (!empty($matchedRule['bgColor'])) $lineBgColor = $this->hexToRgb($matchedRule['bgColor']);
-                            if (!empty($matchedRule['highlightColor'])) $highlightColor = $matchedRule['highlightColor'];
-                            $highlightMode = $matchedRule['highlightMode'] ?? 'match';
-                        }
+                            if ($matchedRule) {
+                                if (!empty($matchedRule['bold'])) $fontStyle .= 'B';
+                                if (!empty($matchedRule['italic'])) $fontStyle .= 'I';
+                                if (!empty($matchedRule['textColor'])) $lineTextColor = $this->hexToRgb($matchedRule['textColor']);
+                                if (!empty($matchedRule['bgColor'])) $lineBgColor = $this->hexToRgb($matchedRule['bgColor']);
+                                if (!empty($matchedRule['highlightColor'])) $highlightColor = $matchedRule['highlightColor'];
+                                $highlightMode = $matchedRule['highlightMode'] ?? 'match';
+                            }
 
-                        // Draw line background if rule has bgColor
-                        if ($lineBgColor) {
-                            $pdf->SetFillColor($lineBgColor[0], $lineBgColor[1], $lineBgColor[2]);
-                            $pdf->Rect($textX, $curY, $textW, $lineH, 'F');
-                        }
+                            // Draw line background if rule has bgColor
+                            if ($lineBgColor) {
+                                $pdf->SetFillColor($lineBgColor[0], $lineBgColor[1], $lineBgColor[2]);
+                                $pdf->Rect($textX, $curY, $textW, $lineH, 'F');
+                            }
 
-                        // Handle highlight
-                        if ($highlightColor && $highlightMode === 'line') {
-                            $hlRgb = $this->hexToRgb($highlightColor);
-                            $pdf->SetFillColor($hlRgb[0], $hlRgb[1], $hlRgb[2]);
-                            $lineStrW = $pdf->GetStringWidth($lineText) + 2;
-                            $pdf->Rect($textX, $curY, min($lineStrW, $textW), $lineH, 'F');
-                        }
+                            // Handle highlight
+                            if ($highlightColor && $highlightMode === 'line') {
+                                $hlRgb = $this->hexToRgb($highlightColor);
+                                $pdf->SetFillColor($hlRgb[0], $hlRgb[1], $hlRgb[2]);
+                                $lineStrW = $pdf->GetStringWidth($lineText) + 2;
+                                $pdf->Rect($textX, $curY, min($lineStrW, $textW), $lineH, 'F');
+                            }
 
-                        if ($highlightColor && $highlightMode === 'match' && $matchedSegments && !empty($matchedSegments[0])) {
-                            $matchText = $matchedSegments[0][0];
-                            $matchOffset = $matchedSegments[0][1];
-                            $beforeMatch = substr($lineText, 0, $matchOffset);
+                            if ($highlightColor && $highlightMode === 'match' && $matchedSegments && !empty($matchedSegments[0])) {
+                                $matchText = $matchedSegments[0][0];
+                                $matchOffset = $matchedSegments[0][1];
+                                $beforeMatch = substr($lineText, 0, $matchOffset);
 
+                                $pdf->SetFont($cliFont, $fontStyle, $cliFontSz);
+                                $beforeW = $pdf->GetStringWidth($beforeMatch);
+                                $matchW = $pdf->GetStringWidth($matchText);
+
+                                $hlRgb = $this->hexToRgb($highlightColor);
+                                $pdf->SetFillColor($hlRgb[0], $hlRgb[1], $hlRgb[2]);
+                                $pdf->Rect($textX + $beforeW, $curY, $matchW + 1, $lineH, 'F');
+                            }
+
+                            // Draw text
                             $pdf->SetFont($cliFont, $fontStyle, $cliFontSz);
-                            $beforeW = $pdf->GetStringWidth($beforeMatch);
-                            $matchW = $pdf->GetStringWidth($matchText);
+                            $pdf->SetTextColor($lineTextColor[0], $lineTextColor[1], $lineTextColor[2]);
+                            $pdf->SetXY($textX, $curY);
+                            $pdf->Cell($textW, $lineH, $lineText, 0, 0, 'L');
 
-                            $hlRgb = $this->hexToRgb($highlightColor);
-                            $pdf->SetFillColor($hlRgb[0], $hlRgb[1], $hlRgb[2]);
-                            $pdf->Rect($textX + $beforeW, $curY, $matchW + 1, $lineH, 'F');
+                            $curY += $lineH;
                         }
 
-                        // Draw text
-                        $pdf->SetFont($cliFont, $fontStyle, $cliFontSz);
-                        $pdf->SetTextColor($lineTextColor[0], $lineTextColor[1], $lineTextColor[2]);
-                        $pdf->SetXY($textX, $curY);
-                        $pdf->Cell($textW, $lineH, $lineText, 0, 0, 'L');
+                        $pdf->StopTransform();
 
-                        $curY += $lineH;
+                        // Reset fill color
+                        $pdf->SetFillColor($cliBg[0], $cliBg[1], $cliBg[2]);
+                        $pdf->SetXY($mLeft, $startY + $segBoxH);
+
+                        $lineIdx += $linesThisPage;
+                        $isFirstSegment = false;
                     }
 
-                    $pdf->StopTransform();
-
-                    // Reset fill color
-                    $pdf->SetFillColor($cliBg[0], $cliBg[1], $cliBg[2]);
-
-                    $pdf->SetXY($mLeft, $startY + $totalBoxH);
                     $pdf->SetFont($bodyFont, '', $bodySize);
                     $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
                 }
@@ -5637,12 +5702,18 @@ class GenerateReportMessageHandler
                 break;
 
             case 'cli_command':
+                // Inherited scope is authoritative: clear manufacturer/model filters
+                // so they cannot re-widen the node selection beyond the parent scope.
                 if ($scope === 'nodes') {
                     $block['nodeIds'] = $nodeIds;
                     $block['tagIds'] = [];
+                    $block['manufacturerIds'] = [];
+                    $block['modelIds'] = [];
                 } elseif ($scope === 'tag') {
                     $block['tagIds'] = $tagIds;
                     $block['nodeIds'] = [];
+                    $block['manufacturerIds'] = [];
+                    $block['modelIds'] = [];
                 }
                 break;
 

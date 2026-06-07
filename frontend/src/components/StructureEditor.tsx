@@ -326,6 +326,8 @@ export interface CliCommandBlock {
   dataSource: "none" | "local" | "remote";
   nodeIds: number[];
   tagIds: number[];
+  manufacturerIds?: number[];
+  modelIds?: number[];
   lineFilter?: string;
   showEllipsis: boolean;
   fontSize?: number;
@@ -5994,14 +5996,19 @@ function CliCommandProperties({
   const dataSource = block.dataSource || "none";
   const nodeIds = block.nodeIds || [];
   const tagIds = block.tagIds || [];
+  const manufacturerIds = block.manufacturerIds || [];
+  const modelIds = block.modelIds || [];
   const conditionalRules = block.conditionalRules ?? [];
 
   const defaultTab: CliTab = "params";
   const [tab, setTab] = useState<CliTab>(defaultTab);
   const [allNodes, setAllNodes] = useState<NodeItem[]>([]);
   const [allTags, setAllTags] = useState<TagItem[]>([]);
+  const [allManufacturers, setAllManufacturers] = useState<InvManufacturerItem[]>([]);
+  const [allModels, setAllModels] = useState<InvModelItem[]>([]);
   const [nodesLoaded, setNodesLoaded] = useState(false);
   const [tagsLoaded, setTagsLoaded] = useState(false);
+  const [refsLoaded, setRefsLoaded] = useState(false);
   const [nodeSearch, setNodeSearch] = useState("");
   const [nodePickerOpen, setNodePickerOpen] = useState(false);
 
@@ -6023,6 +6030,21 @@ function CliCommandProperties({
       .catch(() => setTagsLoaded(true));
   }, [current, tagsLoaded]);
 
+  // Load manufacturers + models
+  useEffect(() => {
+    if (!current || refsLoaded) return;
+    Promise.all([
+      fetch(`/api/manufacturers?context=${current.id}`).then((r) => r.ok ? r.json() : []),
+      fetch(`/api/models?context=${current.id}`).then((r) => r.ok ? r.json() : []),
+    ])
+      .then(([mans, mods]: [InvManufacturerItem[], InvModelItem[]]) => {
+        setAllManufacturers(mans);
+        setAllModels(mods);
+        setRefsLoaded(true);
+      })
+      .catch(() => setRefsLoaded(true));
+  }, [current, refsLoaded]);
+
   const selectedNodes = allNodes.filter((n) => nodeIds.includes(n.id));
   const availableNodes = allNodes.filter(
     (n) =>
@@ -6034,11 +6056,19 @@ function CliCommandProperties({
   );
   const selectedTags = allTags.filter((tg) => tagIds.includes(tg.id));
   const availableTags = allTags.filter((tg) => !tagIds.includes(tg.id));
+  const selectedManufacturers = allManufacturers.filter((m) => manufacturerIds.includes(m.id));
+  const availableManufacturers = allManufacturers.filter((m) => !manufacturerIds.includes(m.id));
+  const selectedModels = allModels.filter((m) => modelIds.includes(m.id));
+  const availableModels = allModels.filter((m) => !modelIds.includes(m.id));
 
   const addNode = (id: number) => updateBlock(block.id, { nodeIds: [...nodeIds, id] });
   const removeNode = (id: number) => updateBlock(block.id, { nodeIds: nodeIds.filter((n) => n !== id) });
   const addTagId = (id: number) => updateBlock(block.id, { tagIds: [...tagIds, id] });
   const removeTagId = (id: number) => updateBlock(block.id, { tagIds: tagIds.filter((t2) => t2 !== id) });
+  const addManufacturerId = (id: number) => updateBlock(block.id, { manufacturerIds: [...manufacturerIds, id] });
+  const removeManufacturerId = (id: number) => updateBlock(block.id, { manufacturerIds: manufacturerIds.filter((m) => m !== id) });
+  const addModelId = (id: number) => updateBlock(block.id, { modelIds: [...modelIds, id] });
+  const removeModelId = (id: number) => updateBlock(block.id, { modelIds: modelIds.filter((m) => m !== id) });
 
   // Conditional rules
   const addConditional = () => {
@@ -6137,7 +6167,7 @@ function CliCommandProperties({
         {dataSource !== "none" && (
           <button type="button" className={tabBtnClass(tab === "devices")} onClick={() => setTab("devices")}>
             {t("structure.cliTabDevices")}
-            {(nodeIds.length > 0 || tagIds.length > 0) && <span className="ml-1 inline-flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold w-4 h-4">{nodeIds.length + tagIds.length}</span>}
+            {(nodeIds.length > 0 || tagIds.length > 0 || manufacturerIds.length > 0 || modelIds.length > 0) && <span className="ml-1 inline-flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-[10px] font-bold w-4 h-4">{nodeIds.length + tagIds.length + manufacturerIds.length + modelIds.length}</span>}
           </button>
         )}
         <button type="button" className={tabBtnClass(tab === "style")} onClick={() => setTab("style")}>{t("structure.inventoryStyle")}</button>
@@ -6261,6 +6291,56 @@ function CliCommandProperties({
                   <option value="">{t("structure.cliAddTag")}</option>
                   {availableTags.map((tg) => (
                     <option key={tg.id} value={tg.id}>{tg.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* By manufacturer */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliByManufacturer")}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedManufacturers.map((m) => (
+                <span key={m.id} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300">
+                  {m.name}
+                  <button onClick={() => removeManufacturerId(m.id)} className="ml-0.5 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
+                </span>
+              ))}
+              {availableManufacturers.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) addManufacturerId(Number(e.target.value)); }}
+                  className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 cursor-pointer focus:outline-none"
+                >
+                  <option value="">{t("structure.cliAddManufacturer")}</option>
+                  {availableManufacturers.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* By model */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.cliByModel")}</label>
+            <div className="flex flex-wrap gap-1.5">
+              {selectedModels.map((m) => (
+                <span key={m.id} className="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300">
+                  {m.name}
+                  <button onClick={() => removeModelId(m.id)} className="ml-0.5 text-slate-400 hover:text-red-500 transition-colors"><X className="h-3 w-3" /></button>
+                </span>
+              ))}
+              {availableModels.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => { if (e.target.value) addModelId(Number(e.target.value)); }}
+                  className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 bg-transparent px-2 py-1 text-xs text-slate-500 dark:text-slate-400 cursor-pointer focus:outline-none"
+                >
+                  <option value="">{t("structure.cliAddModel")}</option>
+                  {availableModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.manufacturer?.name ? `${m.manufacturer.name} — ${m.name}` : m.name}</option>
                   ))}
                 </select>
               )}
