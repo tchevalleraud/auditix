@@ -7,7 +7,9 @@ use App\Entity\Node;
 use App\Entity\Report;
 use App\Entity\ReportTheme;
 use App\Message\GenerateReportMessage;
+use App\Repository\WorkerPoolSettingsRepository;
 use App\Security\Voter\ContextAccessVoter;
+use App\Service\DockerApiClient;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -254,6 +256,50 @@ class ReportController extends AbstractController
         $bus->dispatch(new GenerateReportMessage($report->getId()));
 
         return $this->json($this->serialize($report));
+    }
+
+    #[Route('/{id}/reset', methods: ['POST'])]
+    public function reset(
+        Report $report,
+        EntityManagerInterface $em,
+        WorkerPoolSettingsRepository $workerSettings,
+        DockerApiClient $docker,
+    ): JsonResponse {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $report);
+
+        // Free the button: clear the stuck generation status. The previous
+        // worker may have crashed mid-run and never reset it.
+        $report->setGeneratingStatus(null);
+        $em->flush();
+
+        // Best-effort restart of the generator workers so a fresh consumer is
+        // available for the next generation. This never fails the request: if
+        // the Docker socket is unavailable, only the status reset matters.
+        $restarted = 0;
+        $failed = 0;
+        $dockerAvailable = $docker->isAvailable();
+        if ($dockerAvailable) {
+            $settings = $workerSettings->findByQueue('generator');
+            $service = $settings?->getServiceName() ?? 'worker-generator';
+            foreach ($docker->listContainersByService($service, false) as $container) {
+                $containerId = (string) ($container['Id'] ?? '');
+                if ($containerId === '') {
+                    continue;
+                }
+                if ($docker->restartContainer($containerId)) {
+                    $restarted++;
+                } else {
+                    $failed++;
+                }
+            }
+        }
+
+        return $this->json([
+            'report' => $this->serialize($report),
+            'dockerAvailable' => $dockerAvailable,
+            'workersRestarted' => $restarted,
+            'workersFailed' => $failed,
+        ]);
     }
 
     #[Route('/{id}/download', methods: ['GET'])]

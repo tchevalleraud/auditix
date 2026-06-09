@@ -96,6 +96,12 @@ class DockerApiClient
         return $code === 204 || $code === 304;
     }
 
+    public function restartContainer(string $id, int $timeoutSeconds = 10): bool
+    {
+        $code = $this->requestRaw('POST', '/containers/' . rawurlencode($id) . '/restart?t=' . $timeoutSeconds, null);
+        return $code === 204;
+    }
+
     public function removeContainer(string $id, bool $force = false): bool
     {
         $code = $this->requestRaw('DELETE', '/containers/' . rawurlencode($id) . ($force ? '?force=true' : ''), null);
