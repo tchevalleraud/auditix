@@ -644,8 +644,16 @@ class TopologyV2SvgRenderer
         foreach ($byPair as $group) {
             usort($group, fn(TopologyEdge $a, TopologyEdge $b) => $a->getId() <=> $b->getId());
             $n = count($group);
+            // Per-pair spacing: honour parallelSpacing set on any edge of the pair
+            // (matches the frontend), otherwise use the default. Stored as a px
+            // perpendicular offset so buildPath/pointAt use it directly.
+            $spacing = 18.0;
+            foreach ($group as $e) {
+                $ps = $e->getStyle()['parallelSpacing'] ?? null;
+                if (is_numeric($ps)) { $spacing = (float) $ps; break; }
+            }
             foreach ($group as $i => $e) {
-                $offsets[$e->getId()] = $i - ($n - 1) / 2;
+                $offsets[$e->getId()] = ($i - ($n - 1) / 2) * $spacing;
             }
         }
         return $offsets;
@@ -999,21 +1007,20 @@ class TopologyV2SvgRenderer
         };
     }
 
-    private function buildPath(array $style, float $sx, float $sy, float $tx, float $ty, float $offsetIndex): string
+    private function buildPath(array $style, float $sx, float $sy, float $tx, float $ty, float $offset): string
     {
-        $spacing = 18;
         if (($style['type'] ?? 'straight') === 'orthogonal') {
-            $mx = ($sx + $tx) / 2 + $offsetIndex * $spacing;
+            $mx = ($sx + $tx) / 2 + $offset;
             return 'M ' . $this->fmt($sx) . ' ' . $this->fmt($sy) . ' L ' . $this->fmt($mx) . ' ' . $this->fmt($sy) . ' L ' . $this->fmt($mx) . ' ' . $this->fmt($ty) . ' L ' . $this->fmt($tx) . ' ' . $this->fmt($ty);
         }
-        if (($style['type'] ?? 'straight') === 'curved' || $offsetIndex != 0) {
+        if (($style['type'] ?? 'straight') === 'curved' || $offset != 0) {
             $tension = ($style['type'] ?? 'straight') === 'curved' ? (float)($style['curveTension'] ?? 0.3) : 0;
             $dx = $tx - $sx;
             $dy = $ty - $sy;
             $len = sqrt($dx * $dx + $dy * $dy) ?: 1;
             $px = -$dy / $len;
             $py = $dx / $len;
-            $totalOff = $len * $tension + $offsetIndex * $spacing;
+            $totalOff = $len * $tension + $offset;
             $cx = ($sx + $tx) / 2 + $px * $totalOff;
             $cy = ($sy + $ty) / 2 + $py * $totalOff;
             return 'M ' . $this->fmt($sx) . ' ' . $this->fmt($sy) . ' Q ' . $this->fmt($cx) . ' ' . $this->fmt($cy) . ' ' . $this->fmt($tx) . ' ' . $this->fmt($ty);
@@ -1021,12 +1028,11 @@ class TopologyV2SvgRenderer
         return 'M ' . $this->fmt($sx) . ' ' . $this->fmt($sy) . ' L ' . $this->fmt($tx) . ' ' . $this->fmt($ty);
     }
 
-    private function pointAt(array $style, float $sx, float $sy, float $tx, float $ty, float $ratio, float $offsetIndex): array
+    private function pointAt(array $style, float $sx, float $sy, float $tx, float $ty, float $ratio, float $offset): array
     {
-        $spacing = 18;
         $type = $style['type'] ?? 'straight';
         if ($type === 'orthogonal') {
-            $mx = ($sx + $tx) / 2 + $offsetIndex * $spacing;
+            $mx = ($sx + $tx) / 2 + $offset;
             $seg1 = abs($mx - $sx);
             $seg2 = abs($ty - $sy);
             $seg3 = abs($tx - $mx);
@@ -1043,14 +1049,14 @@ class TopologyV2SvgRenderer
             $r = $seg3 === 0.0 ? 0 : ($target - $seg1 - $seg2) / $seg3;
             return ['x' => $mx + ($tx - $mx) * $r, 'y' => $ty];
         }
-        if ($type === 'curved' || $offsetIndex != 0) {
+        if ($type === 'curved' || $offset != 0) {
             $tension = $type === 'curved' ? (float)($style['curveTension'] ?? 0.3) : 0;
             $dx = $tx - $sx;
             $dy = $ty - $sy;
             $len = sqrt($dx * $dx + $dy * $dy) ?: 1;
             $px = -$dy / $len;
             $py = $dx / $len;
-            $totalOff = $len * $tension + $offsetIndex * $spacing;
+            $totalOff = $len * $tension + $offset;
             $cx = ($sx + $tx) / 2 + $px * $totalOff;
             $cy = ($sy + $ty) / 2 + $py * $totalOff;
             $u = 1 - $ratio;

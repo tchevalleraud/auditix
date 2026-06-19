@@ -22,6 +22,10 @@ class Topology
     #[ORM\Column(length: 255)]
     private string $name;
 
+    #[ORM\ManyToOne(targetEntity: TopologyFolder::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?TopologyFolder $folder = null;
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
@@ -72,6 +76,8 @@ class Topology
     public function setContext(Context $v): static { $this->context = $v; return $this; }
     public function getName(): string { return $this->name; }
     public function setName(string $v): static { $this->name = $v; $this->touch(); return $this; }
+    public function getFolder(): ?TopologyFolder { return $this->folder; }
+    public function setFolder(?TopologyFolder $v): static { $this->folder = $v; $this->touch(); return $this; }
     public function getDescription(): ?string { return $this->description; }
     public function setDescription(?string $v): static { $this->description = $v; $this->touch(); return $this; }
     public function isPrimary(): bool { return $this->isPrimary; }

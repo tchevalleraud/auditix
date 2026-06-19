@@ -19,12 +19,15 @@ import {
   Layers,
   Loader2,
   Maximize2,
+  Minus,
+  Plus,
   RefreshCw,
   SendToBack,
   Settings,
   Square,
   Trash2,
   Type as TypeIcon,
+  UnfoldHorizontal,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -75,6 +78,10 @@ interface GraphEdgeStyle {
   width: number;
   dash: "solid" | "dashed" | "dotted";
   curveTension?: number;
+  // Perpendicular gap (px) between parallel links of the same node pair. When
+  // set on any edge of a pair, it overrides the default PARALLEL_SPACING for the
+  // whole pair. Lets the user widen the spacing to avoid label overlap.
+  parallelSpacing?: number;
   labels?: GraphEdgeLabel[];
   aggregationGroup?: string;
   aggregationLabel?: string;
@@ -724,6 +731,30 @@ export default function TopologyMap({ topologyId }: Props) {
     });
   };
 
+  // When exactly two nodes are selected and they share 2+ parallel links, expose
+  // a control to widen/narrow the gap between those links (avoids label overlap).
+  const selectedPair = useMemo(() => {
+    if (selectedNodeIds.size !== 2 || !data) return null;
+    const [a, b] = Array.from(selectedNodeIds);
+    const edges = data.edges.filter((e) =>
+      (e.sourceNodeId === a && e.targetNodeId === b) || (e.sourceNodeId === b && e.targetNodeId === a),
+    );
+    if (edges.length < 2) return null;
+    let spacing = PARALLEL_SPACING;
+    for (const e of edges) {
+      if (typeof e.style.parallelSpacing === "number") { spacing = e.style.parallelSpacing; break; }
+    }
+    return { edges, spacing };
+  }, [selectedNodeIds, data]);
+
+  const setPairSpacing = async (value: number) => {
+    if (!selectedPair) return;
+    const v = Math.max(2, Math.min(120, Math.round(value)));
+    for (const e of selectedPair.edges) {
+      await saveEdgeStyle(e.id, { parallelSpacing: v });
+    }
+  };
+
   // Centroid of every visible node, used to push cluster labels outward (toward map edges)
   const mapCentroid = useMemo<{ x: number; y: number } | null>(() => {
     if (!data) return null;
@@ -929,7 +960,13 @@ export default function TopologyMap({ topologyId }: Props) {
     for (const group of byPair.values()) {
       group.sort((a, b) => a.id - b.id);
       const n = group.length;
-      group.forEach((edge, i) => offsets.set(edge.id, i - (n - 1) / 2));
+      // Per-pair spacing: honour an explicit parallelSpacing set on any edge of
+      // the pair, otherwise use the default. Stored as a px perpendicular offset.
+      let spacing = PARALLEL_SPACING;
+      for (const e of group) {
+        if (typeof e.style.parallelSpacing === "number") { spacing = e.style.parallelSpacing; break; }
+      }
+      group.forEach((edge, i) => offsets.set(edge.id, (i - (n - 1) / 2) * spacing));
     }
 
     // Build explicit aggregation groups, keyed by (pair, aggregationGroup).
@@ -1362,6 +1399,29 @@ export default function TopologyMap({ topologyId }: Props) {
             >
               <AlignVerticalDistributeCenter className="h-4 w-4" />
             </button>
+            {selectedPair && (
+              <>
+                <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-0.5" />
+                <UnfoldHorizontal className="h-4 w-4 text-slate-400 mx-0.5" />
+                <button
+                  onClick={() => setPairSpacing(selectedPair.spacing - 4)}
+                  className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title={t("topology.linkSpacingDecrease")}
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="px-0.5 text-[11px] tabular-nums text-slate-600 dark:text-slate-300 min-w-[34px] text-center" title={t("topology.linkSpacing")}>
+                  {Math.round(selectedPair.spacing)}px
+                </span>
+                <button
+                  onClick={() => setPairSpacing(selectedPair.spacing + 4)}
+                  className="p-1.5 rounded text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title={t("topology.linkSpacingIncrease")}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </>
+            )}
           </div>
         )}
         <svg
@@ -2627,20 +2687,23 @@ function dashArrayFor(style: GraphEdgeStyle): string | undefined {
   return undefined;
 }
 
+// Default perpendicular gap (px) between parallel links of the same node pair.
+// Overridable per pair via GraphEdgeStyle.parallelSpacing (see edgeOffsets memo).
 const PARALLEL_SPACING = 18;
 
-// Compute the Bezier control point (cx, cy) used when an edge has a perpendicular offset
-// (curved-by-design OR straight-but-parallel-to-a-sibling).
+// Compute the Bezier control point (cx, cy) used when an edge has a perpendicular
+// offset (curved-by-design OR straight-but-parallel-to-a-sibling). `offset` is a
+// signed perpendicular distance in px (already scaled by the pair's spacing).
 function bezierControl(
   sx: number, sy: number, tx: number, ty: number,
-  curveTension: number, offsetIndex: number,
+  curveTension: number, offset: number,
 ): { cx: number; cy: number; len: number; px: number; py: number } {
   const dx = tx - sx;
   const dy = ty - sy;
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
   const px = -dy / len; // perpendicular unit vector
   const py = dx / len;
-  const totalOffset = len * curveTension + offsetIndex * PARALLEL_SPACING;
+  const totalOffset = len * curveTension + offset;
   return {
     cx: (sx + tx) / 2 + px * totalOffset,
     cy: (sy + ty) / 2 + py * totalOffset,
@@ -2648,20 +2711,20 @@ function bezierControl(
   };
 }
 
-function buildPath(style: GraphEdgeStyle, sx: number, sy: number, tx: number, ty: number, offsetIndex = 0): string {
+function buildPath(style: GraphEdgeStyle, sx: number, sy: number, tx: number, ty: number, offset = 0): string {
   if (style.type === "orthogonal") {
-    const mx = (sx + tx) / 2 + offsetIndex * PARALLEL_SPACING;
+    const mx = (sx + tx) / 2 + offset;
     return `M ${sx} ${sy} L ${mx} ${sy} L ${mx} ${ty} L ${tx} ${ty}`;
   }
   if (style.type === "curved") {
-    const { cx, cy } = bezierControl(sx, sy, tx, ty, style.curveTension ?? 0.3, offsetIndex);
+    const { cx, cy } = bezierControl(sx, sy, tx, ty, style.curveTension ?? 0.3, offset);
     return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
   }
   // straight: regular line when no offset, otherwise gentle curve to separate parallel edges
-  if (offsetIndex === 0) {
+  if (offset === 0) {
     return `M ${sx} ${sy} L ${tx} ${ty}`;
   }
-  const { cx, cy } = bezierControl(sx, sy, tx, ty, 0, offsetIndex);
+  const { cx, cy } = bezierControl(sx, sy, tx, ty, 0, offset);
   return `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
 }
 
@@ -2669,10 +2732,10 @@ function pointAt(
   style: GraphEdgeStyle,
   sx: number, sy: number, tx: number, ty: number,
   ratio: number,
-  offsetIndex = 0,
+  offset = 0,
 ): { x: number; y: number } {
   if (style.type === "orthogonal") {
-    const mx = (sx + tx) / 2 + offsetIndex * PARALLEL_SPACING;
+    const mx = (sx + tx) / 2 + offset;
     const seg1 = Math.abs(mx - sx);
     const seg2 = Math.abs(ty - sy);
     const seg3 = Math.abs(tx - mx);
@@ -2690,10 +2753,10 @@ function pointAt(
     return { x: mx + (tx - mx) * r, y: ty };
   }
   // straight w/ offset → behave as bezier; curved → bezier
-  const isBezier = style.type === "curved" || (style.type === "straight" && offsetIndex !== 0);
+  const isBezier = style.type === "curved" || (style.type === "straight" && offset !== 0);
   if (isBezier) {
     const tension = style.type === "curved" ? (style.curveTension ?? 0.3) : 0;
-    const { cx, cy } = bezierControl(sx, sy, tx, ty, tension, offsetIndex);
+    const { cx, cy } = bezierControl(sx, sy, tx, ty, tension, offset);
     const u = 1 - ratio;
     return {
       x: u * u * sx + 2 * u * ratio * cx + ratio * ratio * tx,

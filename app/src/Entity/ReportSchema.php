@@ -22,6 +22,10 @@ class ReportSchema
     #[ORM\Column(length: 255)]
     private string $name;
 
+    #[ORM\ManyToOne(targetEntity: ReportSchemaFolder::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?ReportSchemaFolder $folder = null;
+
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
@@ -78,6 +82,8 @@ class ReportSchema
     public function setContext(Context $v): static { $this->context = $v; return $this; }
     public function getName(): string { return $this->name; }
     public function setName(string $v): static { $this->name = $v; $this->touch(); return $this; }
+    public function getFolder(): ?ReportSchemaFolder { return $this->folder; }
+    public function setFolder(?ReportSchemaFolder $v): static { $this->folder = $v; $this->touch(); return $this; }
     public function getDescription(): ?string { return $this->description; }
     public function setDescription(?string $v): static { $this->description = $v; $this->touch(); return $this; }
     public function getViewport(): ?array { return $this->viewport; }

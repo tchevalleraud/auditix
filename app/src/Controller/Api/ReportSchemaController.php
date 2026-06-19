@@ -5,6 +5,7 @@ namespace App\Controller\Api;
 use App\Entity\Context;
 use App\Entity\Node;
 use App\Entity\ReportSchema;
+use App\Entity\ReportSchemaFolder;
 use App\Security\Voter\ContextAccessVoter;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -22,6 +23,7 @@ class ReportSchemaController extends AbstractController
             'id' => $s->getId(),
             'name' => $s->getName(),
             'description' => $s->getDescription(),
+            'folderId' => $s->getFolder()?->getId(),
             'viewport' => $s->getViewport(),
             'canvasSize' => $s->getCanvasSize(),
             'gridSize' => $s->getGridSize(),
@@ -57,6 +59,44 @@ class ReportSchemaController extends AbstractController
         );
 
         return $this->json(array_map($this->serialize(...), $schemas));
+    }
+
+    #[Route('/tree', methods: ['GET'])]
+    public function tree(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $context = $this->resolveContext($request, $em);
+        if (!$context) {
+            return $this->json(['folders' => [], 'rootSchemas' => []]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
+        $rootFolders = $em->getRepository(ReportSchemaFolder::class)->findBy(
+            ['context' => $context, 'parent' => null],
+            ['name' => 'ASC']
+        );
+        $rootSchemas = $em->getRepository(ReportSchema::class)->findBy(
+            ['context' => $context, 'folder' => null],
+            ['name' => 'ASC']
+        );
+
+        return $this->json([
+            'folders' => array_map(fn($f) => $this->serializeFolder($f, $em), $rootFolders),
+            'rootSchemas' => array_map($this->serialize(...), $rootSchemas),
+        ]);
+    }
+
+    private function serializeFolder(ReportSchemaFolder $f, EntityManagerInterface $em): array
+    {
+        $children = $em->getRepository(ReportSchemaFolder::class)->findBy(['parent' => $f], ['name' => 'ASC']);
+        $schemas = $em->getRepository(ReportSchema::class)->findBy(['folder' => $f], ['name' => 'ASC']);
+        return [
+            'id' => $f->getId(),
+            'name' => $f->getName(),
+            'type' => 'custom',
+            'parentId' => $f->getParent()?->getId(),
+            'children' => array_map(fn($c) => $this->serializeFolder($c, $em), $children),
+            'schemas' => array_map($this->serialize(...), $schemas),
+        ];
     }
 
     /**
@@ -123,6 +163,12 @@ class ReportSchemaController extends AbstractController
         if (array_key_exists('description', $data)) {
             $schema->setDescription($data['description']);
         }
+        if (!empty($data['folderId'])) {
+            $folder = $em->getRepository(ReportSchemaFolder::class)->find($data['folderId']);
+            if ($folder && $folder->getContext()->getId() === $context->getId()) {
+                $schema->setFolder($folder);
+            }
+        }
         if (isset($data['elements']) && is_array($data['elements'])) {
             $schema->setElements($data['elements']);
         }
@@ -182,6 +228,16 @@ class ReportSchemaController extends AbstractController
         if (array_key_exists('description', $data)) {
             $schema->setDescription($data['description']);
         }
+        if (array_key_exists('folderId', $data)) {
+            $folder = null;
+            if (!empty($data['folderId'])) {
+                $folder = $em->getRepository(ReportSchemaFolder::class)->find($data['folderId']);
+                if ($folder && $folder->getContext()->getId() !== $schema->getContext()->getId()) {
+                    $folder = null;
+                }
+            }
+            $schema->setFolder($folder);
+        }
         if (array_key_exists('elements', $data)) {
             $schema->setElements(is_array($data['elements']) ? $data['elements'] : []);
         }
@@ -219,6 +275,33 @@ class ReportSchemaController extends AbstractController
         $em->flush();
 
         return $this->json(null, Response::HTTP_NO_CONTENT);
+    }
+
+    #[Route('/{id}/duplicate', methods: ['POST'], requirements: ['id' => '\d+'])]
+    public function duplicate(int $id, EntityManagerInterface $em): JsonResponse
+    {
+        $schema = $em->getRepository(ReportSchema::class)->find($id);
+        if (!$schema) {
+            return $this->json(['error' => 'Report schema not found'], Response::HTTP_NOT_FOUND);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $schema);
+
+        $copy = new ReportSchema();
+        $copy->setContext($schema->getContext());
+        $copy->setName($schema->getName() . ' (copie)');
+        $copy->setFolder($schema->getFolder());
+        $copy->setDescription($schema->getDescription());
+        $copy->setElements($schema->getElements());
+        $copy->setViewport($schema->getViewport());
+        $copy->setCanvasSize($schema->getCanvasSize());
+        $copy->setGridSize($schema->getGridSize());
+        $copy->setSnapToGrid($schema->getSnapToGrid());
+        // The copy is always a plain, user-owned schema (never plugin-managed).
+
+        $em->persist($copy);
+        $em->flush();
+
+        return $this->json($this->serialize($copy), Response::HTTP_CREATED);
     }
 
     /**

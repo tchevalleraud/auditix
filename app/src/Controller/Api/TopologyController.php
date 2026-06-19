@@ -8,6 +8,7 @@ use App\Entity\Node;
 use App\Entity\NodeInventoryEntry;
 use App\Entity\Topology;
 use App\Entity\TopologyAnnotation;
+use App\Entity\TopologyFolder;
 use App\Entity\TopologyCluster;
 use App\Entity\TopologyClusterMember;
 use App\Entity\TopologyClusterRule;
@@ -31,6 +32,7 @@ class TopologyController extends AbstractController
             'id' => $t->getId(),
             'name' => $t->getName(),
             'description' => $t->getDescription(),
+            'folderId' => $t->getFolder()?->getId(),
             'isPrimary' => $t->isPrimary(),
             'nodeDesign' => $t->getNodeDesign(),
             'layout' => $t->getLayout(),
@@ -82,6 +84,55 @@ class TopologyController extends AbstractController
             fn(Topology $t) => $this->serialize($t, $counts[$t->getId()] ?? 0),
             $topologies
         ));
+    }
+
+    #[Route('/tree', methods: ['GET'])]
+    public function tree(Request $request, EntityManagerInterface $em): JsonResponse
+    {
+        $context = $this->resolveContext($request, $em);
+        if (!$context) {
+            return $this->json(['folders' => [], 'rootTopologies' => []]);
+        }
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $context);
+
+        // Member counts for every topology in the context (single query).
+        $counts = [];
+        $rows = $em->createQuery(
+            'SELECT IDENTITY(tn.topology) AS topologyId, COUNT(tn.id) AS cnt
+             FROM App\Entity\TopologyNode tn JOIN tn.topology t
+             WHERE t.context = :context GROUP BY tn.topology'
+        )->setParameter('context', $context)->getArrayResult();
+        foreach ($rows as $row) {
+            $counts[(int)$row['topologyId']] = (int)$row['cnt'];
+        }
+
+        $rootFolders = $em->getRepository(TopologyFolder::class)->findBy(
+            ['context' => $context, 'parent' => null],
+            ['name' => 'ASC']
+        );
+        $rootTopologies = $em->getRepository(Topology::class)->findBy(
+            ['context' => $context, 'folder' => null],
+            ['isPrimary' => 'DESC', 'name' => 'ASC']
+        );
+
+        return $this->json([
+            'folders' => array_map(fn($f) => $this->serializeFolder($f, $em, $counts), $rootFolders),
+            'rootTopologies' => array_map(fn($t) => $this->serialize($t, $counts[$t->getId()] ?? 0), $rootTopologies),
+        ]);
+    }
+
+    private function serializeFolder(TopologyFolder $f, EntityManagerInterface $em, array $counts): array
+    {
+        $children = $em->getRepository(TopologyFolder::class)->findBy(['parent' => $f], ['name' => 'ASC']);
+        $topologies = $em->getRepository(Topology::class)->findBy(['folder' => $f], ['isPrimary' => 'DESC', 'name' => 'ASC']);
+        return [
+            'id' => $f->getId(),
+            'name' => $f->getName(),
+            'type' => 'custom',
+            'parentId' => $f->getParent()?->getId(),
+            'children' => array_map(fn($c) => $this->serializeFolder($c, $em, $counts), $children),
+            'topologies' => array_map(fn($t) => $this->serialize($t, $counts[$t->getId()] ?? 0), $topologies),
+        ];
     }
 
     #[Route('/primary', methods: ['GET'])]
@@ -185,6 +236,13 @@ class TopologyController extends AbstractController
         $topology->setDescription($data['description'] ?? null);
         $topology->setNodeDesign($data['nodeDesign'] ?? Topology::defaultNodeDesign());
 
+        if (!empty($data['folderId'])) {
+            $folder = $em->getRepository(TopologyFolder::class)->find($data['folderId']);
+            if ($folder && $folder->getContext()->getId() === $context->getId()) {
+                $topology->setFolder($folder);
+            }
+        }
+
         // First topology is primary by default.
         if ($existingCount === 0 || ($data['isPrimary'] ?? false)) {
             $this->clearPrimary($em, $context);
@@ -233,6 +291,16 @@ class TopologyController extends AbstractController
         }
         if (array_key_exists('description', $data)) {
             $topology->setDescription($data['description']);
+        }
+        if (array_key_exists('folderId', $data)) {
+            $folder = null;
+            if (!empty($data['folderId'])) {
+                $folder = $em->getRepository(TopologyFolder::class)->find($data['folderId']);
+                if ($folder && $folder->getContext()->getId() !== $topology->getContext()->getId()) {
+                    $folder = null;
+                }
+            }
+            $topology->setFolder($folder);
         }
         if (array_key_exists('nodeDesign', $data) && is_array($data['nodeDesign'])) {
             $topology->setNodeDesign($data['nodeDesign']);

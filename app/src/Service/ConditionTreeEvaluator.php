@@ -126,6 +126,12 @@ class ConditionTreeEvaluator
                 $equal = (string) $fieldValue === (string) $other;
                 return $operator === 'compare_inventory_equals' ? $equal : !$equal;
             }
+        } elseif ($type === 'row') {
+            // "row" conditions read a column of the current inventory row being
+            // iterated (FOREACH block / multi-condition count). The caller seeds
+            // `$fields` with `row.<column>` => value for the current entryKey.
+            $col = $cond['column'] ?? '';
+            return $this->compareValue($fields["row.$col"] ?? null, $operator, $cond['value'] ?? null);
         } else {
             $source = $cond['source'] ?? '';
             $field = $cond['field'] ?? '$value';
@@ -174,6 +180,71 @@ class ConditionTreeEvaluator
             'is_not_empty' => $fieldValue !== null && $fieldValue !== '' && $fieldValue !== '[]',
             default => false,
         };
+    }
+
+    /**
+     * Return every inventory row of a category keyed by entryKey, each as a map
+     * of column => value. Powers per-row evaluation (FOREACH block and the
+     * multi-condition `count` action).
+     */
+    public function getInventoryRows(?int $categoryId, Node $node, string $tagName = 'latest'): array
+    {
+        if (!$categoryId) return [];
+
+        $category = $this->em->getRepository(InventoryCategory::class)->find($categoryId);
+        if (!$category) return [];
+
+        $filters = $this->em->getFilters();
+        $hadFilter = $tagName !== 'latest' && $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+        try {
+            $entries = $this->em->createQueryBuilder()
+                ->select('e')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
+                ->where('e.node = :node')
+                ->andWhere('e.category = :cat')
+                ->andWhere('t.name = :tag')
+                ->setParameter('node', $node)
+                ->setParameter('cat', $category)
+                ->setParameter('tag', $tagName)
+                ->getQuery()
+                ->getResult();
+        } finally {
+            if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+        }
+
+        $rows = [];
+        foreach ($entries as $e) {
+            /** @var NodeInventoryEntry $e */
+            $rows[$e->getEntryKey()][$e->getColLabel()] = $e->getValue();
+        }
+        return $rows;
+    }
+
+    /**
+     * Count how many inventory rows (entryKeys) of the category satisfy the
+     * given per-row conditions, combined with AND/OR logic. Each condition is a
+     * `row` condition (column/operator/value). Used by the `count` action.
+     */
+    public function countRows(?int $categoryId, array $conditions, string $logic, Node $node, string $tagName = 'latest'): int
+    {
+        $rows = $this->getInventoryRows($categoryId, $node, $tagName);
+        if (empty($rows)) return 0;
+
+        $block = ['logic' => $logic, 'conditions' => $conditions];
+        $count = 0;
+        foreach ($rows as $cols) {
+            $fields = [];
+            foreach ($cols as $c => $v) {
+                $fields["row.$c"] = $v;
+            }
+            if ($this->evaluateConditions($block, $fields, $node)) {
+                $count++;
+            }
+        }
+        return $count;
     }
 
     public function getInventoryValue(?int $categoryId, ?string $key, ?string $column, Node $node, string $tagName = 'latest'): ?string

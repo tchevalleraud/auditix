@@ -753,7 +753,9 @@ class ReportSchemaSvgRenderer
      */
     private function resolveLineGeometry(array $line, array $elementsById, array $lineOffsets): array
     {
-        $gap = 8.0; // mirrors PARALLEL_LINE_GAP in SchemaEditor.tsx
+        // Per-line gap overrides the default (mirrors PARALLEL_LINE_GAP /
+        // line.parallelGap in SchemaEditor.tsx).
+        $gap = (isset($line['parallelGap']) && is_numeric($line['parallelGap'])) ? (float) $line['parallelGap'] : 8.0;
         $resolveEnd = function (?string $id, ?string $anchor, string $end, float $fbX, float $fbY) use ($line, $elementsById, $lineOffsets, $gap): array {
             if (!$id || !$anchor) return [$fbX, $fbY];
             $el = $elementsById[$id] ?? null;

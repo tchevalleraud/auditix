@@ -28,6 +28,7 @@ import {
   MousePointer2,
   Minus,
   Pencil,
+  Plus,
   Redo2,
   SendToBack,
   Settings2,
@@ -232,6 +233,9 @@ export interface LineElement {
   sourceAnchor?: AnchorPosition;
   targetId?: string;
   targetAnchor?: AnchorPosition;
+  // Perpendicular gap (world px) used to spread this line from its parallel
+  // siblings at a shared anchor. Overrides PARALLEL_LINE_GAP when set.
+  parallelGap?: number;
   labels?: LineLabel[];
 }
 
@@ -1021,7 +1025,8 @@ export default function SchemaEditor({ schemaId }: Props) {
       const slot = anchorOffsets[`${line.id}|${end}`];
       if (!slot || slot.count <= 1) return p;
       const t = anchorTangent(anchor);
-      return { x: p.x + t.dx * slot.offsetIndex * PARALLEL_LINE_GAP, y: p.y + t.dy * slot.offsetIndex * PARALLEL_LINE_GAP };
+      const gap = typeof line.parallelGap === "number" ? line.parallelGap : PARALLEL_LINE_GAP;
+      return { x: p.x + t.dx * slot.offsetIndex * gap, y: p.y + t.dy * slot.offsetIndex * gap };
     };
     const start = resolveEnd(line.sourceId, line.sourceAnchor, "src", { x: line.x1, y: line.y1 });
     const finish = resolveEnd(line.targetId, line.targetAnchor, "tgt", { x: line.x2, y: line.y2 });
@@ -1063,6 +1068,45 @@ export default function SchemaEditor({ schemaId }: Props) {
       return next;
     });
   }, [pushHistory, scheduleSave]);
+
+  // When the selected line connects two anchored elements and shares that pair
+  // with other lines, expose the parallel bundle so the gap can be tuned.
+  const parallelBundle = useMemo(() => {
+    if (!primarySelected || primarySelected.kind !== "line") return null;
+    const line = primarySelected;
+    if (!line.sourceId || !line.targetId) return null;
+    const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
+    const key = pairKey(line.sourceId, line.targetId);
+    const ids: string[] = [];
+    for (const el of elements) {
+      if (el.kind === "line" && el.sourceId && el.targetId && pairKey(el.sourceId, el.targetId) === key) {
+        ids.push(el.id);
+      }
+    }
+    if (ids.length < 2) return null;
+    // Only meaningful when this line actually overlaps siblings at a shared
+    // anchor (otherwise the gap has no visible effect).
+    const srcSlot = anchorOffsets[`${line.id}|src`];
+    const tgtSlot = anchorOffsets[`${line.id}|tgt`];
+    if (!(srcSlot && srcSlot.count > 1) && !(tgtSlot && tgtSlot.count > 1)) return null;
+    let gap = PARALLEL_LINE_GAP;
+    for (const el of elements) {
+      if (el.kind === "line" && ids.includes(el.id) && typeof el.parallelGap === "number") { gap = el.parallelGap; break; }
+    }
+    return { ids, gap };
+  }, [primarySelected, elements, anchorOffsets]);
+
+  const setBundleGap = useCallback((value: number) => {
+    if (!parallelBundle) return;
+    const v = Math.max(2, Math.min(60, Math.round(value)));
+    const idset = new Set(parallelBundle.ids);
+    pushHistory();
+    setElements((cur) => {
+      const next = cur.map((el) => (idset.has(el.id) ? ({ ...el, parallelGap: v } as SchemaElement) : el));
+      scheduleSave(next);
+      return next;
+    });
+  }, [parallelBundle, pushHistory, scheduleSave]);
 
   const deleteSelection = useCallback(() => {
     if (selectedIds.size === 0) return;
@@ -2521,6 +2565,8 @@ export default function SchemaEditor({ schemaId }: Props) {
               nodes={nodes}
               inventoryCategories={inventoryCategories}
               resolvedByNode={resolvedByNode}
+              parallelGap={parallelBundle ? parallelBundle.gap : null}
+              onParallelGapChange={setBundleGap}
             />
           ) : (
             <SchemaInfoPanel
@@ -2552,6 +2598,10 @@ interface PropertiesPanelProps {
   nodes: NodeSummary[];
   inventoryCategories: InventoryCategoryOption[];
   resolvedByNode: Record<number, ResolvedNodeData>;
+  // Parallel-line spacing: non-null only when the selected line shares its
+  // node pair with other parallel lines.
+  parallelGap?: number | null;
+  onParallelGapChange?: (v: number) => void;
 }
 
 // ---- Building blocks (Excalidraw-style) ----
@@ -2722,7 +2772,7 @@ function SchemaInfoPanel({
   );
 }
 
-function PropertiesPanel({ element, onChange, onDelete, onDuplicate, onBringToFront, onBringForward, onSendBackward, onSendToBack, nodes, inventoryCategories, resolvedByNode }: PropertiesPanelProps) {
+function PropertiesPanel({ element, onChange, onDelete, onDuplicate, onBringToFront, onBringForward, onSendBackward, onSendToBack, nodes, inventoryCategories, resolvedByNode, parallelGap, onParallelGapChange }: PropertiesPanelProps) {
   const { t } = useI18n();
 
   const setShapeStyle = <K extends keyof ShapeStyle>(key: K, v: ShapeStyle[K]) => {
@@ -2920,6 +2970,28 @@ function PropertiesPanel({ element, onChange, onDelete, onDuplicate, onBringToFr
           <Section label={t("schemas.opacity")}>
             <PercentSlider value={element.style.opacity} onChange={(v) => setLineStyle("opacity", v)} />
           </Section>
+
+          {parallelGap != null && onParallelGapChange && (
+            <Section label={t("schemas.linkSpacing")}>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onParallelGapChange(parallelGap - 2)}
+                  className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title={t("schemas.linkSpacingDecrease")}
+                >
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="flex-1 text-center text-[12px] tabular-nums text-slate-600 dark:text-slate-300">{Math.round(parallelGap)} px</span>
+                <button
+                  onClick={() => onParallelGapChange(parallelGap + 2)}
+                  className="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  title={t("schemas.linkSpacingIncrease")}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+            </Section>
+          )}
 
           <LinePanelLabelsTrigger element={element} onChange={onChange} inventoryCategories={inventoryCategories} resolvedByNode={resolvedByNode} nodes={nodes} />
         </>
@@ -4222,6 +4294,7 @@ function LineEditModal({
                 label={sel}
                 onChange={(patch) => updateLabel(sel.id, patch)}
                 inventoryCategories={inventoryCategories}
+                resolvedByNode={resolvedByNode}
                 nodes={nodes}
               />
             ) : (
@@ -4240,11 +4313,13 @@ function LineLabelEditor({
   label,
   onChange,
   inventoryCategories,
+  resolvedByNode,
   nodes,
 }: {
   label: LineLabel;
   onChange: (patch: Partial<LineLabel>) => void;
   inventoryCategories: InventoryCategoryOption[];
+  resolvedByNode: Record<number, ResolvedNodeData>;
   nodes: NodeSummary[];
 }) {
   const isPill = label.kind === "pill";
@@ -4280,6 +4355,7 @@ function LineLabelEditor({
             onChange={(binding) => onChange({ dataBinding: binding })}
             nodes={nodes}
             inventoryCategories={inventoryCategories}
+            resolvedByNode={resolvedByNode}
           />
         )}
       </Section>
@@ -4365,6 +4441,7 @@ function LineLabelEditor({
             onChange={onChange}
             nodes={nodes}
             inventoryCategories={inventoryCategories}
+            resolvedByNode={resolvedByNode}
           />
         </>
       ) : (
@@ -4407,18 +4484,32 @@ function DataBindingPicker({
   onChange,
   nodes,
   inventoryCategories,
+  resolvedByNode,
   compact,
 }: {
   value: LineLabelDataBinding;
   onChange: (v: LineLabelDataBinding) => void;
   nodes: NodeSummary[];
   inventoryCategories: InventoryCategoryOption[];
+  resolvedByNode?: Record<number, ResolvedNodeData>;
   compact?: boolean;
 }) {
   const inv = parseInventoryField(value.field);
   const setNode = (id: number | null) => onChange({ ...value, nodeId: id });
   const setField = (field: string) => onChange({ ...value, field });
+
+  // When a node is selected, narrow the category/key/column options to what is
+  // actually present on THAT node's inventory; otherwise fall back to the
+  // context-wide options (every value seen across all nodes).
+  const nodeInv = value.nodeId != null ? resolvedByNode?.[value.nodeId]?.inventory ?? null : null;
   const cur = inv ? inventoryCategories.find((c) => c.name === inv.category) : null;
+  const categoryOptions = nodeInv ? Object.keys(nodeInv).sort() : inventoryCategories.map((c) => c.name);
+  const keyOptions = inv
+    ? (nodeInv ? Object.keys(nodeInv[inv.category] ?? {}).sort() : (cur?.keys ?? []))
+    : [];
+  const columnOptions = inv
+    ? (nodeInv ? Object.keys(nodeInv[inv.category]?.[inv.key] ?? {}).sort() : (cur?.columns ?? []))
+    : [];
   return (
     <div className={`space-y-1.5 ${compact ? "" : "mt-2"}`}>
       <select
@@ -4460,7 +4551,7 @@ function DataBindingPicker({
             className="w-full rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-[11px]"
           >
             <option value="">— Catégorie —</option>
-            {inventoryCategories.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            {categoryOptions.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
           {inv.category && (
             <select
@@ -4469,7 +4560,7 @@ function DataBindingPicker({
               className="w-full rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-2 py-1 text-[11px]"
             >
               <option value="">— Clé —</option>
-              {(cur?.keys ?? []).map((k) => <option key={k} value={k}>{k}</option>)}
+              {keyOptions.map((k) => <option key={k} value={k}>{k}</option>)}
             </select>
           )}
           {inv.category && inv.key && (
@@ -4480,7 +4571,7 @@ function DataBindingPicker({
             >
               <option value="">— Colonne —</option>
               <option value="__key__">↳ (la clé elle-même)</option>
-              {(cur?.columns ?? []).map((c) => <option key={c} value={c}>{c}</option>)}
+              {columnOptions.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           )}
         </div>
@@ -4510,11 +4601,13 @@ function PillConditionalColorEditor({
   onChange,
   nodes,
   inventoryCategories,
+  resolvedByNode,
 }: {
   label: LineLabel;
   onChange: (patch: Partial<LineLabel>) => void;
   nodes: NodeSummary[];
   inventoryCategories: InventoryCategoryOption[];
+  resolvedByNode: Record<number, ResolvedNodeData>;
 }) {
   const rules = label.pillColorRules ?? [];
   const setRules = (next: LineLabelColorRule[]) => onChange({ pillColorRules: next });
@@ -4563,6 +4656,7 @@ function PillConditionalColorEditor({
                 onChange={(source) => updateRule(rule.id, { source })}
                 nodes={nodes}
                 inventoryCategories={inventoryCategories}
+                resolvedByNode={resolvedByNode}
                 compact
               />
 

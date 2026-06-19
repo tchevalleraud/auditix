@@ -722,14 +722,14 @@ class CollectNodeMessageHandler
      * (set_tag → NodeDynamicTag, set_inventory → NodeInventoryEntry).
      * Tags are deduplicated against manual tags + already-applied dynamic tags.
      *
-     * Two kinds of blocks coexist in the tree:
-     *   - "if" / "else_if" / "else": evaluated against node state. The first
-     *     matching block's actions are applied (legacy behaviour).
-     *   - "always": no condition, actions applied unconditionally. Used to
-     *     stamp a static value (e.g. MSTP instance ID = "0" when the source
-     *     command doesn't include it).
-     * Always actions run BEFORE conditional ones so a later "if" can read the
-     * value the always block just wrote (rare, but well-defined).
+     * Blocks are processed in document order, so their UI position is meaningful:
+     *   - "always": no condition, actions applied unconditionally when reached.
+     *   - "foreach": iterate every row of a category when reached.
+     *   - "if" / "else_if" / "else": a contiguous run forms one cascade; the
+     *     first matching block in the run wins. An "else" terminates its run, so
+     *     a conditional that follows it (or follows an always/foreach) begins a
+     *     new cascade. This lets an "always" sit before, between or after the
+     *     conditionals and have a well-defined effect on what they read.
      */
     private function applyConditionTrees(array $rules, Node $node, CollectionTag $tag): void
     {
@@ -742,92 +742,258 @@ class CollectNodeMessageHandler
         foreach ($rules as $rule) {
             /** @var CollectionRule $rule */
             $tree = $rule->getConditionTree();
-            $blocks = $tree['blocks'] ?? [];
+            $blocks = is_array($tree) ? ($tree['blocks'] ?? []) : [];
             if (empty($blocks)) {
                 continue;
             }
 
-            // Split always vs conditional blocks.
-            $alwaysActions = [];
-            $conditionalBlocks = [];
-            foreach ($blocks as $b) {
-                if (!is_array($b)) continue;
-                if (($b['type'] ?? '') === 'always') {
+            $n = count($blocks);
+            $i = 0;
+            while ($i < $n) {
+                $b = $blocks[$i];
+                if (!is_array($b)) { $i++; continue; }
+                $type = $b['type'] ?? 'if';
+
+                if ($type === 'always') {
                     $res = $b['result'] ?? [];
-                    if (is_array($res)) {
-                        foreach ((isset($res['type']) ? [$res] : $res) as $a) {
-                            if (is_array($a)) $alwaysActions[] = $a;
-                        }
+                    foreach ((isset($res['type']) ? [$res] : (is_array($res) ? $res : [])) as $a) {
+                        if (is_array($a)) $this->applyAction($a, $node, $rule, $tag, $manualTagIds, $appliedDynamicTagIds);
                     }
+                    $i++;
+                } elseif ($type === 'foreach') {
+                    $this->applyForeachBlock($b, $node, $rule, $tag, $manualTagIds, $appliedDynamicTagIds);
+                    $i++;
                 } else {
-                    $conditionalBlocks[] = $b;
-                }
-            }
-
-            // Build the full action list: always first, then the result of the
-            // conditional cascade (if any block matches).
-            $allActions = $alwaysActions;
-            if (!empty($conditionalBlocks)) {
-                $result = $this->conditionTree->evaluateBlocks($conditionalBlocks, [], $node);
-                if (is_array($result)) {
-                    foreach ((isset($result['type']) ? [$result] : $result) as $a) {
-                        if (is_array($a)) $allActions[] = $a;
-                    }
-                }
-            }
-
-            foreach ($allActions as $action) {
-                $type = $action['type'] ?? null;
-                if ($type === 'set_tag') {
-                    $tagId = isset($action['tagId']) ? (int) $action['tagId'] : 0;
-                    if (!$tagId) continue;
-                    if (isset($manualTagIds[$tagId]) || isset($appliedDynamicTagIds[$tagId])) {
-                        continue;
-                    }
-                    $tag = $this->em->getRepository(NodeTag::class)->find($tagId);
-                    if (!$tag || $tag->getContext()?->getId() !== $node->getContext()?->getId()) {
-                        continue;
-                    }
-                    $assignment = new NodeDynamicTag();
-                    $assignment->setNode($node);
-                    $assignment->setTag($tag);
-                    $assignment->setRule($rule);
-                    $this->em->persist($assignment);
-                    $appliedDynamicTagIds[$tagId] = true;
-                } elseif ($type === 'set_inventory') {
-                    $catId = isset($action['categoryId']) ? (int) $action['categoryId'] : 0;
-                    $col = isset($action['column']) && $action['column'] !== '' ? (string) $action['column'] : 'Value#1';
-                    $value = (string) ($action['value'] ?? '');
-                    if (!$catId) continue;
-                    $category = $this->em->getRepository(InventoryCategory::class)->find($catId);
-                    if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) {
-                        continue;
-                    }
-
-                    $keyMode = (string) ($action['keyMode'] ?? 'single');
-                    if ($keyMode === 'all') {
-                        // Stamp every existing row produced by THIS rule on THIS node
-                        // for the chosen category. Doesn't create rows from thin air —
-                        // an extract must have run first and produced at least one entry.
-                        $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
-                            'node' => $node,
-                            'category' => $category,
-                            'rule' => $rule,
-                        ]);
-                        $seenKeys = [];
-                        foreach ($entries as $entry) {
-                            $entryKey = $entry->getEntryKey();
-                            if (isset($seenKeys[$entryKey])) continue;
-                            $seenKeys[$entryKey] = true;
-                            $this->upsertEntry($node, $category, $category->getName(), $catId, $entryKey, $col, $value, $rule, $tag);
+                    // Gather a contiguous if/else_if/else cascade. An "else"
+                    // ends the run; a following conditional starts a new one.
+                    $run = [$b];
+                    $i++;
+                    while ($i < $n && is_array($blocks[$i])) {
+                        $t = $blocks[$i]['type'] ?? 'if';
+                        $prev = $run[count($run) - 1]['type'] ?? 'if';
+                        if (($t === 'else_if' || $t === 'else') && ($prev === 'if' || $prev === 'else_if')) {
+                            $run[] = $blocks[$i];
+                            $i++;
+                        } else {
+                            break;
                         }
-                    } else {
-                        $key = isset($action['key']) ? trim((string) $action['key']) : '';
-                        if ($key === '') continue;
-                        $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $tag);
+                    }
+                    $result = $this->conditionTree->evaluateBlocks($run, [], $node);
+                    if (is_array($result)) {
+                        foreach ((isset($result['type']) ? [$result] : $result) as $a) {
+                            if (is_array($a)) $this->applyAction($a, $node, $rule, $tag, $manualTagIds, $appliedDynamicTagIds);
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Apply a single non-foreach action (set_tag / set_inventory / count).
+     */
+    private function applyAction(array $action, Node $node, CollectionRule $rule, CollectionTag $tag, array &$manualTagIds, array &$appliedDynamicTagIds): void
+    {
+        $type = $action['type'] ?? null;
+        if ($type === 'set_tag') {
+            $this->applySetTagAction((int) ($action['tagId'] ?? 0), $node, $rule, $manualTagIds, $appliedDynamicTagIds);
+        } elseif ($type === 'set_inventory') {
+            $this->applySetInventoryAction($action, (string) ($action['value'] ?? ''), $node, $rule, $tag);
+        } elseif ($type === 'count') {
+            // Count inventory rows satisfying the per-row match conditions, then
+            // write the total to an inventory cell or use it to gate a tag.
+            $count = $this->conditionTree->countRows(
+                isset($action['matchCategoryId']) ? (int) $action['matchCategoryId'] : null,
+                $this->buildCountConditions($action),
+                (string) ($action['matchLogic'] ?? 'and'),
+                $node,
+                (string) ($action['matchTag'] ?? 'latest'),
+            );
+
+            if ((string) ($action['target'] ?? 'inventory') === 'tag') {
+                $threshold = $this->conditionTree->compareValue(
+                    (string) $count,
+                    (string) ($action['tagOperator'] ?? 'greater_than'),
+                    $action['tagValue'] ?? '0',
+                );
+                if ($threshold) {
+                    $this->applySetTagAction((int) ($action['tagId'] ?? 0), $node, $rule, $manualTagIds, $appliedDynamicTagIds);
+                }
+            } else {
+                $this->applySetInventoryAction($action, (string) $count, $node, $rule, $tag);
+            }
+        }
+    }
+
+    /**
+     * Normalize a `count` action's match criterion into a list of `row`
+     * conditions. Prefers the multi-condition `matchConditions` list; falls back
+     * to the legacy single matchColumn/matchOperator/matchValue triple.
+     */
+    private function buildCountConditions(array $action): array
+    {
+        $conditions = [];
+        if (!empty($action['matchConditions']) && is_array($action['matchConditions'])) {
+            foreach ($action['matchConditions'] as $mc) {
+                if (!is_array($mc)) continue;
+                $conditions[] = [
+                    'type' => 'row',
+                    'column' => isset($mc['column']) && $mc['column'] !== '' ? (string) $mc['column'] : 'Value#1',
+                    'operator' => (string) ($mc['operator'] ?? 'equals'),
+                    'value' => $mc['value'] ?? null,
+                ];
+            }
+        }
+        if (empty($conditions)) {
+            $conditions[] = [
+                'type' => 'row',
+                'column' => isset($action['matchColumn']) && $action['matchColumn'] !== '' ? (string) $action['matchColumn'] : 'Value#1',
+                'operator' => (string) ($action['matchOperator'] ?? 'equals'),
+                'value' => $action['matchValue'] ?? null,
+            ];
+        }
+        return $conditions;
+    }
+
+    /**
+     * Iterate every row of the foreach category, evaluate the per-row cascade
+     * (IF/ELSEIF/ELSE with `row` conditions) and apply the matched actions.
+     * `increment` actions accumulate into counters flushed after the loop;
+     * `set_inventory` defaults its key to the current row key when left blank.
+     */
+    private function applyForeachBlock(array $fb, Node $node, CollectionRule $rule, CollectionTag $tag, array &$manualTagIds, array &$appliedDynamicTagIds): void
+    {
+        $catId = isset($fb['inventoryCategoryId']) ? (int) $fb['inventoryCategoryId'] : 0;
+        $children = $fb['children'] ?? [];
+        if (!$catId || !is_array($children) || empty($children)) return;
+
+        $rows = $this->conditionTree->getInventoryRows($catId, $node, (string) ($fb['inventoryTag'] ?? 'latest'));
+
+        // Pre-seed increment counters to 0 so "0 matches" still writes a value.
+        $counters = [];
+        $this->seedIncrementCounters($children, $counters);
+
+        foreach ($rows as $rowKey => $cols) {
+            $fields = [];
+            foreach ($cols as $c => $v) {
+                $fields["row.$c"] = $v;
+            }
+            $result = $this->conditionTree->evaluateBlocks($children, $fields, $node);
+            if (!is_array($result)) continue;
+            foreach ((isset($result['type']) ? [$result] : $result) as $action) {
+                if (!is_array($action)) continue;
+                if (($action['type'] ?? null) === 'increment') {
+                    $cid = isset($action['categoryId']) ? (int) $action['categoryId'] : 0;
+                    $key = isset($action['key']) ? trim((string) $action['key']) : '';
+                    if (!$cid || $key === '') continue;
+                    $col = isset($action['column']) && $action['column'] !== '' ? (string) $action['column'] : 'Value#1';
+                    $amount = isset($action['amount']) ? (int) $action['amount'] : 1;
+                    $ck = "$cid|$key|$col";
+                    if (!isset($counters[$ck])) $counters[$ck] = ['catId' => $cid, 'key' => $key, 'col' => $col, 'total' => 0];
+                    $counters[$ck]['total'] += $amount;
+                } elseif (($action['type'] ?? null) === 'set_inventory') {
+                    $perRow = $action;
+                    if (!isset($perRow['key']) || trim((string) $perRow['key']) === '') {
+                        $perRow['key'] = (string) $rowKey;
+                    }
+                    $this->applySetInventoryAction($perRow, (string) ($perRow['value'] ?? ''), $node, $rule, $tag);
+                } else {
+                    $this->applyAction($action, $node, $rule, $tag, $manualTagIds, $appliedDynamicTagIds);
+                }
+            }
+        }
+
+        // Flush accumulated counters into their target cells.
+        foreach ($counters as $cnt) {
+            $category = $this->em->getRepository(InventoryCategory::class)->find($cnt['catId']);
+            if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) continue;
+            $this->upsertEntry($node, $category, $category->getName(), $cnt['catId'], $cnt['key'], $cnt['col'], (string) $cnt['total'], $rule, $tag);
+        }
+    }
+
+    /**
+     * Walk foreach children and register every `increment` target cell with a
+     * zero counter, so rows that never match still write an explicit "0".
+     */
+    private function seedIncrementCounters(array $blocks, array &$counters): void
+    {
+        foreach ($blocks as $b) {
+            if (!is_array($b)) continue;
+            if (!empty($b['children']) && is_array($b['children'])) {
+                $this->seedIncrementCounters($b['children'], $counters);
+            }
+            $res = $b['result'] ?? null;
+            if (!is_array($res)) continue;
+            foreach ((isset($res['type']) ? [$res] : $res) as $a) {
+                if (!is_array($a) || ($a['type'] ?? null) !== 'increment') continue;
+                $cid = isset($a['categoryId']) ? (int) $a['categoryId'] : 0;
+                $key = isset($a['key']) ? trim((string) $a['key']) : '';
+                if (!$cid || $key === '') continue;
+                $col = isset($a['column']) && $a['column'] !== '' ? (string) $a['column'] : 'Value#1';
+                $ck = "$cid|$key|$col";
+                if (!isset($counters[$ck])) $counters[$ck] = ['catId' => $cid, 'key' => $key, 'col' => $col, 'total' => 0];
+            }
+        }
+    }
+
+    /**
+     * Persist a dynamic tag for the node, deduplicated against manual tags and
+     * tags already applied during this run. Shared by `set_tag` and `count`.
+     */
+    private function applySetTagAction(int $tagId, Node $node, CollectionRule $rule, array &$manualTagIds, array &$appliedDynamicTagIds): void
+    {
+        if (!$tagId) return;
+        if (isset($manualTagIds[$tagId]) || isset($appliedDynamicTagIds[$tagId])) {
+            return;
+        }
+        $nodeTag = $this->em->getRepository(NodeTag::class)->find($tagId);
+        if (!$nodeTag || $nodeTag->getContext()?->getId() !== $node->getContext()?->getId()) {
+            return;
+        }
+        $assignment = new NodeDynamicTag();
+        $assignment->setNode($node);
+        $assignment->setTag($nodeTag);
+        $assignment->setRule($rule);
+        $this->em->persist($assignment);
+        $appliedDynamicTagIds[$tagId] = true;
+    }
+
+    /**
+     * Write a value to an inventory cell. `keyMode = "all"` stamps every row
+     * already produced by THIS rule; otherwise the single `key` is targeted.
+     * Shared by `set_inventory` and `count` (inventory target).
+     */
+    private function applySetInventoryAction(array $action, string $value, Node $node, CollectionRule $rule, CollectionTag $tag): void
+    {
+        $catId = isset($action['categoryId']) ? (int) $action['categoryId'] : 0;
+        $col = isset($action['column']) && $action['column'] !== '' ? (string) $action['column'] : 'Value#1';
+        if (!$catId) return;
+        $category = $this->em->getRepository(InventoryCategory::class)->find($catId);
+        if (!$category || $category->getContext()->getId() !== $node->getContext()?->getId()) {
+            return;
+        }
+
+        $keyMode = (string) ($action['keyMode'] ?? 'single');
+        if ($keyMode === 'all') {
+            // Stamp every existing row produced by THIS rule on THIS node
+            // for the chosen category. Doesn't create rows from thin air —
+            // an extract must have run first and produced at least one entry.
+            $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
+                'node' => $node,
+                'category' => $category,
+                'rule' => $rule,
+            ]);
+            $seenKeys = [];
+            foreach ($entries as $entry) {
+                $entryKey = $entry->getEntryKey();
+                if (isset($seenKeys[$entryKey])) continue;
+                $seenKeys[$entryKey] = true;
+                $this->upsertEntry($node, $category, $category->getName(), $catId, $entryKey, $col, $value, $rule, $tag);
+            }
+        } else {
+            $key = isset($action['key']) ? trim((string) $action['key']) : '';
+            if ($key === '') return;
+            $this->upsertEntry($node, $category, $category->getName(), $catId, $key, $col, $value, $rule, $tag);
         }
     }
 
@@ -993,7 +1159,11 @@ class CollectNodeMessageHandler
                     '/\$(\d+)/',
                     function ($r) use ($matches, $i) {
                         $g = (int) $r[1];
-                        return isset($matches[$g][$i]) ? trim((string) $matches[$g][$i][0]) : '';
+                        // Only substitute groups the block SEPARATOR captured.
+                        // Leave the others untouched so the per-line regex match
+                        // (applyExtractOnText) can fill them — this is what lets a
+                        // block key vary per row (e.g. "$port - Tx $1").
+                        return isset($matches[$g][$i]) ? trim((string) $matches[$g][$i][0]) : $r[0];
                     },
                     $tpl,
                 ) ?? $tpl;
