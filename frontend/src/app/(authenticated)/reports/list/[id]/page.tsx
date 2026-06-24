@@ -35,6 +35,7 @@ import {
 
 import StructureEditor, { type ReportBlock } from "@/components/StructureEditor";
 import { PluginManagedBanner } from "@/components/PluginManagedBanner";
+import WordVersionsTab from "@/components/WordVersionsTab";
 
 interface Author {
   id: string;
@@ -101,7 +102,7 @@ interface ThemeOption {
   isDefault: boolean;
 }
 
-const tabKeys = ["general", "authors", "revisions", "structure", "live", "settings"] as const;
+const tabKeys = ["general", "authors", "revisions", "structure", "live", "word", "settings"] as const;
 type TabKey = (typeof tabKeys)[number];
 
 export default function ReportDetailPage() {
@@ -465,6 +466,7 @@ export default function ReportDetailPage() {
 
   const rightTabs = [
     { key: "live" as TabKey, label: t("reports.tabLive"), icon: <Eye className="h-4 w-4" /> },
+    { key: "word" as TabKey, label: "Word", icon: <FileText className="h-4 w-4" /> },
     { key: "settings" as TabKey, label: t("reports.tabSettings"), icon: <Settings className="h-4 w-4" /> },
   ];
 
@@ -1126,6 +1128,16 @@ export default function ReportDetailPage() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === "word" && (
+            <div className="flex-1 overflow-hidden min-h-0">
+              <WordVersionsTab
+                reportId={reportId}
+                locale={report.locale}
+                isNodeReport={report.type === "node"}
+              />
             </div>
           )}
 
