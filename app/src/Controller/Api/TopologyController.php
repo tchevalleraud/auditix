@@ -983,6 +983,18 @@ class TopologyController extends AbstractController
 
         $topology = $protocol->getTopology();
 
+        // Capture user-set parallel-link spacing (keyed by node pair) before
+        // wiping, so a manual spacing survives the regeneration and is re-applied
+        // to the freshly generated edges of the same pair below.
+        $preservedSpacing = [];
+        foreach ($em->getRepository(TopologyEdge::class)->findBy(['topology' => $topology]) as $ex) {
+            $sp = $ex->getStyle()['parallelSpacing'] ?? null;
+            if (!is_numeric($sp)) continue;
+            $a = $ex->getSourceNode()->getId();
+            $b = $ex->getTargetNode()->getId();
+            $preservedSpacing[$a < $b ? "$a|$b" : "$b|$a"] = (float) $sp;
+        }
+
         // Wipe previous edges for THIS protocol only
         $em->createQuery('DELETE FROM App\Entity\TopologyEdge e WHERE e.protocol = :p')
             ->setParameter('p', $protocol)->execute();
@@ -1045,6 +1057,25 @@ class TopologyController extends AbstractController
 
         $protocol->setLastGeneratedAt(new \DateTimeImmutable());
         $em->flush();
+
+        // Re-apply the preserved parallel-link spacing to the regenerated edges,
+        // matched by node pair, so the user's spacing isn't lost on regeneration.
+        if (!empty($preservedSpacing)) {
+            $changed = false;
+            foreach ($em->getRepository(TopologyEdge::class)->findBy(['protocol' => $protocol]) as $ne) {
+                $a = $ne->getSourceNode()->getId();
+                $b = $ne->getTargetNode()->getId();
+                $key = $a < $b ? "$a|$b" : "$b|$a";
+                if (!isset($preservedSpacing[$key])) continue;
+                $st = $ne->getStyle();
+                $st['parallelSpacing'] = $preservedSpacing[$key];
+                $ne->setStyle($st);
+                $changed = true;
+            }
+            if ($changed) {
+                $em->flush();
+            }
+        }
 
         return ['stats' => $stats];
     }
