@@ -1278,6 +1278,23 @@ export default function ComplianceRuleEditPage() {
     router.push("/compliance/rules");
   };
 
+  // Persist the per-key iteration setting immediately so it can't be lost by
+  // evaluating before clicking "Save".
+  const saveIteration = async (next: RuleIteration | null) => {
+    setIteration(next);
+    if (rule?.managedByPlugin) return;
+    try {
+      const res = await fetch(`/api/compliance-rules/${ruleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ iteration: next }),
+      });
+      if (res.ok) setRule(await res.json());
+    } catch {
+      // best-effort; the explicit Save button still sends it too
+    }
+  };
+
   const saveConditions = async () => {
     if (rule?.managedByPlugin) return;
     setSavingConditions(true);
@@ -1989,7 +2006,7 @@ export default function ComplianceRuleEditPage() {
                     type="checkbox"
                     checked={!!iteration}
                     disabled={readOnly}
-                    onChange={(e) => setIteration(e.target.checked ? { categoryId: inventoryStructure.find((c) => c.categoryId != null)?.categoryId ?? 0, tag: "latest" } : null)}
+                    onChange={(e) => saveIteration(e.target.checked ? { categoryId: inventoryStructure.find((c) => c.categoryId != null)?.categoryId ?? 0, tag: "latest" } : null)}
                     className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-violet-600 focus:ring-violet-500"
                   />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("compliance_rules.iterationToggle")}</span>
@@ -2003,7 +2020,7 @@ export default function ComplianceRuleEditPage() {
                         <select
                           value={iteration.categoryId || ""}
                           disabled={readOnly}
-                          onChange={(e) => setIteration({ ...iteration, categoryId: Number(e.target.value) })}
+                          onChange={(e) => saveIteration({ ...iteration, categoryId: Number(e.target.value) })}
                           className={inputCls}
                         >
                           <option value="">—</option>
@@ -2017,7 +2034,7 @@ export default function ComplianceRuleEditPage() {
                         <select
                           value={iteration.tag || "latest"}
                           disabled={readOnly}
-                          onChange={(e) => setIteration({ ...iteration, tag: e.target.value })}
+                          onChange={(e) => saveIteration({ ...iteration, tag: e.target.value })}
                           className={inputCls}
                         >
                           {Array.from(new Set(["latest", ...inventoryTags])).map((tg) => (

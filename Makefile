@@ -199,7 +199,8 @@ _upgrade_apply:
 	docker compose exec -T php composer install --no-interaction --optimize-autoloader
 	docker compose exec -T php php bin/console cache:clear --no-interaction
 	docker compose exec -T php php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
-	@echo "\033[36m[6/7]\033[0m Restarting workers..."
+	@echo "\033[36m[6/7]\033[0m Stopping workers gracefully, then restarting them on the new code..."
+	-docker compose exec -T php php bin/console messenger:stop-workers >/dev/null 2>&1 || true
 	docker compose restart php node $$(docker compose config --services | grep '^worker-') >/dev/null
 	@echo "\033[36m[7/7]\033[0m Waiting for frontend and reloading nginx..."
 	@docker compose exec -T node sh -c 'while ! wget -q --spider http://localhost:3000 2>/dev/null; do sleep 3; done'
