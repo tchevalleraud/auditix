@@ -688,6 +688,15 @@ class NodeController extends AbstractController
                 'recommendation' => $r->getRecommendation(),
                 'recommendationType' => $r->getRecommendationType(),
                 'evaluatedAt' => $r->getEvaluatedAt()->format('c'),
+                'perKey' => $r->isPerKey(),
+                'itemsTotal' => $r->getItemsTotal(),
+                'itemsNonCompliant' => $r->getItemsNonCompliant(),
+                'items' => $r->isPerKey() ? array_map(static fn ($it) => [
+                    'itemKey' => $it->getItemKey(),
+                    'status' => $it->getStatus(),
+                    'severity' => $it->getSeverity(),
+                    'message' => $it->getMessage(),
+                ], $r->getItems()->toArray()) : [],
             ];
 
             if (isset($policyMap[$pId]['stats'][$status])) {

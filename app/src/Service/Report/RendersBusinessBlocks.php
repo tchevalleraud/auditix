@@ -49,6 +49,7 @@ trait RendersBusinessBlocks
             case 'rule_non_compliant':
             case 'rule_nodes_table': $this->renderRuleNodesTable($section, $block, $type, $ctx); return true;
             case 'rule_recommendation': $this->renderRuleRecommendation($section, $block, $ctx); return true;
+            case 'rule_items_table': $this->renderRuleItemsTable($section, $block, $ctx); return true;
             case 'inventory_table': $this->renderInventoryTable($section, $block, $ctx); return true;
             case 'inventory_diff': $this->renderInventoryDiff($section, $block, $ctx); return true;
             case 'comparison_summary':
@@ -808,6 +809,67 @@ trait RendersBusinessBlocks
             $rows[] = $row;
         }
         $this->addStripedTable($section, $headers, $rows, $ctx);
+    }
+
+    /**
+     * Per-key detail of a loop rule: one table per node listing each inventory
+     * item (e.g. interface) with its status, severity and message.
+     */
+    private function renderRuleItemsTable(Section $section, array $block, WordRenderContext $ctx): void
+    {
+        $rule = $block['ruleId'] ?? null ? $this->em->getRepository(ComplianceRule::class)->find($block['ruleId']) : null;
+        if (!$rule) {
+            return;
+        }
+        $showSeverity = (bool) ($block['showSeverity'] ?? true);
+        $showMessage = (bool) ($block['showMessage'] ?? true);
+        $onlyFailing = (bool) ($block['onlyFailing'] ?? false);
+
+        foreach ($this->resolveBlockNodes($block, $ctx) as $node) {
+            $qb = $this->em->getRepository(ComplianceResult::class)->createQueryBuilder('r')
+                ->andWhere('r.rule = :rule')->andWhere('r.node = :node')
+                ->setParameter('rule', $rule)->setParameter('node', $node)
+                ->setMaxResults(1);
+            if (!empty($block['policyId'])) {
+                $qb->andWhere('r.policy = :p')->setParameter('p', $block['policyId']);
+            }
+            $result = $qb->getQuery()->getOneOrNullResult();
+            if (!$result || !$result->isPerKey()) {
+                continue;
+            }
+
+            $total = $result->getItemsTotal();
+            $ok = $total - $result->getItemsNonCompliant();
+            $section->addText(
+                trim(sprintf('%s %s', $rule->getIdentifier() ? '[' . $rule->getIdentifier() . ']' : '', $rule->getName()))
+                    . sprintf(' — %s (%d/%d OK)', $node->getHostname() ?: $node->getName() ?: $node->getIpAddress(), $ok, $total),
+                ['name' => $ctx->bodyFont(), 'size' => $ctx->bodySize() + 1, 'bold' => true],
+                ['spaceBefore' => 80, 'spaceAfter' => 20]
+            );
+
+            $headers = ['Item', 'Status'];
+            if ($showSeverity) {
+                $headers[] = 'Severity';
+            }
+            if ($showMessage) {
+                $headers[] = 'Message';
+            }
+            $rows = [];
+            foreach ($result->getItems() as $it) {
+                if ($onlyFailing && !in_array($it->getStatus(), ['non_compliant', 'error'], true)) {
+                    continue;
+                }
+                $row = [$it->getItemKey(), $it->getStatus()];
+                if ($showSeverity) {
+                    $row[] = (string) $it->getSeverity();
+                }
+                if ($showMessage) {
+                    $row[] = (string) $it->getMessage();
+                }
+                $rows[] = $row;
+            }
+            $this->addStripedTable($section, $headers, $rows, $ctx);
+        }
     }
 
     private function renderRuleRecommendation(Section $section, array $block, WordRenderContext $ctx): void

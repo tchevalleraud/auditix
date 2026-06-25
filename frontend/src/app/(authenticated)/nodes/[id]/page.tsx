@@ -76,6 +76,13 @@ interface SnmpMonitoringResponse {
 
 type TabKey = "summary" | "settings" | "collections" | "inventory" | "acl" | "compliance" | "monitoring" | "vulnerabilities" | "system-updates";
 
+interface ComplianceResultItem {
+  itemKey: string;
+  status: string;
+  severity: string | null;
+  message: string | null;
+}
+
 interface ComplianceResultEntry {
   ruleId: number;
   ruleIdentifier: string | null;
@@ -88,6 +95,10 @@ interface ComplianceResultEntry {
   recommendation: string | null;
   recommendationType: "text" | "cli" | null;
   evaluatedAt: string;
+  perKey?: boolean;
+  itemsTotal?: number;
+  itemsNonCompliant?: number;
+  items?: ComplianceResultItem[];
 }
 
 interface CompliancePolicyResult {
@@ -1637,6 +1648,39 @@ export default function NodeDetailPage() {
                                       )
                                     )}
                                   </div>
+                                )}
+                                {r.perKey && r.items && r.items.length > 0 && (
+                                  <details className="mt-2 ml-7 group">
+                                    <summary className="cursor-pointer inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-slate-100">
+                                      <ChevronRight className="h-3 w-3 group-open:rotate-90 transition-transform" />
+                                      {(r.itemsTotal ?? r.items.length) - (r.itemsNonCompliant ?? 0)}/{r.itemsTotal ?? r.items.length} compliant — per-key detail
+                                    </summary>
+                                    <div className="mt-1.5 max-h-72 overflow-auto rounded-md border border-slate-200 dark:border-slate-700">
+                                      <table className="w-full text-[11px]">
+                                        <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-slate-500">
+                                          <tr>
+                                            <th className="text-left px-2 py-1 font-medium">Key</th>
+                                            <th className="text-left px-2 py-1 font-medium">Status</th>
+                                            <th className="text-left px-2 py-1 font-medium">Message</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                          {r.items.map((it) => (
+                                            <tr key={it.itemKey}>
+                                              <td className="px-2 py-1 font-mono whitespace-nowrap">{it.itemKey}</td>
+                                              <td className="px-2 py-1">
+                                                <span className={it.status === "compliant" ? "text-emerald-600 dark:text-emerald-400"
+                                                  : it.status === "non_compliant" ? "text-red-600 dark:text-red-400"
+                                                  : it.status === "error" ? "text-orange-600 dark:text-orange-400"
+                                                  : "text-slate-400"}>{it.status}</span>
+                                              </td>
+                                              <td className="px-2 py-1 text-slate-500 dark:text-slate-400">{it.message}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </details>
                                 )}
                               </div>
                             );

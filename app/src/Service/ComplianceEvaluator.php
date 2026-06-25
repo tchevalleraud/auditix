@@ -47,6 +47,12 @@ class ComplianceEvaluator
             return ['status' => 'not_applicable', 'severity' => null, 'message' => 'No conditions configured'];
         }
 
+        // Inventory-loop mode: evaluate once per key of a category, no data source.
+        $iteration = $rule->getIteration();
+        if (is_array($iteration) && !empty($iteration['categoryId'])) {
+            return $this->evaluateInventoryLoop($rule, $node, $conditionTree, (int) $iteration['categoryId'], (string) ($iteration['tag'] ?? 'latest'));
+        }
+
         // Collect fields from all data sources
         $fields = $this->getAllSourceFields($rule, $node);
         if (isset($fields['_error'])) {
@@ -57,7 +63,8 @@ class ComplianceEvaluator
         $multiRowSource = null;
         $secondaryMultiRowSources = [];
         foreach ($rule->getDataSources() as $src) {
-            if (!empty($src['multiRow'])) {
+            // Inventory sources always loop over every entryKey of the category.
+            if (!empty($src['multiRow']) || ($src['type'] ?? '') === 'inventory') {
                 $name = $src['name'] ?? 'default';
                 $rows = $fields["$name.\$rows"] ?? null;
                 if (is_array($rows) && !empty($rows)) {
@@ -149,8 +156,71 @@ class ComplianceEvaluator
             }
         }
 
+        return $this->finalizeRowResults($rule, $node, $conditionTree, $rowResults, $worst, $fields);
+    }
+
+    /**
+     * Evaluate a rule once per key of an inventory category (loop mode, no data
+     * source). Each row's columns are exposed to the condition tree as
+     * `row.<column>`, and the key as `row.$key`; the entryKey is the item key.
+     */
+    private function evaluateInventoryLoop(ComplianceRule $rule, Node $node, array $conditionTree, int $categoryId, string $tag): array
+    {
+        $rowsByKey = $this->conditionTree->getInventoryRows($categoryId, $node, $tag ?: 'latest');
+        if (empty($rowsByKey)) {
+            return ['status' => 'not_applicable', 'severity' => null, 'message' => 'No inventory entries for this category'];
+        }
+
+        $statusPriority = ['compliant' => 0, 'not_applicable' => 1, 'skipped' => 2, 'error' => 3, 'non_compliant' => 4];
+        $worst = null;
+        $rowResults = [];
+        $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
+
+        foreach ($rowsByKey as $entryKey => $cols) {
+            $rowFields = ['row.$key' => (string) $entryKey];
+            foreach ($cols as $label => $val) {
+                $rowFields["row.$label"] = is_string($val) ? trim($val) : $val;
+            }
+
+            $rowEval = $this->evaluateBlocks($conditionTree['blocks'], $rowFields, $node)
+                ?? ['status' => 'not_applicable', 'severity' => null, 'message' => null];
+
+            // Resolve each item's own message/recommendation against its row.
+            foreach (['message', 'messageLong', 'recommendation'] as $key) {
+                if (!empty($rowEval[$key]) && is_string($rowEval[$key])) {
+                    $rowEval[$key] = $this->resolveTemplate($rowEval[$key], $rowFields, $expectedValues, $node);
+                }
+            }
+
+            $rowResults[] = ['key' => (string) $entryKey, 'evaluation' => $rowEval];
+            if (!$worst || ($statusPriority[$rowEval['status']] ?? 0) > ($statusPriority[$worst['status']] ?? 0)) {
+                $worst = $rowEval;
+            }
+        }
+
+        return $this->finalizeRowResults($rule, $node, $conditionTree, $rowResults, $worst, []);
+    }
+
+    /**
+     * Aggregate per-row evaluations into a single rule result: worst status,
+     * multiRowResults, item counters, multiRowMessages summary and template
+     * resolution. Shared by the data-source and inventory-loop multi-row modes.
+     */
+    private function finalizeRowResults(ComplianceRule $rule, Node $node, array $conditionTree, array $rowResults, ?array $worst, array $templateFields): array
+    {
         $result = $worst ?? ['status' => 'not_applicable', 'severity' => null, 'message' => null];
         $result['multiRowResults'] = $rowResults;
+
+        // Counters for per-key persistence and proportional scoring.
+        $itemsNonCompliant = 0;
+        foreach ($rowResults as $rr) {
+            $st = $rr['evaluation']['status'] ?? '';
+            if ($st === 'non_compliant' || $st === 'error') {
+                $itemsNonCompliant++;
+            }
+        }
+        $result['itemsTotal'] = count($rowResults);
+        $result['itemsNonCompliant'] = $itemsNonCompliant;
 
         // Use multiRowMessages for the global message if configured.
         // Backwards-compat: legacy format = string per status; new format = ['short' => ..., 'long' => ...]
@@ -175,11 +245,11 @@ class ComplianceEvaluator
             $result['message'] = implode("\n", $summary);
         }
 
-        // Resolve template on message, messageLong and recommendation
+        // Resolve template on the aggregated message, messageLong and recommendation
         $expectedValues = $this->findExpectedValues($conditionTree['blocks'], $node);
         foreach (['message', 'messageLong', 'recommendation'] as $key) {
             if (!empty($result[$key]) && is_string($result[$key])) {
-                $result[$key] = $this->resolveTemplate($result[$key], $fields, $expectedValues, $node);
+                $result[$key] = $this->resolveTemplate($result[$key], $templateFields, $expectedValues, $node);
             }
         }
 
@@ -268,6 +338,35 @@ class ComplianceEvaluator
             $valueMap = $src['valueMap'] ?? null;
             $keyGroup = $src['keyGroup'] ?? null;
             $multiRow = !empty($src['multiRow']);
+
+            // Inventory source: iterate over every entryKey of a category, exposing
+            // each column (colLabel) as a field. Feeds the multi-row evaluation so
+            // the condition tree runs once per inventory key (e.g. per interface).
+            if ($type === 'inventory') {
+                $categoryId = isset($src['inventoryCategoryId']) ? (int) $src['inventoryCategoryId'] : null;
+                $invTag = $src['tag'] ?? 'latest';
+                $rowsByKey = $this->conditionTree->getInventoryRows($categoryId, $node, $invTag ?: 'latest');
+                $rows = [];
+                foreach ($rowsByKey as $entryKey => $cols) {
+                    $row = ['_key' => (string) $entryKey];
+                    foreach ($cols as $label => $val) {
+                        $row[$label] = $val;
+                    }
+                    $rows[] = $row;
+                }
+                $allFields["$name.\$rows"] = $rows;
+                $allFields["$name.\$count"] = count($rows);
+                foreach ($rows as $row) {
+                    $rk = $row['_key'];
+                    foreach ($row as $label => $val) {
+                        if ($label === '_key') {
+                            continue;
+                        }
+                        $allFields["$name.$rk.$label"] = $val;
+                    }
+                }
+                continue;
+            }
 
             if (!$command) {
                 $allFields['_error'] = "Source \"$name\": no command configured";
@@ -445,11 +544,10 @@ class ComplianceEvaluator
     public function recalculateComplianceGrade(Node $node): ?string
     {
         $rows = $this->em->getConnection()->fetchAllAssociative(
-            'SELECT cr.status, cr.severity, COUNT(*) as cnt
+            'SELECT cr.status, cr.severity, cr.per_key, cr.items_total, cr.items_non_compliant
              FROM compliance_result cr
              INNER JOIN compliance_policy cp ON cp.id = cr.policy_id
-             WHERE cr.node_id = :nodeId AND cp.enabled = true
-             GROUP BY cr.status, cr.severity',
+             WHERE cr.node_id = :nodeId AND cp.enabled = true',
             ['nodeId' => $node->getId()]
         );
 
@@ -458,18 +556,19 @@ class ComplianceEvaluator
             return null;
         }
 
-        $penalty = 0;
+        $penalty = 0.0;
         $scorable = 0;
         foreach ($rows as $row) {
             $st = $row['status'];
-            $cnt = (int) $row['cnt'];
             if ($st === 'skipped' || $st === 'not_applicable') continue;
-            $scorable += $cnt;
-            if ($st === 'non_compliant') {
-                $penalty += (self::SEVERITY_WEIGHTS[$row['severity'] ?? 'info'] ?? 0) * $cnt;
-            } elseif ($st === 'error') {
-                $penalty += (self::SEVERITY_WEIGHTS['critical'] ?? 10) * $cnt;
-            }
+            $scorable++;
+            $penalty += self::rowPenalty(
+                $st,
+                $row['severity'] ?? null,
+                self::dbBool($row['per_key'] ?? false),
+                (int) ($row['items_total'] ?? 0),
+                (int) ($row['items_non_compliant'] ?? 0),
+            );
         }
 
         $grade = self::calculateGrade($scorable, $penalty);
@@ -532,7 +631,36 @@ class ComplianceEvaluator
 
     // ---- Score calculation ----
 
-    public static function calculateGrade(int $totalRules, int $penaltySum): string
+    /**
+     * Penalty contributed by a single compliance result. For a per-key rule the
+     * weight is scaled by the share of failing inventory items (e.g. 3/48
+     * interfaces), so one such rule never weighs more than a normal one.
+     */
+    public static function rowPenalty(string $status, ?string $severity, bool $perKey = false, int $itemsTotal = 0, int $itemsNonCompliant = 0): float
+    {
+        if ($status === 'non_compliant') {
+            $weight = self::SEVERITY_WEIGHTS[$severity ?? 'info'] ?? 0;
+        } elseif ($status === 'error') {
+            $weight = self::SEVERITY_WEIGHTS['critical'] ?? 10;
+        } else {
+            return 0.0;
+        }
+
+        $factor = ($perKey && $itemsTotal > 0) ? min(1.0, $itemsNonCompliant / $itemsTotal) : 1.0;
+
+        return $weight * $factor;
+    }
+
+    /**
+     * Normalize a boolean coming back from a raw DBAL fetch (PostgreSQL returns
+     * 't'/'f' strings, some drivers return real bools).
+     */
+    public static function dbBool(mixed $v): bool
+    {
+        return $v === true || $v === 't' || $v === '1' || $v === 1 || $v === 'true';
+    }
+
+    public static function calculateGrade(int $totalRules, float $penaltySum): string
     {
         if ($totalRules === 0) return 'A';
         $maxWeight = $totalRules * 10;

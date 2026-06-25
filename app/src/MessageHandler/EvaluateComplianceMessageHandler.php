@@ -4,6 +4,7 @@ namespace App\MessageHandler;
 
 use App\Entity\CompliancePolicy;
 use App\Entity\ComplianceResult;
+use App\Entity\ComplianceResultItem;
 use App\Entity\ComplianceRule;
 use App\Entity\ComplianceRuleFolder;
 use App\Entity\Node;
@@ -81,6 +82,32 @@ class EvaluateComplianceMessageHandler
             $result->setRecommendation($evaluation['recommendation'] ?? null);
             $result->setRecommendationType($evaluation['recommendationType'] ?? null);
             $result->setEvaluatedAt(new \DateTimeImmutable());
+
+            // Per-key (inventory loop) rule: store one item per inventory key and
+            // the aggregate counters used for proportional scoring.
+            $multiRowResults = $evaluation['multiRowResults'] ?? null;
+            if (is_array($multiRowResults)) {
+                $result->setPerKey(true);
+                $result->setItemsTotal((int) ($evaluation['itemsTotal'] ?? count($multiRowResults)));
+                $result->setItemsNonCompliant((int) ($evaluation['itemsNonCompliant'] ?? 0));
+                $seenKeys = [];
+                foreach ($multiRowResults as $rr) {
+                    $itemKey = (string) ($rr['key'] ?? '');
+                    // Guard against duplicate keys (unique constraint result_id+item_key).
+                    if ($itemKey === '' || isset($seenKeys[$itemKey])) {
+                        continue;
+                    }
+                    $seenKeys[$itemKey] = true;
+                    $ev = is_array($rr['evaluation'] ?? null) ? $rr['evaluation'] : [];
+                    $item = new ComplianceResultItem();
+                    $item->setItemKey(mb_substr($itemKey, 0, 255));
+                    $item->setStatus($ev['status'] ?? 'error');
+                    $item->setSeverity($ev['severity'] ?? null);
+                    $item->setMessage($ev['message'] ?? null);
+                    $result->addItem($item);
+                }
+            }
+
             $this->em->persist($result);
 
             $status = $evaluation['status'] ?? 'error';
@@ -108,27 +135,27 @@ class EvaluateComplianceMessageHandler
         // Use a direct SQL query to avoid ORM cache issues with concurrent workers
         $conn = $this->em->getConnection();
         $rows = $conn->fetchAllAssociative(
-            'SELECT cr.status, cr.severity, COUNT(*) as cnt
+            'SELECT cr.status, cr.severity, cr.per_key, cr.items_total, cr.items_non_compliant
              FROM compliance_result cr
              INNER JOIN compliance_policy cp ON cp.id = cr.policy_id
-             WHERE cr.node_id = :nodeId AND cp.enabled = true
-             GROUP BY cr.status, cr.severity',
+             WHERE cr.node_id = :nodeId AND cp.enabled = true',
             ['nodeId' => $node->getId()]
         );
 
-        $globalPenalty = 0;
+        $globalPenalty = 0.0;
         $globalScorable = 0;
 
         foreach ($rows as $row) {
             $st = $row['status'];
-            $cnt = (int) $row['cnt'];
             if ($st === 'skipped' || $st === 'not_applicable') continue;
-            $globalScorable += $cnt;
-            if ($st === 'non_compliant') {
-                $globalPenalty += (ComplianceEvaluator::SEVERITY_WEIGHTS[$row['severity'] ?? 'info'] ?? 0) * $cnt;
-            } elseif ($st === 'error') {
-                $globalPenalty += (ComplianceEvaluator::SEVERITY_WEIGHTS['critical'] ?? 10) * $cnt;
-            }
+            $globalScorable++;
+            $globalPenalty += ComplianceEvaluator::rowPenalty(
+                $st,
+                $row['severity'] ?? null,
+                ComplianceEvaluator::dbBool($row['per_key'] ?? false),
+                (int) ($row['items_total'] ?? 0),
+                (int) ($row['items_non_compliant'] ?? 0),
+            );
         }
 
         $complianceGrade = ComplianceEvaluator::calculateGrade($globalScorable, $globalPenalty);

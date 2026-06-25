@@ -459,6 +459,21 @@ export interface RuleNodesTableBlock {
   nodeRulesMatch?: "all" | "any";
 }
 
+export interface RuleItemsTableBlock {
+  id: string;
+  type: "rule_items_table";
+  policyId: number | null;
+  ruleId: number | null;
+  showSeverity: boolean;
+  showMessage: boolean;
+  onlyFailing: boolean;
+  pageBreakBefore?: boolean;
+  fontSize?: number;
+  nodeIds?: number[];
+  nodeRules?: InventoryNodeRule[];
+  nodeRulesMatch?: "all" | "any";
+}
+
 export interface RuleRecommendationBlock {
   id: string;
   type: "rule_recommendation";
@@ -845,6 +860,7 @@ export type ReportBlock = (
   | ComplianceMatrixBlock
   | RuleNonCompliantBlock
   | RuleNodesTableBlock
+  | RuleItemsTableBlock
   | RuleRecommendationBlock
   | ComplianceRecommendationsBlock
   | StaticRecommendationsBlock
@@ -991,6 +1007,7 @@ const BLOCK_CATEGORIES: BlockCategoryDef[] = [
       { type: "compliance_matrix", labelKey: "structure.addComplianceMatrix", icon: <ShieldCheck className="h-4 w-4 text-green-500" /> },
       { type: "rule_non_compliant", labelKey: "structure.addRuleNonCompliant", icon: <ShieldAlert className="h-4 w-4 text-red-500" /> },
       { type: "rule_nodes_table", labelKey: "structure.addRuleNodesTable", icon: <Activity className="h-4 w-4 text-sky-500" /> },
+      { type: "rule_items_table", labelKey: "structure.addRuleItemsTable", icon: <Activity className="h-4 w-4 text-violet-500" /> },
       { type: "rule_recommendation", labelKey: "structure.addRuleRecommendation", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
       { type: "compliance_recommendations", labelKey: "structure.addComplianceRecommendations", icon: <ShieldAlert className="h-4 w-4 text-amber-500" /> },
       { type: "static_recommendations", labelKey: "structure.addStaticRecommendations", icon: <Lightbulb className="h-4 w-4 text-amber-500" /> },
@@ -1138,6 +1155,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       block = { id, type: "rule_non_compliant", policyId: null, ruleId: null, showRuleDescription: true, showSeverity: true, showMessage: true, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
     } else if (type === "rule_nodes_table") {
       block = { id, type: "rule_nodes_table", policyId: null, ruleId: null, showRuleDescription: true, showMessage: false, pageBreakBefore: false, columns: [], nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
+    } else if (type === "rule_items_table") {
+      block = { id, type: "rule_items_table", policyId: null, ruleId: null, showSeverity: true, showMessage: true, onlyFailing: false, pageBreakBefore: false, nodeIds: [], nodeRules: [], nodeRulesMatch: "any" };
     } else if (type === "rule_recommendation") {
       block = { id, type: "rule_recommendation", policyId: null, ruleId: null, nodeId: null, source: "static", recommendation: "", showHeader: true, pageBreakBefore: false };
     } else if (type === "compliance_recommendations") {
@@ -1464,6 +1483,12 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
       }
       return <span className="italic text-slate-400">{t("structure.emptyRuleNodesTable")}</span>;
     }
+    if (block.type === "rule_items_table") {
+      if (block.ruleId) {
+        return <span className="text-slate-500 text-xs">{t("structure.ruleItemsTable")} — rule #{block.ruleId}</span>;
+      }
+      return <span className="italic text-slate-400">{t("structure.emptyRuleItemsTable")}</span>;
+    }
     if (block.type === "rule_recommendation") {
       if (block.ruleId && block.nodeId) {
         const src = (block.source ?? "static") === "dynamic" ? "DYN" : "STA";
@@ -1659,6 +1684,13 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     if (block.type === "rule_nodes_table") {
       return (
         <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-sky-100 dark:bg-sky-500/15 px-2 py-0.5 text-[11px] font-bold text-sky-600 dark:text-sky-400">
+          <ShieldQuestion className="h-3 w-3" />
+        </span>
+      );
+    }
+    if (block.type === "rule_items_table") {
+      return (
+        <span className="shrink-0 inline-flex items-center gap-1 rounded-md bg-violet-100 dark:bg-violet-500/15 px-2 py-0.5 text-[11px] font-bold text-violet-600 dark:text-violet-400">
           <ShieldQuestion className="h-3 w-3" />
         </span>
       );
@@ -2007,6 +2039,9 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
               )}
               {editingBlock.type === "rule_nodes_table" && (
                 <RuleNodesTableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
+              )}
+              {editingBlock.type === "rule_items_table" && (
+                <RuleItemsTableProperties block={editingBlock} updateBlock={updateBlock} t={t} />
               )}
               {editingBlock.type === "rule_recommendation" && (
                 <RuleRecommendationProperties block={editingBlock} updateBlock={updateBlock} t={t} />
@@ -8181,7 +8216,7 @@ function ComplianceRulePicker({
   updateBlock,
   t,
 }: {
-  block: RuleNonCompliantBlock | RuleNodesTableBlock;
+  block: RuleNonCompliantBlock | RuleNodesTableBlock | RuleItemsTableBlock;
   updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
   t: (key: string, params?: Record<string, string>) => string;
 }) {
@@ -8435,6 +8470,93 @@ function RuleNodesTableProperties({
           onChange={(cols) => updateBlock(block.id, { columns: cols })}
           t={t}
         />
+      )}
+
+      {activeTab === "devices" && (
+        <NodeSelectionPanel
+          nodeIds={blockNodeIds}
+          nodeRules={blockNodeRules}
+          nodeRulesMatch={blockNodeRulesMatch}
+          onChange={(patch) => updateBlock(block.id, patch)}
+          t={t}
+        />
+      )}
+    </div>
+  );
+}
+
+function RuleItemsTableProperties({
+  block,
+  updateBlock,
+  t,
+}: {
+  block: RuleItemsTableBlock;
+  updateBlock: (id: string, patch: Partial<ReportBlock>) => void;
+  t: (key: string, params?: Record<string, string>) => string;
+}) {
+  const [activeTab, setActiveTab] = useState<"content" | "devices">("content");
+  const blockNodeIds = block.nodeIds ?? [];
+  const blockNodeRules = block.nodeRules ?? [];
+  const blockNodeRulesMatch = block.nodeRulesMatch ?? "any";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex border-b border-slate-200 dark:border-slate-700">
+        <button type="button" className={complianceTabBtnClass(activeTab === "content")} onClick={() => setActiveTab("content")}>
+          {t("structure.complianceTabContent")}
+        </button>
+        <button type="button" className={complianceTabBtnClass(activeTab === "devices")} onClick={() => setActiveTab("devices")}>
+          {t("structure.complianceTabDevices")}
+          {(blockNodeIds.length > 0 || blockNodeRules.length > 0) && (
+            <span className="ml-1.5 inline-flex items-center justify-center h-5 min-w-[20px] rounded-full bg-violet-100 dark:bg-violet-500/15 px-1.5 text-[10px] font-bold text-violet-600 dark:text-violet-400">
+              {blockNodeIds.length + blockNodeRules.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {activeTab === "content" && (
+        <div className="space-y-4">
+          <ComplianceRulePicker block={block} updateBlock={updateBlock} t={t} />
+          <p className="text-xs text-slate-500 dark:text-slate-400">{t("structure.ruleItemsTableHint")}</p>
+
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showSeverity}
+                onChange={(e) => updateBlock(block.id, { showSeverity: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowSeverity")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.showMessage}
+                onChange={(e) => updateBlock(block.id, { showMessage: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.complianceShowMessage")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.onlyFailing}
+                onChange={(e) => updateBlock(block.id, { onlyFailing: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.ruleItemsOnlyFailing")}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={block.pageBreakBefore ?? false}
+                onChange={(e) => updateBlock(block.id, { pageBreakBefore: e.target.checked })}
+                className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500" />
+              <span className="text-sm text-slate-700 dark:text-slate-300">{t("structure.pageBreakBefore")}</span>
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className={labelClass}>{t("structure.complianceFontSize")}</label>
+            <div className="flex items-center gap-3">
+              <input type="range" min={6} max={14} step={0.5} value={block.fontSize ?? 9}
+                onChange={(e) => updateBlock(block.id, { fontSize: Number(e.target.value) })}
+                className="flex-1 accent-blue-600" />
+              <span className="text-sm font-mono text-slate-600 dark:text-slate-300 w-12 text-right">{block.fontSize ?? 9}pt</span>
+            </div>
+          </div>
+        </div>
       )}
 
       {activeTab === "devices" && (

@@ -48,7 +48,7 @@ import { PluginManagedBanner } from "@/components/PluginManagedBanner";
 
 interface DataSource {
   name: string;
-  type: "collection" | "ssh";
+  type: "collection" | "ssh" | "inventory";
   command: string;
   tag?: string | null;
   regex?: string | null;
@@ -56,6 +56,7 @@ interface DataSource {
   valueMap?: { group: number; label: string }[] | null;
   keyGroup?: number | null;
   multiRow?: boolean;
+  inventoryCategoryId?: number | null;
 }
 
 interface MultiRowMessageEntry { short: string; long?: string }
@@ -69,10 +70,13 @@ interface RuleDetail {
   dataSources: DataSource[];
   conditionTree: ConditionTree | null;
   multiRowMessages: Record<string, string | MultiRowMessageEntry> | null;
+  iteration: RuleIteration | null;
   folderId: number | null;
   managedByPlugin: string | null;
   createdAt: string;
 }
+
+interface RuleIteration { categoryId: number; tag: string; }
 
 interface ConditionTree { blocks: ConditionBlock[]; }
 interface ConditionBlock {
@@ -83,7 +87,7 @@ interface ConditionBlock {
   result: ConditionResult | null;
 }
 interface ConditionItem {
-  type: "source" | "inventory";
+  type: "source" | "inventory" | "row";
   // Source fields
   source?: string;
   field?: string;
@@ -93,6 +97,8 @@ interface ConditionItem {
   inventoryColumn?: string;
   inventoryTag?: string;
   compareTag?: string;
+  // Row field (inventory-loop mode): column of the current iterated row
+  column?: string;
   // Common
   operator: string;
   value: string | null;
@@ -485,6 +491,7 @@ interface BlockListProps {
   categories: CategoryItem[];
   inventoryStructure: InventoryStructure[];
   inventoryTags: string[];
+  iterationColumns: string[];
   nodes: NodeItem[];
   nodeTags: NodeTagItem[];
   inputCls: string;
@@ -497,7 +504,7 @@ interface BlockListProps {
   onDuplicate: (path: number[]) => void;
 }
 
-function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, sourceFieldOptions, categories, inventoryStructure, inventoryTags, nodes, nodeTags, inputCls, makeEmptyCondition, onUpdate, onRemove, onAddSibling, onAddNestedIf, onReorder, onDuplicate }: BlockListProps) {
+function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses, severities, sourceFieldOptions, categories, inventoryStructure, inventoryTags, iterationColumns, nodes, nodeTags, inputCls, makeEmptyCondition, onUpdate, onRemove, onAddSibling, onAddNestedIf, onReorder, onDuplicate }: BlockListProps) {
   const getInventoryKeys = (catId: number | null | undefined): string[] => {
     if (!catId) return [];
     const cat = inventoryStructure.find((c) => c.categoryId === catId);
@@ -659,12 +666,14 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                             {nodes.find((n) => n.model?.id === cond.nodeModelId)?.model?.name || `model#${cond.nodeModelId}`}
                           </span>
                         )}
-                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${condType === "source" ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
-                          {condType === "source" ? "SRC" : "INV"}
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${condType === "source" ? "bg-violet-50 dark:bg-violet-500/10 text-violet-600 dark:text-violet-400" : condType === "row" ? "bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400" : "bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400"}`}>
+                          {condType === "source" ? "SRC" : condType === "row" ? "ROW" : "INV"}
                         </span>
                         <span className="text-xs font-mono text-slate-700 dark:text-slate-300 truncate">
                           {condType === "source"
                             ? `${cond.source || "?"}.${cond.field || "$value"}`
+                            : condType === "row"
+                            ? `row.${cond.column || "?"}`
                             : `${inventoryStructure.find((c) => c.categoryId === cond.inventoryCategoryId)?.categoryName || "?"} / ${cond.inventoryKey || "?"}`}
                         </span>
                         {condType === "inventory" && (
@@ -730,7 +739,8 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                           </div>
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Type</span>
-                            <select value={condType} onChange={(e) => { const nt = e.target.value as "source" | "inventory"; if (nt === "inventory") updateCond({ type: "inventory", inventoryCategoryId: inventoryStructure[0]?.categoryId || null, inventoryKey: "", inventoryColumn: "Value#1", inventoryTag: "latest", source: undefined, field: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); else updateCond({ type: "source", source: sourceFieldOptions[0]?.source || "", field: sourceFieldOptions[0]?.field || "$value", inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined, inventoryTag: undefined, compareTag: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); }} className={`${smallInput} w-[110px]`}>
+                            <select value={condType} onChange={(e) => { const nt = e.target.value as ConditionItem["type"]; if (nt === "row") updateCond({ type: "row", column: iterationColumns[0] || "", source: undefined, field: undefined, inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined, inventoryTag: undefined, compareTag: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); else if (nt === "inventory") updateCond({ type: "inventory", inventoryCategoryId: inventoryStructure[0]?.categoryId || null, inventoryKey: "", inventoryColumn: "Value#1", inventoryTag: "latest", source: undefined, field: undefined, column: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); else updateCond({ type: "source", source: sourceFieldOptions[0]?.source || "", field: sourceFieldOptions[0]?.field || "$value", inventoryCategoryId: undefined, inventoryKey: undefined, inventoryColumn: undefined, inventoryTag: undefined, compareTag: undefined, column: undefined, operator: cond.operator.startsWith("compare_inventory_") ? "equals" : cond.operator }); }} className={`${smallInput} w-[110px]`}>
+                              {iterationColumns.length > 0 && <option value="row">{t("compliance_rules.conditionTypeRow")}</option>}
                               <option value="source">{t("compliance_rules.conditionTypeSource")}</option>
                               <option value="inventory">{t("compliance_rules.conditionTypeInventory")}</option>
                             </select>
@@ -779,6 +789,16 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                                 </select>
                               </div>
                             </>
+                          )}
+                          {condType === "row" && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-semibold text-slate-400 uppercase w-10 shrink-0">Col.</span>
+                              <select value={cond.column || ""} onChange={(e) => updateCond({ column: e.target.value })} className={`${smallInput} max-w-[200px] font-mono`}>
+                                <option value="">--</option>
+                                <option value="$key">$key</option>
+                                {iterationColumns.map((c) => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </div>
                           )}
                         </div>
 
@@ -841,6 +861,7 @@ function ConditionBlockList({ blocks, parentPath, depth, t, operators, statuses,
                   categories={categories}
                   inventoryStructure={inventoryStructure}
                   inventoryTags={inventoryTags}
+                  iterationColumns={iterationColumns}
                   nodes={nodes}
                   nodeTags={nodeTags}
                   inputCls={inputCls}
@@ -1094,6 +1115,7 @@ export default function ComplianceRuleEditPage() {
 
   // Conditions
   const [conditionTree, setConditionTree] = useState<ConditionTree | null>(null);
+  const [iteration, setIteration] = useState<RuleIteration | null>(null);
   const [savingConditions, setSavingConditions] = useState(false);
   const [savedConditions, setSavedConditions] = useState(false);
 
@@ -1126,6 +1148,7 @@ export default function ComplianceRuleEditPage() {
       setFolderId(data.folderId);
       setDataSources(data.dataSources || []);
       setConditionTree(data.conditionTree || null);
+      setIteration(data.iteration || null);
       // Backwards-compat: legacy format = { status: string }; new format = { status: { short, long } }
       const raw = data.multiRowMessages || {};
       const normalized: Record<string, MultiRowMessageEntry> = {};
@@ -1262,7 +1285,7 @@ export default function ComplianceRuleEditPage() {
       const res = await fetch(`/api/compliance-rules/${ruleId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conditionTree }),
+        body: JSON.stringify({ conditionTree, iteration }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -1347,7 +1370,20 @@ export default function ComplianceRuleEditPage() {
     return options;
   }, [dataSources]);
 
+  // Columns available when the rule loops over an inventory category.
+  const iterationColumns = useMemo(() => {
+    if (!iteration?.categoryId) return [] as string[];
+    const cat = inventoryStructure.find((c) => c.categoryId === iteration.categoryId);
+    if (!cat) return [] as string[];
+    const cols = new Set<string>();
+    for (const e of cat.entries || []) for (const col of e.columns || []) cols.add(col);
+    return Array.from(cols);
+  }, [iteration, inventoryStructure]);
+
   const makeEmptyCondition = (): ConditionItem => {
+    if (iteration?.categoryId) {
+      return { type: "row", column: iterationColumns[0] || "", operator: "equals", value: "" };
+    }
     if (sourceFieldOptions.length > 0) {
       return { type: "source", source: sourceFieldOptions[0].source, field: sourceFieldOptions[0].field, operator: "equals", value: "" };
     }
@@ -1622,15 +1658,43 @@ export default function ComplianceRuleEditPage() {
                         <div className="space-y-1.5">
                           <label className={labelCls}>{t("compliance_rules.sourceType")}</label>
                           <div className="flex gap-2">
-                            {(["collection", "ssh"] as const).map((tp) => (
-                              <button key={tp} onClick={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], type: tp }; setDataSources(ns); }}
+                            {(["collection", "ssh", "inventory"] as const).map((tp) => (
+                              <button key={tp} onClick={() => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], type: tp, ...(tp === "inventory" ? { multiRow: true, inventoryCategoryId: ns[idx].inventoryCategoryId ?? (inventoryStructure[0]?.categoryId ?? null), tag: ns[idx].tag ?? "latest" } : {}) }; setDataSources(ns); }}
                                 className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${src.type === tp ? "border-slate-900 dark:border-white bg-slate-900 dark:bg-white text-white dark:text-slate-900" : "border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
-                                {tp === "collection" ? "Collection" : "SSH"}
+                                {tp === "collection" ? "Collection" : tp === "ssh" ? "SSH" : "Inventory"}
                               </button>
                             ))}
                           </div>
                         </div>
                       </div>
+                      {src.type === "inventory" ? (
+                        <>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Loops over every key of the chosen inventory category (one evaluation per item, e.g. per interface). Each column is exposed as a field
+                            <code className="mx-1 font-mono">{src.name || "source"}.&lt;Column&gt;</code> in the conditions.
+                          </p>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Inventory category</label>
+                              <select value={src.inventoryCategoryId ?? ""} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], inventoryCategoryId: e.target.value ? Number(e.target.value) : null }; setDataSources(ns); }} className={inputCls}>
+                                <option value="">—</option>
+                                {inventoryStructure.filter((c) => c.categoryId != null).map((c) => (
+                                  <option key={c.categoryId} value={c.categoryId as number}>{c.categoryName}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className={labelCls}>Tag</label>
+                              <select value={src.tag || "latest"} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], tag: e.target.value || "latest" }; setDataSources(ns); }} className={inputCls}>
+                                {Array.from(new Set(["latest", ...inventoryTags])).map((tg) => (
+                                  <option key={tg} value={tg}>{tg}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                      <>
                       <div className="space-y-1.5">
                         <label className={labelCls}>{t("compliance_rules.command")}</label>
                         <input type="text" value={src.command} onChange={(e) => { const ns = [...dataSources]; ns[idx] = { ...ns[idx], command: e.target.value }; setDataSources(ns); }} placeholder="show hostname" className={`${inputCls} font-mono`} />
@@ -1723,6 +1787,8 @@ export default function ComplianceRuleEditPage() {
                             ))}
                           </div>
                         </div>
+                      )}
+                      </>
                       )}
                     </div>
                   )}
@@ -1917,6 +1983,53 @@ export default function ComplianceRuleEditPage() {
                 </div>
               </div>
 
+              <div className="rounded-lg border border-violet-200 dark:border-violet-500/30 bg-violet-50/50 dark:bg-violet-500/5 p-4 space-y-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!iteration}
+                    disabled={readOnly}
+                    onChange={(e) => setIteration(e.target.checked ? { categoryId: inventoryStructure.find((c) => c.categoryId != null)?.categoryId ?? 0, tag: "latest" } : null)}
+                    className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-violet-600 focus:ring-violet-500"
+                  />
+                  <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("compliance_rules.iterationToggle")}</span>
+                </label>
+                {iteration && (
+                  <>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">{t("compliance_rules.iterationHint")}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("compliance_rules.iterationCategory")}</label>
+                        <select
+                          value={iteration.categoryId || ""}
+                          disabled={readOnly}
+                          onChange={(e) => setIteration({ ...iteration, categoryId: Number(e.target.value) })}
+                          className={inputCls}
+                        >
+                          <option value="">—</option>
+                          {inventoryStructure.filter((c) => c.categoryId != null).map((c) => (
+                            <option key={c.categoryId} value={c.categoryId as number}>{c.categoryName}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Tag</label>
+                        <select
+                          value={iteration.tag || "latest"}
+                          disabled={readOnly}
+                          onChange={(e) => setIteration({ ...iteration, tag: e.target.value })}
+                          className={inputCls}
+                        >
+                          {Array.from(new Set(["latest", ...inventoryTags])).map((tg) => (
+                            <option key={tg} value={tg}>{tg}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+
               {!conditionTree ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-3 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">
@@ -1950,6 +2063,7 @@ export default function ComplianceRuleEditPage() {
                     categories={categories}
                     inventoryStructure={inventoryStructure}
                     inventoryTags={inventoryTags}
+                    iterationColumns={iterationColumns}
                     nodes={nodes}
                     nodeTags={nodeTags}
                     inputCls={inputCls}

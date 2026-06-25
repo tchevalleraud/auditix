@@ -38,6 +38,15 @@ class ComplianceRule
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $multiRowMessages = null;
 
+    /**
+     * When set, the rule is evaluated once per key of an inventory category
+     * (loop mode), without configuring a data source. Shape:
+     * {categoryId: int, tag: string}. Conditions read the current row's columns
+     * via the `row` condition type (`row.<column>`, `row.$key` for the key).
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $iteration = null;
+
     #[ORM\ManyToOne(targetEntity: ComplianceRuleFolder::class)]
     #[ORM\JoinColumn(nullable: true, onDelete: 'CASCADE')]
     private ?ComplianceRuleFolder $folder = null;
@@ -76,6 +85,8 @@ class ComplianceRule
     public function setConditionTree(?array $v): static { $this->conditionTree = $v; return $this; }
     public function getMultiRowMessages(): ?array { return $this->multiRowMessages; }
     public function setMultiRowMessages(?array $v): static { $this->multiRowMessages = $v; return $this; }
+    public function getIteration(): ?array { return $this->iteration; }
+    public function setIteration(?array $v): static { $this->iteration = $v; return $this; }
     public function getFolder(): ?ComplianceRuleFolder { return $this->folder; }
     public function setFolder(?ComplianceRuleFolder $v): static { $this->folder = $v; return $this; }
     public function getContext(): Context { return $this->context; }

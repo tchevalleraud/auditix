@@ -34,6 +34,7 @@ class ComplianceRuleController extends AbstractController
             'dataSources' => $r->getDataSources(),
             'conditionTree' => $r->getConditionTree(),
             'multiRowMessages' => $r->getMultiRowMessages(),
+            'iteration' => $r->getIteration(),
             'folderId' => $r->getFolder()?->getId(),
             'hasInventoryCompare' => $this->hasInventoryCompare($r->getConditionTree()),
             'managedByPlugin' => $r->getManagedByPlugin(),
@@ -542,6 +543,13 @@ class ComplianceRuleController extends AbstractController
         }
         if (array_key_exists('multiRowMessages', $data)) {
             $rule->setMultiRowMessages($data['multiRowMessages']);
+        }
+        if (array_key_exists('iteration', $data)) {
+            $it = $data['iteration'];
+            $rule->setIteration(is_array($it) && !empty($it['categoryId']) ? [
+                'categoryId' => (int) $it['categoryId'],
+                'tag' => isset($it['tag']) && $it['tag'] !== '' ? (string) $it['tag'] : 'latest',
+            ] : null);
         }
     }
 
