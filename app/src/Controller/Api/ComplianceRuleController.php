@@ -546,10 +546,19 @@ class ComplianceRuleController extends AbstractController
         }
         if (array_key_exists('iteration', $data)) {
             $it = $data['iteration'];
-            $rule->setIteration(is_array($it) && !empty($it['categoryId']) ? [
-                'categoryId' => (int) $it['categoryId'],
-                'tag' => isset($it['tag']) && $it['tag'] !== '' ? (string) $it['tag'] : 'latest',
-            ] : null);
+            // Identify the loop category by name (always available) and/or id.
+            if (is_array($it) && (!empty($it['categoryName']) || !empty($it['categoryId']))) {
+                $iter = ['tag' => isset($it['tag']) && $it['tag'] !== '' ? (string) $it['tag'] : 'latest'];
+                if (!empty($it['categoryName'])) {
+                    $iter['categoryName'] = (string) $it['categoryName'];
+                }
+                if (!empty($it['categoryId'])) {
+                    $iter['categoryId'] = (int) $it['categoryId'];
+                }
+                $rule->setIteration($iter);
+            } else {
+                $rule->setIteration(null);
+            }
         }
     }
 

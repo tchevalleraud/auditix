@@ -49,8 +49,8 @@ class ComplianceEvaluator
 
         // Inventory-loop mode: evaluate once per key of a category, no data source.
         $iteration = $rule->getIteration();
-        if (is_array($iteration) && !empty($iteration['categoryId'])) {
-            return $this->evaluateInventoryLoop($rule, $node, $conditionTree, (int) $iteration['categoryId'], (string) ($iteration['tag'] ?? 'latest'));
+        if (is_array($iteration) && (!empty($iteration['categoryName']) || !empty($iteration['categoryId']))) {
+            return $this->evaluateInventoryLoop($rule, $node, $conditionTree, $iteration);
         }
 
         // Collect fields from all data sources
@@ -164,9 +164,17 @@ class ComplianceEvaluator
      * source). Each row's columns are exposed to the condition tree as
      * `row.<column>`, and the key as `row.$key`; the entryKey is the item key.
      */
-    private function evaluateInventoryLoop(ComplianceRule $rule, Node $node, array $conditionTree, int $categoryId, string $tag): array
+    private function evaluateInventoryLoop(ComplianceRule $rule, Node $node, array $conditionTree, array $iteration): array
     {
-        $rowsByKey = $this->conditionTree->getInventoryRows($categoryId, $node, $tag ?: 'latest');
+        $tag = (string) ($iteration['tag'] ?? 'latest') ?: 'latest';
+        // Prefer the category name (always present); fall back to the legacy id.
+        if (!empty($iteration['categoryName'])) {
+            $rowsByKey = $this->conditionTree->getInventoryRowsByName((string) $iteration['categoryName'], $node, $tag);
+        } elseif (!empty($iteration['categoryId'])) {
+            $rowsByKey = $this->conditionTree->getInventoryRows((int) $iteration['categoryId'], $node, $tag);
+        } else {
+            $rowsByKey = [];
+        }
         if (empty($rowsByKey)) {
             return ['status' => 'not_applicable', 'severity' => null, 'message' => 'No inventory entries for this category'];
         }

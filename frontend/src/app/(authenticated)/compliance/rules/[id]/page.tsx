@@ -76,7 +76,7 @@ interface RuleDetail {
   createdAt: string;
 }
 
-interface RuleIteration { categoryId: number; tag: string; }
+interface RuleIteration { categoryName: string; tag: string; categoryId?: number | null; }
 
 interface ConditionTree { blocks: ConditionBlock[]; }
 interface ConditionBlock {
@@ -1389,8 +1389,8 @@ export default function ComplianceRuleEditPage() {
 
   // Columns available when the rule loops over an inventory category.
   const iterationColumns = useMemo(() => {
-    if (!iteration?.categoryId) return [] as string[];
-    const cat = inventoryStructure.find((c) => c.categoryId === iteration.categoryId);
+    if (!iteration?.categoryName) return [] as string[];
+    const cat = inventoryStructure.find((c) => c.categoryName === iteration.categoryName);
     if (!cat) return [] as string[];
     const cols = new Set<string>();
     for (const e of cat.entries || []) for (const col of e.columns || []) cols.add(col);
@@ -1398,7 +1398,7 @@ export default function ComplianceRuleEditPage() {
   }, [iteration, inventoryStructure]);
 
   const makeEmptyCondition = (): ConditionItem => {
-    if (iteration?.categoryId) {
+    if (iteration?.categoryName) {
       return { type: "row", column: iterationColumns[0] || "", operator: "equals", value: "" };
     }
     if (sourceFieldOptions.length > 0) {
@@ -2006,7 +2006,7 @@ export default function ComplianceRuleEditPage() {
                     type="checkbox"
                     checked={!!iteration}
                     disabled={readOnly}
-                    onChange={(e) => saveIteration(e.target.checked ? { categoryId: inventoryStructure.find((c) => c.categoryId != null)?.categoryId ?? 0, tag: "latest" } : null)}
+                    onChange={(e) => saveIteration(e.target.checked ? { categoryName: inventoryStructure[0]?.categoryName ?? "", tag: "latest" } : null)}
                     className="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-violet-600 focus:ring-violet-500"
                   />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("compliance_rules.iterationToggle")}</span>
@@ -2018,14 +2018,14 @@ export default function ComplianceRuleEditPage() {
                       <div className="space-y-1">
                         <label className="text-xs font-medium text-slate-500 dark:text-slate-400">{t("compliance_rules.iterationCategory")}</label>
                         <select
-                          value={iteration.categoryId || ""}
+                          value={iteration.categoryName || ""}
                           disabled={readOnly}
-                          onChange={(e) => saveIteration({ ...iteration, categoryId: Number(e.target.value) })}
+                          onChange={(e) => saveIteration({ categoryName: e.target.value, tag: iteration.tag || "latest" })}
                           className={inputCls}
                         >
                           <option value="">—</option>
-                          {inventoryStructure.filter((c) => c.categoryId != null).map((c) => (
-                            <option key={c.categoryId} value={c.categoryId as number}>{c.categoryName}</option>
+                          {inventoryStructure.map((c) => (
+                            <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
                           ))}
                         </select>
                       </div>

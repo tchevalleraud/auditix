@@ -224,6 +224,43 @@ class ConditionTreeEvaluator
     }
 
     /**
+     * Same as getInventoryRows() but keyed by category NAME, so it works for
+     * categories that have no InventoryCategory id (defined by name only).
+     */
+    public function getInventoryRowsByName(string $categoryName, Node $node, string $tagName = 'latest'): array
+    {
+        if ($categoryName === '') return [];
+
+        $filters = $this->em->getFilters();
+        $hadFilter = $tagName !== 'latest' && $filters->isEnabled(LatestInventoryFilter::NAME);
+        if ($hadFilter) $filters->disable(LatestInventoryFilter::NAME);
+
+        try {
+            $entries = $this->em->createQueryBuilder()
+                ->select('e')
+                ->from(NodeInventoryEntry::class, 'e')
+                ->innerJoin('e.collectionTag', 't')
+                ->where('e.node = :node')
+                ->andWhere('e.categoryName = :name')
+                ->andWhere('t.name = :tag')
+                ->setParameter('node', $node)
+                ->setParameter('name', $categoryName)
+                ->setParameter('tag', $tagName)
+                ->getQuery()
+                ->getResult();
+        } finally {
+            if ($hadFilter) $filters->enable(LatestInventoryFilter::NAME);
+        }
+
+        $rows = [];
+        foreach ($entries as $e) {
+            /** @var NodeInventoryEntry $e */
+            $rows[$e->getEntryKey()][$e->getColLabel()] = $e->getValue();
+        }
+        return $rows;
+    }
+
+    /**
      * Count how many inventory rows (entryKeys) of the category satisfy the
      * given per-row conditions, combined with AND/OR logic. Each condition is a
      * `row` condition (column/operator/value). Used by the `count` action.
