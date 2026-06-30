@@ -1125,15 +1125,39 @@ trait RendersBusinessBlocks
         $aggregation = (string) ($col['aggregation'] ?? 'value');
 
         if ($aggregation === 'count') {
+            $matchValue = (string) ($col['matchValue'] ?? '');
+            $matchOp = (string) ($col['matchOperator'] ?? 'eq');
+            // No matchValue and operator is eq/neq => count all entries (the "Total" column).
+            $countAll = ($matchValue === '' && ($matchOp === 'eq' || $matchOp === 'neq'));
+
+            if ($countAll) {
+                $qb = $this->em->getRepository(NodeInventoryEntry::class)->createQueryBuilder('e')
+                    ->select('COUNT(e.id)')
+                    ->andWhere('e.node = :node')->setParameter('node', $node)
+                    ->andWhere('LOWER(e.categoryName) = :cat')->setParameter('cat', mb_strtolower($category));
+                if ($colLabel) {
+                    $qb->andWhere('LOWER(e.colLabel) = :col')->setParameter('col', mb_strtolower((string) $colLabel));
+                }
+
+                return (string) (int) $qb->getQuery()->getSingleScalarResult();
+            }
+
+            // Per-value column (e.g. a speed bucket): count only entries whose value matches.
             $qb = $this->em->getRepository(NodeInventoryEntry::class)->createQueryBuilder('e')
-                ->select('COUNT(e.id)')
                 ->andWhere('e.node = :node')->setParameter('node', $node)
                 ->andWhere('LOWER(e.categoryName) = :cat')->setParameter('cat', mb_strtolower($category));
             if ($colLabel) {
                 $qb->andWhere('LOWER(e.colLabel) = :col')->setParameter('col', mb_strtolower((string) $colLabel));
             }
+            $entries = $qb->getQuery()->getResult();
+            $count = 0;
+            foreach ($entries as $entry) {
+                if ($this->matchCountValue((string) ($entry->getValue() ?? ''), $matchValue, $matchOp)) {
+                    $count++;
+                }
+            }
 
-            return (string) (int) $qb->getQuery()->getSingleScalarResult();
+            return (string) $count;
         }
 
         if ($aggregation === 'list') {
@@ -1146,6 +1170,25 @@ trait RendersBusinessBlocks
         }
 
         return (string) $this->getInventoryValue($node, $category, $key, $colLabel ? (string) $colLabel : null);
+    }
+
+    /**
+     * Match an inventory entry value against a column's matchValue/matchOperator.
+     * Mirrors the PDF renderer so per-value count columns agree across formats.
+     */
+    private function matchCountValue(string $cellVal, string $matchVal, string $op): bool
+    {
+        switch ($op) {
+            case 'neq':
+                return $cellVal !== $matchVal;
+            case 'contains':
+                return $matchVal !== '' && str_contains(mb_strtolower($cellVal), mb_strtolower($matchVal));
+            case 'not_contains':
+                return $matchVal === '' || !str_contains(mb_strtolower($cellVal), mb_strtolower($matchVal));
+            case 'eq':
+            default:
+                return $cellVal === $matchVal;
+        }
     }
 
     private function renderInventorySingleNode(Section $section, array $block, WordRenderContext $ctx): void
