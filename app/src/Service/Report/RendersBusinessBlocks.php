@@ -1161,12 +1161,36 @@ trait RendersBusinessBlocks
         }
 
         if ($aggregation === 'list') {
+            $listSource = ($col['listSource'] ?? 'keys') === 'values' ? 'values' : 'keys';
+            $listSeparator = (string) ($col['listSeparator'] ?? ', ');
+            $listFilters = is_array($col['listFilters'] ?? null) ? $col['listFilters'] : [];
+            $listFiltersMatch = ($col['listFiltersMatch'] ?? 'all') === 'any' ? 'any' : 'all';
+            $listCompact = !empty($col['listCompact']);
+
             $entries = $this->em->getRepository(NodeInventoryEntry::class)->findBy([
                 'node' => $node, 'categoryName' => $category,
             ] + ($colLabel ? ['colLabel' => $colLabel] : []));
-            $vals = array_filter(array_map(fn ($e) => $e->getValue(), $entries));
 
-            return implode(', ', array_unique($vals));
+            $items = [];
+            foreach ($entries as $entry) {
+                $entryKey = (string) ($entry->getEntryKey() ?? '');
+                $value = (string) ($entry->getValue() ?? '');
+                if (!$this->matchListFilters($entryKey, $value, $listFilters, $listFiltersMatch)) {
+                    continue;
+                }
+                $item = ($listSource === 'values') ? $value : $entryKey;
+                if ($item === '') {
+                    continue;
+                }
+                $items[] = $item;
+            }
+            $items = array_values(array_unique($items));
+            usort($items, 'strnatcasecmp');
+            if ($listCompact) {
+                $items = $this->compactNumericRanges($items);
+            }
+
+            return implode($listSeparator, $items);
         }
 
         return (string) $this->getInventoryValue($node, $category, $key, $colLabel ? (string) $colLabel : null);
@@ -1189,6 +1213,110 @@ trait RendersBusinessBlocks
             default:
                 return $cellVal === $matchVal;
         }
+    }
+
+    /**
+     * Evaluate inventory list-mode filters against an entry's key and value.
+     * Each filter: { field: 'key'|'value', operator, value }.
+     * Match mode 'all' = AND (default), 'any' = OR. Mirrors the PDF renderer.
+     *
+     * @param array<int,array<string,mixed>> $filters
+     */
+    private function matchListFilters(string $entryKey, string $entryValue, array $filters, string $match): bool
+    {
+        if (empty($filters)) {
+            return true;
+        }
+        $results = [];
+        foreach ($filters as $f) {
+            $field = ($f['field'] ?? 'value') === 'key' ? 'key' : 'value';
+            $op = (string) ($f['operator'] ?? 'eq');
+            $needle = (string) ($f['value'] ?? '');
+            $haystack = $field === 'key' ? $entryKey : $entryValue;
+            $hl = mb_strtolower($haystack);
+            $nl = mb_strtolower($needle);
+            switch ($op) {
+                case 'neq':
+                    $results[] = $haystack !== $needle;
+                    break;
+                case 'contains':
+                    $results[] = $needle !== '' && str_contains($hl, $nl);
+                    break;
+                case 'not_contains':
+                    $results[] = $needle === '' || !str_contains($hl, $nl);
+                    break;
+                case 'starts_with':
+                    $results[] = $needle !== '' && str_starts_with($hl, $nl);
+                    break;
+                case 'ends_with':
+                    $results[] = $needle !== '' && str_ends_with($hl, $nl);
+                    break;
+                case 'eq':
+                default:
+                    $results[] = $haystack === $needle;
+                    break;
+            }
+        }
+
+        return $match === 'any' ? in_array(true, $results, true) : !in_array(false, $results, true);
+    }
+
+    /**
+     * Collapse consecutive numeric "interface-like" keys into ranges
+     * (e.g. "1/1", "1/2", "1/3" => "1/1-1/3"). The input is expected to be
+     * already sorted (natural case). Mirrors the PDF renderer.
+     *
+     * @param string[] $items
+     * @return string[]
+     */
+    private function compactNumericRanges(array $items): array
+    {
+        $parse = static function (string $s): ?array {
+            if (!preg_match('#^\d+(?:[/:]\d+)*$#', $s)) {
+                return null;
+            }
+            $segs = preg_split('#([/:])#', $s, -1, PREG_SPLIT_DELIM_CAPTURE);
+            if ($segs === false) {
+                return null;
+            }
+            $stem = implode('', array_slice($segs, 0, -1));
+            $last = (int) $segs[count($segs) - 1];
+
+            return ['stem' => $stem, 'last' => $last];
+        };
+
+        $out = [];
+        $n = count($items);
+        $i = 0;
+        while ($i < $n) {
+            $a = $items[$i];
+            $pa = $parse($a);
+            if ($pa === null) {
+                $out[] = $a;
+                $i++;
+                continue;
+            }
+            $j = $i;
+            $prevLast = $pa['last'];
+            while ($j + 1 < $n) {
+                $pb = $parse($items[$j + 1]);
+                if ($pb === null) {
+                    break;
+                }
+                if ($pb['stem'] !== $pa['stem']) {
+                    break;
+                }
+                if ($pb['last'] !== $prevLast + 1) {
+                    break;
+                }
+                $j++;
+                $prevLast = $pb['last'];
+            }
+            $out[] = ($j === $i) ? $a : ($a . '-' . $items[$j]);
+            $i = $j + 1;
+        }
+
+        return $out;
     }
 
     private function renderInventorySingleNode(Section $section, array $block, WordRenderContext $ctx): void
