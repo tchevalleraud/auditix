@@ -17,7 +17,8 @@ use Doctrine\ORM\EntityManagerInterface;
  * a PDF or shown as a preview. Mirrors the React TopologyMap render rules.
  *
  * Supported options:
- *   - protocolFilter:  "manual" | int(protocolId)   (default: "manual")
+ *   - protocolFilter:  "manual" | int(protocolId) | list of those   (default: "manual")
+ *                      A list combines several protocols on the same map.
  *   - showClusters:    bool   (default: true)
  *   - showAnnotations: bool   (default: true)
  *   - canvasWidth:     int    (default: 1200)  — px of the output SVG (height is auto)
@@ -70,6 +71,23 @@ class TopologyV2SvgRenderer
     public function render(Topology $topology, array $options = []): string
     {
         $protocolFilter = $options['protocolFilter'] ?? 'manual';
+        // The filter may be a single value ("manual" | int) or a list of them to
+        // combine several protocols on the same map. Normalise to a selection set.
+        $selectedPids = [];      // protocolId(int) => true
+        $manualSelected = false;
+        foreach ((is_array($protocolFilter) ? $protocolFilter : [$protocolFilter]) as $pf) {
+            if ($pf === 'manual' || $pf === null || $pf === '') {
+                $manualSelected = true;
+                continue;
+            }
+            if (is_int($pf) || ctype_digit((string) $pf)) {
+                $selectedPids[(int) $pf] = true;
+            }
+        }
+        // Empty/unknown selection falls back to manual edges (legacy default).
+        if (!$manualSelected && empty($selectedPids)) {
+            $manualSelected = true;
+        }
         $showClusters = $options['showClusters'] ?? true;
         $showAnnotations = $options['showAnnotations'] ?? true;
         $canvasWidth = (int) ($options['canvasWidth'] ?? 1200);
@@ -135,9 +153,9 @@ class TopologyV2SvgRenderer
         $visibleEdges = [];
         foreach ($allEdges as $e) {
             $pid = $e->getProtocol()?->getId();
-            if ($protocolFilter === 'manual') {
-                if ($pid === null) $visibleEdges[] = $e;
-            } else if ((int)$protocolFilter === $pid) {
+            if ($pid === null) {
+                if ($manualSelected) $visibleEdges[] = $e;
+            } else if (isset($selectedPids[$pid])) {
                 $visibleEdges[] = $e;
             }
         }
@@ -147,7 +165,7 @@ class TopologyV2SvgRenderer
         if ($showClusters) {
             foreach ($this->em->getRepository(TopologyCluster::class)->findBy(['topology' => $topology]) as $c) {
                 $cpid = $c->getProtocol()?->getId();
-                if ($cpid === null || ($protocolFilter !== 'manual' && (int)$protocolFilter === $cpid)) {
+                if ($cpid === null || isset($selectedPids[$cpid])) {
                     $clusters[] = $c;
                 }
             }
@@ -173,9 +191,19 @@ class TopologyV2SvgRenderer
             if ($p->getType() === TopologyProtocol::TYPE_MSTP) $mstpProtocolIds[$p->getId()] = true;
             if ($p->getType() === TopologyProtocol::TYPE_STP)  $stpProtocolIds[$p->getId()]  = true;
         }
-        $filterPid = (is_int($protocolFilter) || ctype_digit((string) $protocolFilter)) ? (int) $protocolFilter : null;
-        $isStpFiltered  = $filterPid !== null && (isset($stpProtocolIds[$filterPid]) || isset($mstpProtocolIds[$filterPid]));
-        $isMstpFiltered = $filterPid !== null && isset($mstpProtocolIds[$filterPid]);
+        // Whether the current selection includes any STP/MSTP/ISIS protocol —
+        // drives the root badges, MSTP recolouring and which legend is shown.
+        // With several protocols combined, a flag is true if ANY selected
+        // protocol is of that type; per-edge styling still keys off each edge's
+        // own protocol below.
+        $isStpFiltered = false;
+        $isMstpFiltered = false;
+        $isisFiltered = false;
+        foreach (array_keys($selectedPids) as $spid) {
+            if (isset($mstpProtocolIds[$spid])) { $isStpFiltered = true; $isMstpFiltered = true; }
+            elseif (isset($stpProtocolIds[$spid])) { $isStpFiltered = true; }
+            if (isset($isisProtocolIds[$spid])) { $isisFiltered = true; }
+        }
 
         // Identify STP root node IDs for the current context. The clusters that
         // emitStpRootClusters() persists carry { stpRoot: true, stpInstance: <id> }
@@ -184,13 +212,16 @@ class TopologyV2SvgRenderer
         $stpRootNodeIds = [];
         if ($isStpFiltered) {
             foreach ($allClusters as $c) {
-                if ($c->getProtocol()?->getId() !== $filterPid) continue;
+                $cpid = $c->getProtocol()?->getId();
+                if ($cpid === null || !isset($selectedPids[$cpid])) continue;
+                if (!isset($stpProtocolIds[$cpid]) && !isset($mstpProtocolIds[$cpid])) continue;
                 $cs = $c->getStyle();
                 if (empty($cs['stpRoot'])) continue;
-                if ($isMstpFiltered && $mstpInstance !== null
+                // For MSTP, restrict the R badge to the picked instance's root.
+                if (isset($mstpProtocolIds[$cpid]) && $mstpInstance !== null
                     && (string)($cs['stpInstance'] ?? '') !== $mstpInstance) continue;
-                $members = $this->em->getRepository(TopologyClusterMember::class)->findBy(['cluster' => $c]);
-                foreach ($members as $m) {
+                $rootMembers = $this->em->getRepository(TopologyClusterMember::class)->findBy(['cluster' => $c]);
+                foreach ($rootMembers as $m) {
                     $stpRootNodeIds[$m->getNode()->getId()] = true;
                 }
             }
@@ -278,7 +309,7 @@ class TopologyV2SvgRenderer
             // Skip the edge entirely if it has no data for that instance, so
             // the PDF shows only relevant adjacencies (mirrors the map).
             $styleOverride = null;
-            if ($isMstpFiltered && $pid === $filterPid && $mstpInstance !== null) {
+            if ($pid !== null && isset($mstpProtocolIds[$pid]) && $mstpInstance !== null) {
                 $instances = $eStyle['stpInstances'] ?? [];
                 $found = null;
                 foreach ($instances as $i) {
@@ -322,7 +353,7 @@ class TopologyV2SvgRenderer
             $unitPerPx = $vw / max(1, $canvasWidth);
             if ($isStpFiltered) {
                 $out .= $this->renderStpLegend($minX, $minY, $vw, $vh, $legendPos, $isMstpFiltered, $unitPerPx);
-            } elseif ($filterPid !== null && isset($isisProtocolIds[$filterPid]) && !empty($isisAreaColors)) {
+            } elseif ($isisFiltered && !empty($isisAreaColors)) {
                 $out .= $this->renderIsisLegend($minX, $minY, $vw, $vh, $legendPos, $isisAreaColors, $unitPerPx);
             }
         }

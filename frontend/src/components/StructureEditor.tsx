@@ -387,8 +387,9 @@ export interface TopologyBlock {
   id: string;
   type: "topology";
   topologyId?: number | null;
-  /** Protocol filter: "manual" | protocol id */
-  protocolFilter?: "manual" | number | null;
+  /** Protocol filter: "manual" | protocol id, or a list of them to combine
+   *  several protocols on the same topology. */
+  protocolFilter?: "manual" | number | ("manual" | number)[] | null;
   /** When the filtered protocol is MSTP, the MSTI to render (string instance id). */
   mstpInstance?: string | null;
   width: number;
@@ -1451,7 +1452,8 @@ export default function StructureEditor({ blocks, onChange, t, reportType, repor
     if (block.type === "topology") {
       if (block.topologyId) {
         const pf = block.protocolFilter;
-        const pfLabel = typeof pf === "number" ? `#${pf}` : (pf ?? "");
+        const pfList = Array.isArray(pf) ? pf : pf == null ? [] : [pf];
+        const pfLabel = pfList.map((k) => (k === "manual" ? "manual" : `#${k}`)).join(", ");
         return <span className="text-slate-500 text-xs">{t("structure.topologyBlock")} — #{block.topologyId}{pfLabel ? ` (${pfLabel})` : ""}</span>;
       }
       return <span className="italic text-slate-400">{t("structure.emptyTopology")}</span>;
@@ -7234,13 +7236,38 @@ function TopologyBlockProperties({
       .catch(() => setProtocols([]));
   }, [block.topologyId]);
 
+  // Normalised selection (array form) for the multi-protocol picker. Accepts the
+  // legacy single value or null (= manual edges only).
+  const protocolFilterList = useMemo<("manual" | number)[]>(() => {
+    const pf = block.protocolFilter;
+    if (Array.isArray(pf)) return pf.length ? pf : ["manual"];
+    if (pf == null) return ["manual"];
+    return [pf];
+  }, [block.protocolFilter]);
+  const protocolFilterListSet = useMemo(
+    () => new Set<"manual" | number>(protocolFilterList),
+    [protocolFilterList],
+  );
+  // Toggle one protocol (or "manual"); collapse to a single value when only one
+  // remains so legacy consumers keep working, and never store an empty set.
+  const toggleBlockProtocol = (key: "manual" | number) => {
+    const next = protocolFilterList.includes(key)
+      ? protocolFilterList.filter((k) => k !== key)
+      : [...protocolFilterList, key];
+    updateBlock(block.id, {
+      protocolFilter: next.length === 0 ? "manual" : next.length === 1 ? next[0] : next,
+      mstpInstance: null,
+    });
+  };
+
   // List MSTP instances available on the currently selected protocol — derived
   // from the edges' style.stpInstances metadata (same as TopologyMap.tsx).
   // Only loaded when the selected protocol is of type 'mstp'.
   useEffect(() => {
-    const pf = block.protocolFilter;
-    const selected = typeof pf === "number" ? protocols.find((p) => p.id === pf) : null;
-    if (!selected || selected.type !== "mstp" || !block.topologyId) {
+    const mstpIds = new Set(
+      protocols.filter((p) => p.type === "mstp" && protocolFilterListSet.has(p.id)).map((p) => p.id),
+    );
+    if (mstpIds.size === 0 || !block.topologyId) {
       setMstpInstances([]);
       return;
     }
@@ -7250,7 +7277,7 @@ function TopologyBlockProperties({
         if (!g) return;
         const set = new Set<string>();
         for (const e of g.edges ?? []) {
-          if (e.protocolId !== pf) continue;
+          if (e.protocolId == null || !mstpIds.has(e.protocolId)) continue;
           for (const i of e.style?.stpInstances ?? []) set.add(i.instance);
         }
         setMstpInstances(Array.from(set).sort((a, b) => {
@@ -7259,14 +7286,11 @@ function TopologyBlockProperties({
         }));
       })
       .catch(() => setMstpInstances([]));
-  }, [block.topologyId, block.protocolFilter, protocols]);
+  }, [block.topologyId, protocolFilterListSet, protocols]);
 
   // Auto-pick the smallest instance when MSTP is freshly selected (mirrors
   // the live map default) and reset to null when MSTP is not active.
-  const selectedProtocol = typeof block.protocolFilter === "number"
-    ? protocols.find((p) => p.id === block.protocolFilter)
-    : null;
-  const isMstpFiltered = selectedProtocol?.type === "mstp";
+  const isMstpFiltered = protocols.some((p) => p.type === "mstp" && protocolFilterListSet.has(p.id));
   useEffect(() => {
     if (!isMstpFiltered) {
       if (block.mstpInstance != null) updateBlock(block.id, { mstpInstance: null });
@@ -7284,11 +7308,10 @@ function TopologyBlockProperties({
   // a rectangle is overlaid on top to represent the viewportFrame, if any.
   useEffect(() => {
     if (!block.topologyId) { setPreviewUrl(null); return; }
-    const pf = block.protocolFilter ?? "manual";
-    const pfStr = typeof pf === "number" ? String(pf) : pf;
+    const pfStr = protocolFilterList.map((k) => (k === "manual" ? "manual" : String(k))).join(",");
     const mi = block.mstpInstance ? `&mstpInstance=${encodeURIComponent(block.mstpInstance)}` : "";
-    setPreviewUrl(`/api/topologies/${block.topologyId}/svg?protocolFilter=${pfStr}${mi}&width=900&t=${Date.now()}`);
-  }, [block.topologyId, block.protocolFilter, block.mstpInstance]);
+    setPreviewUrl(`/api/topologies/${block.topologyId}/svg?protocolFilter=${encodeURIComponent(pfStr)}${mi}&width=900&t=${Date.now()}`);
+  }, [block.topologyId, protocolFilterList, block.mstpInstance]);
 
   const selectedTopology = topologies.find((m) => m.id === block.topologyId);
 
@@ -7333,22 +7356,30 @@ function TopologyBlockProperties({
           <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
             {t("structure.topologyProtocol")}
           </label>
-          <select
-            value={typeof block.protocolFilter === "number" ? String(block.protocolFilter) : (block.protocolFilter ?? "manual")}
-            onChange={(e) => {
-              const v = e.target.value;
-              updateBlock(block.id, {
-                protocolFilter: v === "manual" ? "manual" : Number(v),
-                mstpInstance: null,
-              });
-            }}
-            className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:border-slate-400 dark:focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400/20"
-          >
-            <option value="manual">{t("topology.filterManual")}</option>
+          {/* Multi-select: tick one or several protocols to combine them on the
+              same topology. "Manual" shows links with no protocol. */}
+          <div className="space-y-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-2">
+            <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700/50">
+              <input
+                type="checkbox"
+                className="accent-blue-600"
+                checked={protocolFilterListSet.has("manual")}
+                onChange={() => toggleBlockProtocol("manual")}
+              />
+              {t("topology.filterManual")}
+            </label>
             {protocols.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
+              <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-sm text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700/50">
+                <input
+                  type="checkbox"
+                  className="accent-blue-600"
+                  checked={protocolFilterListSet.has(p.id)}
+                  onChange={() => toggleBlockProtocol(p.id)}
+                />
+                {p.name}
+              </label>
             ))}
-          </select>
+          </div>
         </div>
       )}
 

@@ -3041,8 +3041,18 @@ class GenerateReportMessageHandler
 
                 $topology = $this->em->getRepository(\App\Entity\Topology::class)->find($topoId);
                 if (!$topology) continue;
+                // protocolFilter may be a single value ("manual" | int) or a
+                // list of them to combine several protocols; the renderer
+                // normalises both forms, so just coerce numeric strings to int.
                 $pf = $block['protocolFilter'] ?? 'manual';
-                if ($pf !== 'manual' && is_numeric($pf)) $pf = (int)$pf;
+                if (is_array($pf)) {
+                    $pf = array_map(
+                        static fn ($v) => ($v !== 'manual' && is_numeric($v)) ? (int) $v : $v,
+                        $pf
+                    );
+                } elseif ($pf !== 'manual' && is_numeric($pf)) {
+                    $pf = (int) $pf;
+                }
                 $opts = [
                     'protocolFilter' => $pf,
                     'canvasWidth' => 1200,

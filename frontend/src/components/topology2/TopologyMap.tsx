@@ -308,9 +308,20 @@ export default function TopologyMap({ topologyId }: Props) {
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<number>>(new Set());
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedAnnotationId, setSelectedAnnotationId] = useState<number | null>(null);
-  // "manual" = manual only, otherwise specific protocol id. "All" was removed because
-  // it tends to overcrowd the map; the user explicitly picks a focus.
-  const [protocolFilter, setProtocolFilter] = useState<"manual" | number>("manual");
+  // Selected protocols to display. Each entry is "manual" (manual links only) or
+  // a protocol id. Several can be combined to overlay multiple protocols on the
+  // same map. "All" was removed because it tends to overcrowd the map.
+  const [protocolFilters, setProtocolFilters] = useState<("manual" | number)[]>(["manual"]);
+  const protocolFilterSet = useMemo(() => new Set<"manual" | number>(protocolFilters), [protocolFilters]);
+  // Whether the protocol picker popover is open.
+  const [protocolMenuOpen, setProtocolMenuOpen] = useState(false);
+  // Toggle one protocol (or "manual") in/out of the selection; never empty.
+  const toggleProtocolFilter = useCallback((key: "manual" | number) => {
+    setProtocolFilters((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      return next.length === 0 ? ["manual"] : next;
+    });
+  }, []);
   // MSTP: when the active protocol is MSTP, this picks which instance drives
   // the edge colouring and which root cluster is shown. null = "all instances"
   // (edges fall back to their aggregated state, every root is shown).
@@ -368,7 +379,7 @@ export default function TopologyMap({ topologyId }: Props) {
         } else {
           initial = "manual";
         }
-        setProtocolFilter(initial);
+        setProtocolFilters([initial]);
         const initialPositions: Record<number, { x: number; y: number }> = {};
         const cols = Math.max(1, Math.ceil(Math.sqrt(g.nodes.length)));
         g.nodes.forEach((n, i) => {
@@ -931,9 +942,10 @@ export default function TopologyMap({ topologyId }: Props) {
 
   const visibleEdges = useMemo<GraphEdge[]>(() => {
     if (!data) return [];
-    if (protocolFilter === "manual") return data.edges.filter((e) => e.protocolId == null);
-    return data.edges.filter((e) => e.protocolId === protocolFilter);
-  }, [data, protocolFilter]);
+    return data.edges.filter((e) =>
+      e.protocolId == null ? protocolFilterSet.has("manual") : protocolFilterSet.has(e.protocolId),
+    );
+  }, [data, protocolFilterSet]);
 
   // edgeOffsets: signed offset index per edge so parallel edges (same pair) don't overlap visually.
   // aggregationGroups: edges grouped by explicit `aggregationGroup` (+ pair), rendered as capsules.
@@ -1015,26 +1027,34 @@ export default function TopologyMap({ topologyId }: Props) {
     return m;
   }, [data]);
 
+  // Protocols currently selected (the "manual" sentinel is excluded). With
+  // several protocols combined, the STP/MSTP/ISIS-specific behaviours below key
+  // off these sets rather than a single active protocol.
+  const selectedProtocols = useMemo(() => {
+    if (!data) return [] as GraphProtocol[];
+    return data.protocols.filter((p) => protocolFilterSet.has(p.id));
+  }, [data, protocolFilterSet]);
+  const mstpProtocolIdSet = useMemo<Set<number>>(
+    () => new Set(selectedProtocols.filter((p) => p.type === "mstp").map((p) => p.id)),
+    [selectedProtocols],
+  );
+
+  // All ISIS protocol ids (independent of the selection) — drives per-edge area
+  // colouring, which keys off each edge's own protocol.
   const isisProtocolIdSet = useMemo<Set<number>>(() => {
     if (!data) return new Set();
     return new Set(data.protocols.filter((p) => p.type === "isis").map((p) => p.id));
   }, [data]);
 
-  // MSTP support: which protocol is currently filtered + what instances it
-  // carries (derived from the edges' style.stpInstances metadata).
-  const activeProtocol = useMemo(() => {
-    if (!data || typeof protocolFilter !== "number") return null;
-    return data.protocols.find((p) => p.id === protocolFilter) ?? null;
-  }, [data, protocolFilter]);
-
-  const isMstpFiltered = activeProtocol?.type === "mstp";
-  const isStpFiltered = activeProtocol?.type === "stp" || activeProtocol?.type === "mstp";
+  const isMstpFiltered = selectedProtocols.some((p) => p.type === "mstp");
+  const isStpFiltered = selectedProtocols.some((p) => p.type === "stp" || p.type === "mstp");
+  const isisFiltered = selectedProtocols.some((p) => p.type === "isis");
 
   const mstpInstances = useMemo<string[]>(() => {
     if (!data || !isMstpFiltered) return [];
     const set = new Set<string>();
     for (const e of data.edges) {
-      if (e.protocolId !== protocolFilter) continue;
+      if (e.protocolId == null || !mstpProtocolIdSet.has(e.protocolId)) continue;
       for (const i of e.style.stpInstances ?? []) set.add(i.instance);
     }
     // Numeric-aware sort: 0,1,2,…,10 not 0,1,10,2
@@ -1043,7 +1063,7 @@ export default function TopologyMap({ topologyId }: Props) {
       const ok = !Number.isNaN(an) && !Number.isNaN(bn);
       return ok ? an - bn : a.localeCompare(b);
     });
-  }, [data, protocolFilter, isMstpFiltered]);
+  }, [data, mstpProtocolIdSet, isMstpFiltered]);
 
   // MSTP filter must always have an instance selected (no "all" — it would
   // produce zebra-coloured edges that don't reflect any real topology state).
@@ -1075,13 +1095,14 @@ export default function TopologyMap({ topologyId }: Props) {
     const out = new Set<number>();
     if (!data || !isStpFiltered) return out;
     for (const c of data.clusters) {
-      if (c.protocolId !== protocolFilter) continue;
+      if (c.protocolId == null || !protocolFilterSet.has(c.protocolId)) continue;
       if (!c.style?.stpRoot) continue;
-      if (isMstpFiltered && mstpInstance !== null && c.style.stpInstance !== mstpInstance) continue;
+      // For MSTP clusters, restrict to the picked instance's root.
+      if (mstpProtocolIdSet.has(c.protocolId) && mstpInstance !== null && c.style.stpInstance !== mstpInstance) continue;
       for (const nid of c.nodeIds) out.add(nid);
     }
     return out;
-  }, [data, isStpFiltered, isMstpFiltered, mstpInstance, protocolFilter]);
+  }, [data, isStpFiltered, mstpProtocolIdSet, mstpInstance, protocolFilterSet]);
 
   // Per-node "this is root for instance X" labels, used for the crown tooltip
   // when MSTP is filtered without an instance focus.
@@ -1089,7 +1110,7 @@ export default function TopologyMap({ topologyId }: Props) {
     const m = new Map<number, string[]>();
     if (!data || !isStpFiltered) return m;
     for (const c of data.clusters) {
-      if (c.protocolId !== protocolFilter) continue;
+      if (c.protocolId == null || !protocolFilterSet.has(c.protocolId)) continue;
       if (!c.style?.stpRoot) continue;
       const label = c.style.stpInstance ?? "";
       for (const nid of c.nodeIds) {
@@ -1099,7 +1120,7 @@ export default function TopologyMap({ topologyId }: Props) {
       }
     }
     return m;
-  }, [data, isStpFiltered, protocolFilter]);
+  }, [data, isStpFiltered, protocolFilterSet]);
 
   const renderShape = (d: NodeDesign) => {
     const w = d.width, h = d.height;
@@ -1292,21 +1313,50 @@ export default function TopologyMap({ topologyId }: Props) {
           </button>
           <div className="ml-2 flex items-center gap-1.5">
             <Layers className="h-3.5 w-3.5 text-slate-400" />
-            <select
-              value={typeof protocolFilter === "number" ? String(protocolFilter) : protocolFilter}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === "manual") setProtocolFilter("manual");
-                else setProtocolFilter(Number(v));
-              }}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-              title={t("topology.filterProtocols")}
-            >
-              <option value="manual">{t("topology.filterManual")}</option>
-              {(data?.protocols ?? []).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setProtocolMenuOpen((o) => !o)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 max-w-[200px]"
+                title={t("topology.filterProtocols")}
+              >
+                <span className="truncate">
+                  {protocolFilters
+                    .map((k) => (k === "manual" ? t("topology.filterManual") : data?.protocols.find((p) => p.id === k)?.name ?? "?"))
+                    .join(", ")}
+                </span>
+                <ChevronDown className="h-3 w-3 shrink-0 text-slate-400" />
+              </button>
+              {protocolMenuOpen && (
+                <>
+                  {/* Click-away backdrop so several protocols can be ticked
+                      without the menu closing after each toggle. */}
+                  <div className="fixed inset-0 z-10" onClick={() => setProtocolMenuOpen(false)} />
+                  <div className="absolute left-0 z-20 mt-1 min-w-[180px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1 shadow-lg">
+                  <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                    <input
+                      type="checkbox"
+                      className="accent-blue-600"
+                      checked={protocolFilterSet.has("manual")}
+                      onChange={() => toggleProtocolFilter("manual")}
+                    />
+                    {t("topology.filterManual")}
+                  </label>
+                  {(data?.protocols ?? []).map((p) => (
+                    <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                      <input
+                        type="checkbox"
+                        className="accent-blue-600"
+                        checked={protocolFilterSet.has(p.id)}
+                        onChange={() => toggleProtocolFilter(p.id)}
+                      />
+                      {p.name}
+                    </label>
+                  ))}
+                  </div>
+                </>
+              )}
+            </div>
             {isMstpFiltered && mstpInstances.length > 0 && (
               <select
                 value={mstpInstance ?? mstpInstances[0]}
@@ -1449,7 +1499,7 @@ export default function TopologyMap({ topologyId }: Props) {
               (corner, e) => handleAnnotationResizeStart(annotation.id, corner, e),
             ))}
             {(data.clusters ?? [])
-              .filter((cluster) => cluster.protocolId == null || cluster.protocolId === protocolFilter)
+              .filter((cluster) => cluster.protocolId == null || protocolFilterSet.has(cluster.protocolId))
               // STP/MSTP "root" clusters are rendered as a per-node crown badge,
               // not as a hull/zone, so skip them here.
               .filter((cluster) => !cluster.style?.stpRoot)
@@ -1582,7 +1632,7 @@ export default function TopologyMap({ topologyId }: Props) {
               //    annotate port labels with priority and add a cost label
               //  - "all" + multi-instance edge → zebra dash, one stripe per instance colour
               let effectiveEdge = edge;
-              if (isMstpFiltered && edge.protocolId === protocolFilter) {
+              if (edge.protocolId != null && mstpProtocolIdSet.has(edge.protocolId)) {
                 const instances = edge.style.stpInstances ?? [];
                 if (mstpInstance !== null) {
                   const found = instances.find((i) => i.instance === mstpInstance);
@@ -1799,7 +1849,7 @@ export default function TopologyMap({ topologyId }: Props) {
             );
           }
 
-          if (typeof protocolFilter === "number" && isisProtocolIdSet.has(protocolFilter)) {
+          if (isisFiltered) {
             const areas = Array.from(isisAreaColors.entries());
             if (areas.length === 0) return null;
             return (

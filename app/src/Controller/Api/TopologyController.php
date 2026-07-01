@@ -2562,9 +2562,19 @@ class TopologyController extends AbstractController
         }
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $topology);
 
-        $protocolFilter = $request->query->get('protocolFilter', 'manual');
-        if ($protocolFilter !== 'manual' && ctype_digit($protocolFilter)) {
-            $protocolFilter = (int)$protocolFilter;
+        // protocolFilter accepts a single value ("manual" | int) or a
+        // comma-separated list ("manual,3,5") to combine several protocols.
+        $protocolFilterRaw = (string) $request->query->get('protocolFilter', 'manual');
+        $protocolFilter = [];
+        foreach (explode(',', $protocolFilterRaw) as $pf) {
+            $pf = trim($pf);
+            if ($pf === '') continue;
+            $protocolFilter[] = ($pf !== 'manual' && ctype_digit($pf)) ? (int) $pf : $pf;
+        }
+        if (empty($protocolFilter)) {
+            $protocolFilter = 'manual';
+        } elseif (count($protocolFilter) === 1) {
+            $protocolFilter = $protocolFilter[0];
         }
         $opts = [
             'protocolFilter' => $protocolFilter,
