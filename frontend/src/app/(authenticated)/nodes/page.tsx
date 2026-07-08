@@ -271,12 +271,19 @@ export default function NodesPage() {
     if (!current || nodes.length === 0) return;
     const url = new URL("/.well-known/mercure", window.location.origin);
     url.searchParams.append("topic", `nodes/context/${current.id}`);
-    nodes.forEach((n) => {
-      url.searchParams.append("topic", `collections/node/${n.id}`);
-      url.searchParams.append("topic", `compliance/node/${n.id}`);
-      url.searchParams.append("topic", `extractions/node/${n.id}`);
-      url.searchParams.append("topic", `enforce/node/${n.id}`);
-    });
+    // Subscribe with URI templates (RFC 6570) rather than one topic per node.
+    // Mercure matches the published per-node topics (e.g. extractions/node/42)
+    // against these templates, so the subscription URL stays a fixed size no
+    // matter how many nodes are in the inventory. Emitting one topic per node
+    // made the query string grow unbounded and, past a few dozen nodes, nginx
+    // rejected the request with "414 Request-URI Too Large" — the EventSource
+    // then never connected and no real-time update ever arrived. Each handler
+    // below already filters on the payload's nodeId, so matching every node's
+    // topic is harmless.
+    url.searchParams.append("topic", "collections/node/{id}");
+    url.searchParams.append("topic", "compliance/node/{id}");
+    url.searchParams.append("topic", "extractions/node/{id}");
+    url.searchParams.append("topic", "enforce/node/{id}");
     const es = new EventSource(url);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
