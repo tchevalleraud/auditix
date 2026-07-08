@@ -22,6 +22,14 @@ class WorkerPoolCommand extends Command
 {
     private const POLL_INTERVAL = 5;
 
+    // SIGTERM value. The named constant is only defined when ext-pcntl is
+    // loaded, which it is not in the worker containers. Process::signal() only
+    // needs the integer (it delivers via ext-posix), so referencing the bare
+    // SIGTERM constant here caused a fatal "Undefined constant SIGTERM" that
+    // crashed the whole pool supervisor on every scale-down, killing in-flight
+    // extractions and leaving them stuck in a phantom (grey) state.
+    private const SIG_TERM = 15;
+
     /** @var array<int, array{process: Process, startedAt: int, busySince: ?int}> */
     private array $children = [];
     private bool $shutdown = false;
@@ -195,7 +203,7 @@ class WorkerPoolCommand extends Command
             if ($i >= $count) {
                 break;
             }
-            $entry['process']->signal(SIGTERM);
+            $entry['process']->signal(self::SIG_TERM);
             $output->writeln(sprintf('[worker-pool] sent SIGTERM to pid=%s', $entry['process']->getPid()));
             $i++;
         }
@@ -205,7 +213,7 @@ class WorkerPoolCommand extends Command
     {
         foreach ($this->children as $entry) {
             try {
-                $entry['process']->signal(SIGTERM);
+                $entry['process']->signal(self::SIG_TERM);
             } catch (\Throwable) {}
         }
         $deadline = time() + 30;
