@@ -73,6 +73,39 @@ class SystemUpdateScoreCalculator
     }
 
     /**
+     * Resolve and persist the product range(s) for a node as stored variables:
+     *  - node.productRange       → the range driving the lifecycle (worst unit,
+     *                              or simply the single node's range)
+     *  - node.stackUnitRanges    → per-unit range ids for a real stack, else null
+     *
+     * The caller is responsible for flushing.
+     */
+    public function resolveAndPersistRanges(Node $node): void
+    {
+        $context = $node->getContext();
+        $units = $this->stackResolver->resolveUnits($node, $context?->getStackConfig());
+
+        $perUnit = [];
+        $worstScore = null;
+        $worstRange = null;
+
+        foreach ($units as $unit) {
+            $range = $this->findProductRangeForModel($unit->model, $unit->version, $context);
+            if (!$unit->implicit) {
+                $perUnit[$unit->key] = $range?->getId();
+            }
+            $calc = $this->calculateForModel($unit->version, $range);
+            if ($worstScore === null || $calc['score'] < $worstScore) {
+                $worstScore = $calc['score'];
+                $worstRange = $range;
+            }
+        }
+
+        $node->setProductRange($worstRange);
+        $node->setStackUnitRanges($perUnit === [] ? null : $perUnit);
+    }
+
+    /**
      * Score a single model/version against its product range lifecycle data
      * (version currency + lifecycle dates).
      *
@@ -230,14 +263,15 @@ class SystemUpdateScoreCalculator
     }
 
     /**
-     * Find the matching ProductRange for a node using its productModel field.
-     * Matches against ProductRange name prefix or disambiguates by version.
-     * Public so controllers can also resolve the product range for display.
+     * Find the matching ProductRange for a node using its discoveredModel field.
+     * Matches against explicit modelPatterns first, then the range name prefix,
+     * disambiguating by version. Public so controllers can also resolve the
+     * product range for display.
      */
     public function findProductRange(Node $node): ?ProductRange
     {
         return $this->findProductRangeForModel(
-            $node->getProductModel(),
+            $node->getDiscoveredModel(),
             $node->getDiscoveredVersion(),
             $node->getContext(),
         );
@@ -245,42 +279,96 @@ class SystemUpdateScoreCalculator
 
     /**
      * Find the matching ProductRange for an arbitrary model string (a stack unit
-     * model, or a node's productModel). Matches against ProductRange name prefix
-     * or disambiguates by version. Public so callers can resolve per-unit ranges.
+     * model, or a node's discoveredModel). Matches against each range's explicit
+     * modelPatterns first, then falls back to the range name prefix, and
+     * disambiguates by version. Public so callers can resolve per-unit ranges.
      */
-    public function findProductRangeForModel(?string $productModel, ?string $version, ?Context $context): ?ProductRange
+    public function findProductRangeForModel(?string $discoveredModel, ?string $version, ?Context $context): ?ProductRange
     {
-        if (!$productModel) return null;
+        if (!$discoveredModel) return null;
 
         $ranges = $this->em->getRepository(ProductRange::class)->findBy(['context' => $context]);
 
-        // First try: exact name match (e.g., productModel = "5520 (Fabric Engine)")
+        // First try: exact name match (e.g., discoveredModel = "5520 (Fabric Engine)")
         foreach ($ranges as $range) {
-            if (strcasecmp($range->getName(), $productModel) === 0) {
+            if (strcasecmp($range->getName(), $discoveredModel) === 0) {
                 return $range;
             }
         }
 
-        // Second try: match productModel against the range name prefix
-        // e.g., productModel = "5520-24T" should match "5520 (Fabric Engine)"
-        // We pick the best match by checking which range name starts with the product model's base
+        // Second try: explicit regex patterns take priority over the name heuristic.
+        // e.g., a range named "ERS 4900 (ERS)" with modelPatterns ["^ERS49"] reliably
+        // matches a discovered "ERS4900GTS-PWR+" even though the names don't align.
+        $patternCandidates = [];
+        foreach ($ranges as $range) {
+            foreach ($range->getModelPatterns() ?? [] as $pattern) {
+                if ($this->modelMatchesPattern($pattern, $discoveredModel)) {
+                    $patternCandidates[] = $range;
+                    break;
+                }
+            }
+        }
+        if ($patternCandidates !== []) {
+            return $this->disambiguate($patternCandidates, $version);
+        }
+
+        // Third try: match discoveredModel against the range name prefix
+        // e.g., discoveredModel = "5520-24T" should match "5520 (Fabric Engine)"
+        // We pick the best match by checking which range name starts with the model's base
         $candidates = [];
         foreach ($ranges as $range) {
             $rangeName = $range->getName();
             // Extract hardware part from range name: "5520 (Fabric Engine)" → "5520"
             $hwPart = preg_replace('/\s*\(.*$/', '', $rangeName);
 
-            if (stripos($productModel, $hwPart) !== false) {
+            if ($hwPart !== '' && stripos($discoveredModel, $hwPart) !== false) {
                 $candidates[] = $range;
             }
         }
 
+        return $this->disambiguate($candidates, $version);
+    }
+
+    /**
+     * Test a model string against one modelPattern. Patterns fed by plugins are
+     * full delimited PCRE (e.g. "/ERS\s*4900/i"); patterns typed manually in the
+     * UI are usually bare (e.g. "ERS 4900") — those get wrapped case-insensitively.
+     * Invalid patterns never throw; they simply don't match.
+     */
+    private function modelMatchesPattern(mixed $pattern, string $subject): bool
+    {
+        if (!is_string($pattern)) {
+            return false;
+        }
+        $pattern = trim($pattern);
+        if ($pattern === '') {
+            return false;
+        }
+
+        // Already delimited: first char is a non-alphanumeric delimiter with a
+        // matching closing delimiter (optionally followed by flags).
+        $delim = $pattern[0];
+        $isDelimited = !ctype_alnum($delim) && $delim !== '\\'
+            && preg_match('/' . preg_quote($delim, '/') . '[a-zA-Z]*$/', substr($pattern, 1)) === 1;
+
+        $regex = $isDelimited ? $pattern : '~' . $pattern . '~i';
+
+        return @preg_match($regex, $subject) === 1;
+    }
+
+    /**
+     * Pick a single ProductRange from candidates that all matched a model, using
+     * the discovered version to guess the right platform when several remain
+     * (e.g., "5520 (Fabric Engine)" vs "5520 (Switch Engine)").
+     *
+     * @param ProductRange[] $candidates
+     */
+    private function disambiguate(array $candidates, ?string $version): ?ProductRange
+    {
         if (count($candidates) === 1) {
             return $candidates[0];
         }
 
-        // Multiple candidates (e.g., "5520 (Fabric Engine)" and "5520 (Switch Engine)")
-        // Try to disambiguate using the discovered version
         if (count($candidates) > 1 && $version) {
             foreach ($candidates as $range) {
                 $recommended = $range->getRecommendedVersion();

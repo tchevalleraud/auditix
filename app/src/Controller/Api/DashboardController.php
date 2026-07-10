@@ -341,7 +341,7 @@ class DashboardController extends AbstractController
 
         $conn = $em->getConnection();
         $totalRanges = (int) $conn->fetchOne('SELECT COUNT(*) FROM product_range WHERE context_id = ?', [$contextId]);
-        $nodesWithRange = (int) $conn->fetchOne('SELECT COUNT(*) FROM node WHERE context_id = ? AND product_model IS NOT NULL', [$contextId]);
+        $nodesWithRange = (int) $conn->fetchOne('SELECT COUNT(*) FROM node WHERE context_id = ? AND product_range_id IS NOT NULL', [$contextId]);
 
         $gradeRows = $conn->fetchAllAssociative(
             'SELECT system_update_score AS grade, COUNT(*) AS cnt FROM node
@@ -358,25 +358,17 @@ class DashboardController extends AbstractController
 
         $pastEol = (int) $conn->fetchOne(
             'SELECT COUNT(*) FROM node n
-             WHERE n.context_id = ? AND n.product_model IS NOT NULL
-             AND EXISTS (
-                 SELECT 1 FROM product_range pr
-                 WHERE pr.context_id = n.context_id
-                 AND pr.end_of_life_date IS NOT NULL AND pr.end_of_life_date < NOW()
-                 AND n.product_model ILIKE CONCAT(\'%\', SPLIT_PART(pr.name, \' (\', 1), \'%\')
-             )',
+             JOIN product_range pr ON pr.id = n.product_range_id
+             WHERE n.context_id = ?
+             AND pr.end_of_life_date IS NOT NULL AND pr.end_of_life_date < NOW()',
             [$contextId]
         );
 
         $pastEos = (int) $conn->fetchOne(
             'SELECT COUNT(*) FROM node n
-             WHERE n.context_id = ? AND n.product_model IS NOT NULL
-             AND EXISTS (
-                 SELECT 1 FROM product_range pr
-                 WHERE pr.context_id = n.context_id
-                 AND pr.end_of_support_date IS NOT NULL AND pr.end_of_support_date < NOW()
-                 AND n.product_model ILIKE CONCAT(\'%\', SPLIT_PART(pr.name, \' (\', 1), \'%\')
-             )',
+             JOIN product_range pr ON pr.id = n.product_range_id
+             WHERE n.context_id = ?
+             AND pr.end_of_support_date IS NOT NULL AND pr.end_of_support_date < NOW()',
             [$contextId]
         );
 

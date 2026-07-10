@@ -557,7 +557,6 @@ class ContextImporter
                 ->setHostname($row['hostname'] ?? null)
                 ->setDiscoveredModel($row['discoveredModel'] ?? null)
                 ->setDiscoveredVersion($row['discoveredVersion'] ?? null)
-                ->setProductModel($row['productModel'] ?? null)
                 ->setPolicy($row['policy'] ?? 'audit')
                 ->setContext($context);
             if ($row['manufacturer'] ?? null) {

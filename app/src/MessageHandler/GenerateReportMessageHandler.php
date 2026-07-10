@@ -1899,7 +1899,36 @@ class GenerateReportMessageHandler
                         }
                     } else {
                         $key = $colDef['entryKey'] ?? '';
-                        if ($colId === '' || $cat === '' || $key === '' || $col === '') continue;
+
+                        // Stack-unit column (empty key): fill invData with the per-node
+                        // FALLBACK value so a NON-stack device (no stack rows → no
+                        // per-unit expansion) can still show e.g. its serial/model from
+                        // another category. Stacked nodes ignore invData for these cells
+                        // — they resolve per unit from StackResolver.
+                        if ($key === '') {
+                            $fbCat = (string) ($colDef['fallbackCategory'] ?? '');
+                            $fbCol = (string) ($colDef['fallbackColLabel'] ?? '');
+                            if ($colId === '' || $fbCat === '' || $fbCol === '') continue;
+                            $fbKey = (string) ($colDef['fallbackEntryKey'] ?? '');
+
+                            $qb = $invRepo->createQueryBuilder('e')
+                                ->where('e.node IN (:nodes)')
+                                ->andWhere('e.categoryName = :cat')
+                                ->andWhere('e.colLabel = :col')
+                                ->setParameter('nodes', $nodeIds)
+                                ->setParameter('cat', $fbCat)
+                                ->setParameter('col', $fbCol);
+                            if ($fbKey !== '') {
+                                $qb->andWhere('e.entryKey = :key')->setParameter('key', $fbKey);
+                            }
+                            foreach ($qb->getQuery()->getResult() as $entry) {
+                                $nid = $entry->getNode()->getId();
+                                $invData[$nid][$colId] = $entry->getValue() ?? '';
+                            }
+                            continue;
+                        }
+
+                        if ($colId === '' || $cat === '' || $col === '') continue;
 
                         $entries = $invRepo->createQueryBuilder('e')
                             ->where('e.node IN (:nodes)')
@@ -2131,7 +2160,13 @@ class GenerateReportMessageHandler
                     // node-level cells (hostname + non-stack columns) via rowspan.
                     if ($stackExpand && !empty($stackCellIdx)) {
                         $units = $this->stackResolver->resolveUnits($node, $stackCfg);
-                        if (count($units) > 1) {
+                        // Expand as soon as there is real stack inventory — a
+                        // single-member stack still gets its per-unit value (its
+                        // serial/model), instead of falling through to a blank cell.
+                        // Only the implicit (no stack data) fallback skips expansion.
+                        $hasRealUnits = count($units) > 1
+                            || (count($units) === 1 && !$units[0]->implicit);
+                        if ($hasRealUnits) {
                             // Node-level value for each non-stack cell (0 = hostname).
                             $nodeVals = [0 => (string) $hostname];
                             foreach ($columns as $ci => $colDef) {
@@ -6546,7 +6581,7 @@ class GenerateReportMessageHandler
      * Two shapes are accepted:
      *   - {{for.node.<field>}}              → single-segment simple field
      *     (hostname, name, ip/ipAddress, manufacturer, model, version /
-     *     discoveredVersion, productModel)
+     *     discoveredVersion, discoveredModel, productRange)
      *   - {{for.node.<cat>.<key>[.<col>]}}  → inventory lookup, matching the
      *     existing {{node.<cat>.<key>[.<col>]}} convention
      * Anything else is left untouched so the standard resolver can still pick
@@ -6567,7 +6602,8 @@ class GenerateReportMessageHandler
             'model' => fn() => (string) ($node->getModel()?->getName() ?? ''),
             'version' => fn() => (string) ($node->getDiscoveredVersion() ?? ''),
             'discoveredversion' => fn() => (string) ($node->getDiscoveredVersion() ?? ''),
-            'productmodel' => fn() => (string) ($node->getProductModel() ?? ''),
+            'discoveredmodel' => fn() => (string) ($node->getDiscoveredModel() ?? ''),
+            'productrange' => fn() => (string) ($node->getProductRange()?->getName() ?? ''),
         ];
 
         // Inventory data cache for this node, keyed by lowercase
@@ -6851,7 +6887,7 @@ class GenerateReportMessageHandler
             // node contributes as many data points as it has units instead of one.
             // A non-stacked node still yields a single unit, i.e. unchanged output.
             $expandUnits = !empty($dim['expandStackUnits'])
-                && in_array($kindD, ['model', 'productModel', 'productRange'], true);
+                && in_array($kindD, ['model', 'discoveredModel', 'productRange'], true);
             $stackUnits = $expandUnits
                 ? $this->stackResolver->resolveUnits($n, $n->getContext()?->getStackConfig())
                 : null;
@@ -6860,11 +6896,11 @@ class GenerateReportMessageHandler
                     return [(string) ($n->getHostname() ?? $n->getName() ?? $n->getIpAddress() ?? '—')];
                 case 'discoveredVersion':
                     return [(string) ($n->getDiscoveredVersion() ?? '—')];
-                case 'productModel':
+                case 'discoveredModel':
                     if ($stackUnits !== null) {
                         return array_map(fn($u) => (string) ($u->model ?? '—'), $stackUnits);
                     }
-                    return [(string) ($n->getProductModel() ?? '—')];
+                    return [(string) ($n->getDiscoveredModel() ?? '—')];
                 case 'manufacturer':
                     return [(string) ($n->getManufacturer()?->getName() ?? '—')];
                 case 'model':

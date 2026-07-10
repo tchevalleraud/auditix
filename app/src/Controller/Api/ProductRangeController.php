@@ -16,6 +16,27 @@ use Symfony\Component\Routing\Attribute\Route;
 #[Route('/api/product-ranges')]
 class ProductRangeController extends AbstractController
 {
+    /**
+     * Normalise a modelPatterns payload (array of strings, or a single
+     * newline/comma-separated string) into a clean list, or null when empty.
+     */
+    private function normalizePatterns(mixed $raw): ?array
+    {
+        if (is_string($raw)) {
+            $raw = preg_split('/[\r\n,]+/', $raw) ?: [];
+        }
+        if (!is_array($raw)) {
+            return null;
+        }
+        $out = [];
+        foreach ($raw as $p) {
+            if (!is_string($p)) continue;
+            $p = trim($p);
+            if ($p !== '') $out[] = $p;
+        }
+        return $out === [] ? null : array_values(array_unique($out));
+    }
+
     private function serialize(ProductRange $pr): array
     {
         return [
@@ -28,6 +49,7 @@ class ProductRangeController extends AbstractController
             ] : null,
             'recommendedVersion' => $pr->getRecommendedVersion(),
             'currentVersion' => $pr->getCurrentVersion(),
+            'modelPatterns' => $pr->getModelPatterns() ?? [],
             'releaseDate' => $pr->getReleaseDate()?->format('c'),
             'endOfSaleDate' => $pr->getEndOfSaleDate()?->format('c'),
             'endOfSupportDate' => $pr->getEndOfSupportDate()?->format('c'),
@@ -82,6 +104,7 @@ class ProductRangeController extends AbstractController
         $range->setContext($context);
         $range->setRecommendedVersion($data['recommendedVersion'] ?? null);
         $range->setCurrentVersion($data['currentVersion'] ?? null);
+        $range->setModelPatterns($this->normalizePatterns($data['modelPatterns'] ?? null));
 
         if (!empty($data['releaseDate'])) $range->setReleaseDate(new \DateTimeImmutable($data['releaseDate']));
         if (!empty($data['endOfSaleDate'])) $range->setEndOfSaleDate(new \DateTimeImmutable($data['endOfSaleDate']));
@@ -113,6 +136,7 @@ class ProductRangeController extends AbstractController
         if (array_key_exists('description', $data)) $range->setDescription($data['description']);
         if (array_key_exists('recommendedVersion', $data)) $range->setRecommendedVersion($data['recommendedVersion'] ?: null);
         if (array_key_exists('currentVersion', $data)) $range->setCurrentVersion($data['currentVersion'] ?: null);
+        if (array_key_exists('modelPatterns', $data)) $range->setModelPatterns($this->normalizePatterns($data['modelPatterns']));
 
         if (array_key_exists('releaseDate', $data)) {
             $range->setReleaseDate($data['releaseDate'] ? new \DateTimeImmutable($data['releaseDate']) : null);

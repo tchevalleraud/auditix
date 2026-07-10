@@ -13,6 +13,7 @@ interface ProductRange {
   manufacturer: { id: number; name: string } | null;
   recommendedVersion: string | null;
   currentVersion: string | null;
+  modelPatterns: string[] | null;
   releaseDate: string | null;
   endOfSaleDate: string | null;
   endOfSupportDate: string | null;
@@ -42,6 +43,7 @@ export default function ProductRangesPage() {
   const [formManufacturerId, setFormManufacturerId] = useState("");
   const [formRecommendedVersion, setFormRecommendedVersion] = useState("");
   const [formCurrentVersion, setFormCurrentVersion] = useState("");
+  const [formModelPatterns, setFormModelPatterns] = useState("");
   const [formReleaseDate, setFormReleaseDate] = useState("");
   const [formEndOfSaleDate, setFormEndOfSaleDate] = useState("");
   const [formEndOfSupportDate, setFormEndOfSupportDate] = useState("");
@@ -68,7 +70,7 @@ export default function ProductRangesPage() {
   const openCreate = () => {
     setEditing(null); setShowForm(true);
     setFormName(""); setFormDescription(""); setFormManufacturerId("");
-    setFormRecommendedVersion(""); setFormCurrentVersion("");
+    setFormRecommendedVersion(""); setFormCurrentVersion(""); setFormModelPatterns("");
     setFormReleaseDate(""); setFormEndOfSaleDate(""); setFormEndOfSupportDate(""); setFormEndOfLifeDate("");
   };
 
@@ -77,6 +79,7 @@ export default function ProductRangesPage() {
     setFormName(r.name); setFormDescription(r.description ?? "");
     setFormManufacturerId(String(r.manufacturer?.id ?? ""));
     setFormRecommendedVersion(r.recommendedVersion ?? ""); setFormCurrentVersion(r.currentVersion ?? "");
+    setFormModelPatterns((r.modelPatterns ?? []).join("\n"));
     setFormReleaseDate(r.releaseDate ? r.releaseDate.split("T")[0] : "");
     setFormEndOfSaleDate(r.endOfSaleDate ? r.endOfSaleDate.split("T")[0] : "");
     setFormEndOfSupportDate(r.endOfSupportDate ? r.endOfSupportDate.split("T")[0] : "");
@@ -91,6 +94,7 @@ export default function ProductRangesPage() {
       name: formName, description: formDescription || null,
       manufacturerId: Number(formManufacturerId) || null,
       recommendedVersion: formRecommendedVersion || null, currentVersion: formCurrentVersion || null,
+      modelPatterns: formModelPatterns.split(/[\r\n,]+/).map((s) => s.trim()).filter(Boolean),
       releaseDate: formReleaseDate || null, endOfSaleDate: formEndOfSaleDate || null,
       endOfSupportDate: formEndOfSupportDate || null, endOfLifeDate: formEndOfLifeDate || null,
     };
@@ -234,6 +238,12 @@ export default function ProductRangesPage() {
                 <label className={labelClass}>{t("systemUpdates.currentVersion")}</label>
                 <input type="text" value={formCurrentVersion} onChange={(e) => setFormCurrentVersion(e.target.value)} disabled={editingReadOnly} className={inputClass} />
               </div>
+            </div>
+            <div>
+              <label className={labelClass}>{t("productRanges.modelPatterns")}</label>
+              <textarea value={formModelPatterns} onChange={(e) => setFormModelPatterns(e.target.value)} disabled={editingReadOnly}
+                rows={3} className={`${inputClass} font-mono`} placeholder={t("productRanges.modelPatternsPlaceholder")} />
+              <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">{t("productRanges.modelPatternsHelp")}</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>

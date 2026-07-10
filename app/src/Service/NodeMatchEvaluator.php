@@ -113,9 +113,11 @@ class NodeMatchEvaluator
             'name' => $node->getName(),
             'hostname' => $node->getHostname(),
             'ipAddress' => $node->getIpAddress(),
-            'discoveredModel' => $node->getDiscoveredModel(),
+            'discoveredModel',
+            // 'productModel' is a legacy alias kept so rules from older exports keep
+            // matching after the free-text productModel field was removed.
+            'productModel' => $node->getDiscoveredModel(),
             'discoveredVersion' => $node->getDiscoveredVersion(),
-            'productModel' => $node->getProductModel(),
             'manufacturer' => $node->getManufacturer()?->getName(),
             'model' => $node->getModel()?->getName(),
             default => null,

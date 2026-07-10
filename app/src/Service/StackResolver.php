@@ -22,7 +22,7 @@ use App\Repository\NodeInventoryEntryRepository;
  *
  * A node without stack data (feature off, config incomplete, or no matching
  * inventory rows) yields exactly one implicit unit built from the node's own
- * productModel / discoveredVersion, so every caller can treat "node" and
+ * discoveredModel / discoveredVersion, so every caller can treat "node" and
  * "stack" uniformly (a plain node is simply a one-unit stack).
  */
 class StackResolver
@@ -86,7 +86,7 @@ class StackResolver
         return new StackUnit(
             key: (string) ($node->getId() ?? '0'),
             serial: null,
-            model: $node->getProductModel() ?: $node->getDiscoveredModel(),
+            model: $node->getDiscoveredModel(),
             version: $node->getDiscoveredVersion(),
             columns: [],
             implicit: true,

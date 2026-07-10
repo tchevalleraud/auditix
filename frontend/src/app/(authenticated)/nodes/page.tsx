@@ -310,7 +310,7 @@ export default function NodesPage() {
                   hostname: data.hostname ?? n.hostname,
                   discoveredModel: data.discoveredModel ?? n.discoveredModel,
                   discoveredVersion: data.discoveredVersion ?? n.discoveredVersion,
-                  productModel: data.productModel ?? n.productModel,
+                  productRange: data.productRange ?? n.productRange,
                   tags: Array.isArray(data.tags) ? data.tags : n.tags,
                   dynamicTags: Array.isArray(data.dynamicTags) ? data.dynamicTags : n.dynamicTags,
                 }
@@ -811,7 +811,7 @@ export default function NodesPage() {
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300";
 
   const getDefaultWidth = (fieldKey: string): "auto" | "min" => {
-    const autoFields = ["hostname", "name", "ipAddress", "manufacturer", "model", "profile", "productModel", "discoveredModel", "inventory"];
+    const autoFields = ["hostname", "name", "ipAddress", "manufacturer", "model", "profile", "productRange", "discoveredModel", "inventory"];
     return autoFields.includes(fieldKey) ? "auto" : "min";
   };
   const getColumnWidthClass = (col: ColumnDef): string => {

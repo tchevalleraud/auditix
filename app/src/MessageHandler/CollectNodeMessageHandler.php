@@ -571,7 +571,7 @@ class CollectNodeMessageHandler
                 'hostname' => $node->getHostname(),
                 'discoveredModel' => $node->getDiscoveredModel(),
                 'discoveredVersion' => $node->getDiscoveredVersion(),
-                'productModel' => $node->getProductModel(),
+                'productRange' => $node->getProductRange()?->getName(),
                 'tags' => $tags,
                 'dynamicTags' => $dynamicTags,
             ]),
@@ -703,7 +703,6 @@ class CollectNodeMessageHandler
                     'hostname' => $node->setHostname($value),
                     'discoveredModel' => $node->setDiscoveredModel($value),
                     'discoveredVersion' => $node->setDiscoveredVersion($value),
-                    'productModel' => $node->setProductModel($value),
                     default => null,
                 };
             }

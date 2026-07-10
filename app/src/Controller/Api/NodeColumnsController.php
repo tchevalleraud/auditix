@@ -84,9 +84,9 @@ class NodeColumnsController extends AbstractController
                 ['key' => 'manufacturer', 'category' => 'hardware', 'sortable' => true, 'primaryOnly' => true],
                 ['key' => 'model', 'category' => 'hardware', 'sortable' => true],
                 ['key' => 'profile', 'category' => 'hardware', 'sortable' => true],
-                ['key' => 'productModel', 'category' => 'hardware', 'sortable' => true],
                 ['key' => 'discoveredModel', 'category' => 'hardware', 'sortable' => true],
                 ['key' => 'discoveredVersion', 'category' => 'hardware', 'sortable' => true],
+                ['key' => 'productRange', 'category' => 'hardware', 'sortable' => true],
 
                 // Tags
                 ['key' => 'tags', 'category' => 'tags'],

@@ -11,7 +11,7 @@ use Doctrine\ORM\EntityManagerInterface;
  * Evaluates "auto-selection" rules attached to inventory_table report blocks.
  * Rule shape (matches frontend InventoryNodeRule):
  *   {
- *     type: tag|discoveredVersion|manufacturer|model|productModel|hostname|inventory,
+ *     type: tag|discoveredVersion|manufacturer|model|discoveredModel|hostname|inventory,
  *     operator: eq|neq|contains|not_contains|starts_with|ends_with,
  *     value?: string, tagId?: int, category?: string, entryKey?: string, colLabel?: string
  *   }
@@ -113,7 +113,8 @@ class InventoryNodeRuleEvaluator
         // Plain string fields
         $fieldVal = match ($type) {
             'discoveredVersion' => $node->getDiscoveredVersion() ?? '',
-            'productModel' => $node->getProductModel() ?? '',
+            // 'productModel' is a legacy alias for discoveredModel (field removed).
+            'discoveredModel', 'productModel' => $node->getDiscoveredModel() ?? '',
             'hostname' => $node->getHostname() ?? '',
             default => '',
         };

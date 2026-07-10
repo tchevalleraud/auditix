@@ -28,7 +28,7 @@ interface NodeDetail {
   policy: string;
   discoveredModel: string | null;
   discoveredVersion: string | null;
-  productModel: string | null;
+  productRange: string | null;
   complianceEvaluating: string | null;
   enforcing: string | null;
   isReachable: boolean | null;
@@ -414,7 +414,7 @@ export default function NodeDetailPage() {
           hostname: data.hostname ?? prev.hostname,
           discoveredModel: data.discoveredModel ?? prev.discoveredModel,
           discoveredVersion: data.discoveredVersion ?? prev.discoveredVersion,
-          productModel: data.productModel ?? prev.productModel,
+          productRange: data.productRange ?? prev.productRange,
           tags: Array.isArray(data.tags) ? data.tags : prev.tags,
           dynamicTags: Array.isArray(data.dynamicTags) ? data.dynamicTags : prev.dynamicTags,
         } : prev);
@@ -1061,7 +1061,7 @@ export default function NodeDetailPage() {
                     [t("nodes.colProfile"), node.profile?.name],
                     [t("nodes.summaryVersion"), node.discoveredVersion],
                     [t("nodes.summaryDiscoveredModel"), node.discoveredModel],
-                    [t("systemUpdates.productModel"), node.productModel],
+                    [t("systemUpdates.productRange"), node.productRange],
                     [t("nodes.summaryPolicy"), node.policy === "enforce" ? t("nodes.policyEnforce") : t("nodes.policyAudit")],
                   ].filter(([, v]) => v).map(([label, value], i) => (
                     <div key={i} className="flex items-center justify-between px-5 py-2.5">

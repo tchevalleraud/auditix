@@ -72,11 +72,12 @@ class SyncLifecycleMessageHandler
 
             $this->em->flush();
 
-            // Recalculate scores for nodes with a product range
+            // Recalculate scores for nodes that carry a discovered model — only
+            // those can resolve to a product range, and the recalc re-resolves and
+            // persists node.productRange from the freshly-synced ranges.
             $nodes = $this->em->getRepository(Node::class)->findBy(['context' => $context]);
             foreach ($nodes as $node) {
-                $model = $node->getModel();
-                if ($model && $model->getProductRange()) {
+                if ($node->getDiscoveredModel()) {
                     $this->bus->dispatch(new RecalculateNodeScoreMessage($node->getId()));
                 }
             }
@@ -171,6 +172,9 @@ class SyncLifecycleMessageHandler
             }
             if ($entry->endOfLifeDate !== null) {
                 $range->setEndOfLifeDate($entry->endOfLifeDate);
+            }
+            if ($entry->modelPatterns !== []) {
+                $range->setModelPatterns($entry->modelPatterns);
             }
 
             $range->setPluginSource($pluginIdentifier);

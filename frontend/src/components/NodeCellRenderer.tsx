@@ -34,7 +34,7 @@ export interface NodeRow {
   policy: string;
   discoveredModel: string | null;
   discoveredVersion: string | null;
-  productModel: string | null;
+  productRange: string | null;
   complianceEvaluating: string | null;
   enforcing: string | null;
   isReachable: boolean | null;
@@ -113,22 +113,11 @@ function formatDate(s: string | null | undefined, locale: string): string {
 }
 
 function getUpgradeInfo(node: NodeRow, productRanges: { name: string; recommendedVersion: string | null }[]) {
-  if (!node.productModel || !node.discoveredVersion) return null;
-  const candidates = productRanges.filter((pr) => {
-    const hwName = pr.name.replace(/\s*\(.*$/, "");
-    return node.productModel!.toLowerCase().includes(hwName.toLowerCase());
-  });
-  if (candidates.length === 0) return null;
-  let match = candidates[0];
-  if (candidates.length > 1) {
-    const vMajor = parseInt(node.discoveredVersion.split(".")[0], 10);
-    for (const c of candidates) {
-      if (!c.recommendedVersion) continue;
-      const rMajor = parseInt(c.recommendedVersion.split(".")[0], 10);
-      if (Math.abs(vMajor - rMajor) <= 5) { match = c; break; }
-    }
-  }
-  if (!match.recommendedVersion) return null;
+  // The product range is now resolved & persisted server-side (node.productRange),
+  // so we look it up by name instead of re-running the model heuristic here.
+  if (!node.productRange || !node.discoveredVersion) return null;
+  const match = productRanges.find((pr) => pr.name === node.productRange);
+  if (!match || !match.recommendedVersion) return null;
   const cmp = node.discoveredVersion.localeCompare(match.recommendedVersion, undefined, { numeric: true, sensitivity: "base" });
   if (cmp >= 0) return null;
   return { needsUpgrade: true, recommended: match.recommendedVersion };
@@ -359,8 +348,8 @@ export function renderCell(node: NodeRow, ref: FieldRef, ctx: CellContext, varia
 
     case "model": return <span className={textCls}>{node.model?.name || dash()}</span>;
     case "profile": return <span className={textCls}>{node.profile?.name || dash()}</span>;
-    case "productModel": return <span className={textCls}>{node.productModel || dash()}</span>;
     case "discoveredModel": return <span className={textCls}>{node.discoveredModel || dash()}</span>;
+    case "productRange": return <span className={textCls}>{node.productRange || dash()}</span>;
 
     case "discoveredVersion": {
       if (!node.discoveredVersion) return dash();
@@ -500,7 +489,7 @@ export function getSortValue(node: NodeRow, ref: FieldRef, extras: NodeExtras | 
     case "manufacturer": return (node.manufacturer?.name || "").toLowerCase();
     case "model": return (node.model?.name || "").toLowerCase();
     case "profile": return (node.profile?.name || "").toLowerCase();
-    case "productModel": return (node.productModel || "").toLowerCase();
+    case "productRange": return (node.productRange || "").toLowerCase();
     case "discoveredModel": return (node.discoveredModel || "").toLowerCase();
     case "discoveredVersion": return (node.discoveredVersion || "").toLowerCase();
     case "policy": return node.policy || "";

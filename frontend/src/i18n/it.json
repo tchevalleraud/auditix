@@ -2303,7 +2303,7 @@
     "invRuleTypeVersion": "Versione rilevata",
     "invRuleTypeManufacturer": "Produttore",
     "invRuleTypeModel": "Modello (catalogo)",
-    "invRuleTypeProductModel": "Modello rilevato",
+    "invRuleTypeDiscoveredModel": "Modello rilevato",
     "invRuleTypeHostname": "Hostname",
     "invRuleTypeInventory": "Valore di inventario",
     "invRuleStartsWith": "inizia con",

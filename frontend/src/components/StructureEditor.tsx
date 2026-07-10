@@ -61,6 +61,7 @@ import {
   Columns2,
   GitBranch,
   Repeat,
+  Layers,
   AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
@@ -171,6 +172,14 @@ export interface InventoryTableColumn {
   sort?: "asc" | "desc";
   /** Fixed column width as a percentage of the table width (1-100). Undefined = auto. */
   width?: number;
+  /**
+   * Stack-unit column only (category = stack category, stackExpand on): fallback
+   * inventory source used for NON-stack devices (which have no stack rows), so a
+   * standalone device can still show e.g. its serial/model from another category.
+   */
+  fallbackCategory?: string;
+  fallbackEntryKey?: string;
+  fallbackColLabel?: string;
 }
 
 export interface InventoryCountColumn {
@@ -227,7 +236,7 @@ export type InventoryNodeRuleType =
   | "discoveredVersion"
   | "manufacturer"
   | "model"
-  | "productModel"
+  | "discoveredModel"
   | "hostname"
   | "inventory";
 
@@ -600,7 +609,7 @@ export type ChartDimensionKind =
   | "discoveredVersion"
   | "model"
   | "manufacturer"
-  | "productModel"
+  | "discoveredModel"
   | "productRange"
   | "tag"
   | "device";
@@ -613,7 +622,7 @@ export interface ChartDimension {
   entryKey?: string;
   colLabel?: string;
   /**
-   * For model/productModel/productRange dimensions: count each physical unit of
+   * For model/discoveredModel/productRange dimensions: count each physical unit of
    * a stacked device instead of one per node. Requires the stack feature.
    */
   expandStackUnits?: boolean;
@@ -2316,7 +2325,8 @@ function ForNodeVariablePicker({
     { id: "manufacturer", label: t("structure.forNodeFieldManufacturer") },
     { id: "model", label: t("structure.forNodeFieldModel") },
     { id: "version", label: t("structure.forNodeFieldVersion") },
-    { id: "productModel", label: t("structure.forNodeFieldProductModel") },
+    { id: "discoveredModel", label: t("structure.forNodeFieldDiscoveredModel") },
+    { id: "productRange", label: t("structure.forNodeFieldProductRange") },
   ];
 
   const insertSimple = (id: string) => {
@@ -4238,6 +4248,43 @@ function InventoryTableProperties({
   const pickerCatData = pickerCat ? structure.find((c) => c.categoryName === pickerCat) : null;
   const pickerKeyData = pickerCatData && pickerKey ? pickerCatData.entries.find((e) => e.key === pickerKey) : null;
 
+  // Stack awareness: when "Expand Stack Units" is on, a column pointing at the
+  // stack category resolves to each physical unit's own value. In that case the
+  // per-key drill-down is meaningless (each unit is its own key), so the picker
+  // lets the user pick the stack column (e.g. Serial) directly.
+  const stackCategoryName = current?.stackConfig?.categoryName ?? null;
+  const stackExpandOn = !!block.stackExpand && !!current?.stackEnabled;
+  const pickerCatIsStack = stackExpandOn && !!stackCategoryName && pickerCat === stackCategoryName;
+  const isStackUnitColumn = (col: InventoryTableColumn) =>
+    stackExpandOn && !!stackCategoryName && col.category === stackCategoryName;
+  const columnsForCategory = (catName: string, entryKey?: string): string[] => {
+    const cat = structure.find((c) => c.categoryName === catName);
+    if (!cat) return [];
+    const labels = new Set<string>();
+    cat.entries.forEach((e) => {
+      if (entryKey && e.key !== entryKey) return;
+      e.columns.forEach((c) => labels.add(c));
+    });
+    return Array.from(labels);
+  };
+  const entryKeysForCategory = (catName: string): string[] => {
+    const cat = structure.find((c) => c.categoryName === catName);
+    return cat ? cat.entries.map((e) => e.key) : [];
+  };
+  const addStackUnitColumn = (colLabel: string) => {
+    if (!stackCategoryName) return;
+    const col: InventoryTableColumn = {
+      id: uid(),
+      category: stackCategoryName,
+      entryKey: "",
+      colLabel,
+      label: `${stackCategoryName} > ${colLabel}`,
+      aggregation: "value",
+    };
+    updateBlock(block.id, { columns: [...block.columns, col] });
+    resetPicker();
+  };
+
   const rules = block.styleRules ?? [];
 
   const addRule = () => {
@@ -4307,7 +4354,7 @@ function InventoryTableProperties({
     { value: "discoveredVersion", label: t("structure.invRuleTypeVersion") },
     { value: "manufacturer", label: t("structure.invRuleTypeManufacturer") },
     { value: "model", label: t("structure.invRuleTypeModel") },
-    { value: "productModel", label: t("structure.invRuleTypeProductModel") },
+    { value: "discoveredModel", label: t("structure.invRuleTypeDiscoveredModel") },
     { value: "hostname", label: t("structure.invRuleTypeHostname") },
     { value: "inventory", label: t("structure.invRuleTypeInventory") },
   ];
@@ -4531,13 +4578,16 @@ function InventoryTableProperties({
             const isCount = col.aggregation === "count";
             const isList = col.aggregation === "list";
             const isRemark = col.aggregation === "remark";
+            const isStackCol = !isCount && !isList && !isRemark && isStackUnitColumn(col);
             const colTitle = isCount
               ? `${col.category} > ${col.colLabel} (count)`
               : isList
                 ? `${col.category} > ${col.colLabel} (list)`
                 : isRemark
                   ? col.headerLabel || col.label || t("structure.invRemarkDefaultHeader")
-                  : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
+                  : isStackCol
+                    ? `${col.category} > ${col.colLabel} (${t("structure.invStackColBadge")})`
+                    : `${col.category} > ${col.entryKey} > ${col.colLabel}`;
             return (
             <div key={col.id} className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 space-y-1.5">
               <div className="flex items-center gap-2">
@@ -4557,10 +4607,16 @@ function InventoryTableProperties({
                     {t("structure.invRemarkBadge")}
                   </span>
                 )}
+                {isStackCol && (
+                  <span className="inline-flex items-center gap-1 text-[9px] font-bold text-violet-600 dark:text-violet-400 bg-violet-100 dark:bg-violet-500/20 rounded px-1.5 py-0.5 uppercase tracking-wide shrink-0">
+                    <Layers className="h-2.5 w-2.5" />
+                    {t("structure.invStackColBadge")}
+                  </span>
+                )}
                 <span className="flex-1 text-sm text-slate-700 dark:text-slate-300 truncate" title={colTitle}>
                   {isRemark ? (
                     <>{col.headerLabel || col.label || t("structure.invRemarkDefaultHeader")}</>
-                  ) : isCount || isList ? (
+                  ) : isCount || isList || isStackCol ? (
                     <>{col.category} &gt; {col.colLabel}</>
                   ) : (
                     <>{col.category} &gt; {col.entryKey} &gt; {col.colLabel}</>
@@ -4752,6 +4808,48 @@ function InventoryTableProperties({
                   t={t}
                 />
               </div>
+              {/* Fallback source for non-stack devices (stack-unit columns only) */}
+              {isStackCol && (
+                <div className="rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-800/40 p-2 space-y-1">
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">{t("structure.invStackFallbackHint")}</p>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <select
+                      value={col.fallbackCategory ?? ""}
+                      onChange={(e) => updateColumnProp(col.id, { fallbackCategory: e.target.value || undefined, fallbackEntryKey: "", fallbackColLabel: "" })}
+                      className="shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-1 focus:outline-none focus:border-violet-400"
+                    >
+                      <option value="">{t("structure.invStackFallbackNone")}</option>
+                      {structure.map((c) => (
+                        <option key={c.categoryName} value={c.categoryName}>{c.categoryName}</option>
+                      ))}
+                    </select>
+                    {col.fallbackCategory && (
+                      <>
+                        <select
+                          value={col.fallbackEntryKey ?? ""}
+                          onChange={(e) => updateColumnProp(col.id, { fallbackEntryKey: e.target.value, fallbackColLabel: "" })}
+                          className="shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-1 focus:outline-none focus:border-violet-400"
+                        >
+                          <option value="">{t("structure.invRemarkAnyKey")}</option>
+                          {entryKeysForCategory(col.fallbackCategory).map((k) => (
+                            <option key={k} value={k}>{k}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={col.fallbackColLabel ?? ""}
+                          onChange={(e) => updateColumnProp(col.id, { fallbackColLabel: e.target.value })}
+                          className="shrink-0 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 text-[11px] text-slate-700 dark:text-slate-300 px-1.5 py-1 focus:outline-none focus:border-violet-400"
+                        >
+                          <option value="">{t("structure.invRemarkPickColumn")}</option>
+                          {columnsForCategory(col.fallbackCategory, col.fallbackEntryKey || undefined).map((cl) => (
+                            <option key={cl} value={cl}>{cl}</option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             );
           })}
@@ -4778,9 +4876,11 @@ function InventoryTableProperties({
                       ? (!pickerCountCol ? t("structure.invCountPickColumn") : t("structure.invCountConfigure"))
                       : pickerMode === "list"
                         ? (!pickerListCol ? t("structure.invListPickColumn") : t("structure.invListConfigure"))
-                        : !pickerKey
-                          ? t("structure.inventoryPickKey")
-                          : t("structure.inventoryPickValue")}
+                        : pickerCatIsStack
+                          ? t("structure.invStackColPickColumn")
+                          : !pickerKey
+                            ? t("structure.inventoryPickKey")
+                            : t("structure.inventoryPickValue")}
                 </span>
                 <button
                   onClick={resetPicker}
@@ -4996,8 +5096,10 @@ function InventoryTableProperties({
                 </div>
               )}
 
-              {/* VALUE MODE — Level 2: Entry keys */}
-              {pickerMode === "value" && pickerCat && !pickerKey && pickerCatData && (
+              {/* VALUE MODE — Level 2: Entry keys (skipped for the stack category
+                  when expansion is on: the column resolves per unit, so we go
+                  straight to picking the stack column). */}
+              {pickerMode === "value" && pickerCat && !pickerKey && pickerCatData && !pickerCatIsStack && (
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {pickerCatData.entries.map((entry) => (
                     <button
@@ -5009,6 +5111,28 @@ function InventoryTableProperties({
                       <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
                     </button>
                   ))}
+                </div>
+              )}
+
+              {/* VALUE MODE — stack category: pick the per-unit column directly */}
+              {pickerMode === "value" && pickerCatIsStack && (
+                <div className="space-y-1.5">
+                  <p className="text-[10px] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                    <Layers className="h-3 w-3" />
+                    {t("structure.invStackColumnHint")}
+                  </p>
+                  <div className="max-h-48 overflow-y-auto space-y-1">
+                    {columnsForCategory(pickerCat!).map((col) => (
+                      <button
+                        key={col}
+                        onClick={() => addStackUnitColumn(col)}
+                        className="w-full flex items-center rounded-md px-3 py-2 text-sm text-left text-slate-700 dark:text-slate-300 hover:bg-violet-100 dark:hover:bg-violet-800/30 transition-colors"
+                      >
+                        <Plus className="h-3.5 w-3.5 mr-2 text-violet-500" />
+                        {col}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -9933,7 +10057,7 @@ function ChartInventoryProperties({
             <option value="discoveredVersion">{t("structure.chartDimVersion")}</option>
             <option value="model">{t("structure.chartDimModel")}</option>
             <option value="manufacturer">{t("structure.chartDimManufacturer")}</option>
-            <option value="productModel">{t("structure.chartDimProductModel")}</option>
+            <option value="discoveredModel">{t("structure.chartDimDiscoveredModel")}</option>
             <option value="productRange">{t("structure.chartDimProductRange")}</option>
             <option value="tag">{t("structure.chartDimTag")}</option>
             <option value="inventory">{t("structure.chartDimInventory")}</option>
@@ -9975,7 +10099,7 @@ function ChartInventoryProperties({
             </>
           )}
         </div>
-        {current?.stackEnabled && kind && ["model", "productModel", "productRange"].includes(kind) && (
+        {current?.stackEnabled && kind && ["model", "discoveredModel", "productRange"].includes(kind) && (
           <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
             <input
               type="checkbox"
@@ -11773,7 +11897,7 @@ function RepeatPerNodeProperties({
     { value: "discoveredVersion", label: t("structure.invRuleTypeVersion") },
     { value: "manufacturer", label: t("structure.invRuleTypeManufacturer") },
     { value: "model", label: t("structure.invRuleTypeModel") },
-    { value: "productModel", label: t("structure.invRuleTypeProductModel") },
+    { value: "discoveredModel", label: t("structure.invRuleTypeDiscoveredModel") },
     { value: "hostname", label: t("structure.invRuleTypeHostname") },
   ];
   const ruleOperatorOptions: { value: InventoryNodeRuleOperator; label: string }[] = [
@@ -12003,7 +12127,7 @@ function RepeatPerNodeProperties({
                         {models.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}
                       </select>
                     )}
-                    {(rule.type === "discoveredVersion" || rule.type === "productModel" || rule.type === "hostname") && (
+                    {(rule.type === "discoveredVersion" || rule.type === "discoveredModel" || rule.type === "hostname") && (
                       <input
                         type="text"
                         value={rule.value ?? ""}

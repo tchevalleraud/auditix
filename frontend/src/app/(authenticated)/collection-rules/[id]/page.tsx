@@ -2039,7 +2039,6 @@ export default function CollectionRuleEditPage() {
                                 <option value="hostname">{t("collection_rules.extractNodeFieldHostname")}</option>
                                 <option value="discoveredModel">{t("collection_rules.extractNodeFieldModel")}</option>
                                 <option value="discoveredVersion">{t("collection_rules.extractNodeFieldVersion")}</option>
-                                <option value="productModel">{t("collection_rules.extractNodeFieldProductModel")}</option>
                               </select>
                               {extractNodeField && (
                                 <div>

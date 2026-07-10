@@ -48,7 +48,7 @@ const blockColors: Record<string, { border: string; bg: string; badge: string }>
 
 const fieldOptions = [
   "name", "hostname", "ipAddress", "discoveredModel", "discoveredVersion",
-  "productModel", "manufacturer", "model", "tag", "inventory",
+  "manufacturer", "model", "tag", "inventory",
 ] as const;
 
 const operators: { key: string; noValue: boolean }[] = [

@@ -46,8 +46,22 @@ class Node
     #[ORM\Column(length: 255, nullable: true)]
     private ?string $discoveredVersion = null;
 
-    #[ORM\Column(length: 255, nullable: true)]
-    private ?string $productModel = null;
+    /**
+     * Product range resolved from discoveredModel (single node / composite of a
+     * stack). Persisted so callers can read it as a stored variable instead of
+     * recomputing the match on every render/report.
+     */
+    #[ORM\ManyToOne(targetEntity: ProductRange::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'SET NULL')]
+    private ?ProductRange $productRange = null;
+
+    /**
+     * Per-unit resolved product ranges for a stacked node, keyed by stack unit
+     * key: [ "1" => productRangeId, "2" => productRangeId, … ]. Empty/null for a
+     * plain (single-unit) node.
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $stackUnitRanges = null;
 
     #[ORM\Column(length: 1, nullable: true)]
     private ?string $score = null; // A, B, C, D, E, F (combined global grade)
@@ -108,8 +122,10 @@ class Node
     public function setDiscoveredModel(?string $v): static { $this->discoveredModel = $v; return $this; }
     public function getDiscoveredVersion(): ?string { return $this->discoveredVersion; }
     public function setDiscoveredVersion(?string $v): static { $this->discoveredVersion = $v; return $this; }
-    public function getProductModel(): ?string { return $this->productModel; }
-    public function setProductModel(?string $v): static { $this->productModel = $v; return $this; }
+    public function getProductRange(): ?ProductRange { return $this->productRange; }
+    public function setProductRange(?ProductRange $v): static { $this->productRange = $v; return $this; }
+    public function getStackUnitRanges(): ?array { return $this->stackUnitRanges; }
+    public function setStackUnitRanges(?array $v): static { $this->stackUnitRanges = $v; return $this; }
     public function getScore(): ?string { return $this->score; }
     public function setScore(?string $v): static { $this->score = $v; return $this; }
     public function getComplianceScore(): ?string { return $this->complianceScore; }

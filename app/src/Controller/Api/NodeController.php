@@ -68,7 +68,7 @@ class NodeController extends AbstractController
             'policy' => $n->getPolicy(),
             'discoveredModel' => $n->getDiscoveredModel(),
             'discoveredVersion' => $n->getDiscoveredVersion(),
-            'productModel' => $n->getProductModel(),
+            'productRange' => $n->getProductRange()?->getName(),
             'complianceEvaluating' => $n->getComplianceEvaluating(),
             'enforcing' => $n->getEnforcing(),
             'isReachable' => $n->getIsReachable(),
@@ -978,7 +978,7 @@ class NodeController extends AbstractController
             'calculatedGrade' => $result['grade'],
             'details' => $result['details'],
             'productRange' => $this->serializeProductRange($productRange),
-            'productModel' => $node->getProductModel(),
+            'discoveredModel' => $node->getDiscoveredModel(),
             'discoveredVersion' => $node->getDiscoveredVersion(),
             // Per-unit lifecycle breakdown (a plain node has a single implicit unit).
             'units' => $unitsResult['units'],

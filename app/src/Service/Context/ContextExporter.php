@@ -374,7 +374,6 @@ class ContextExporter
             'hostname' => $n->getHostname(),
             'discoveredModel' => $n->getDiscoveredModel(),
             'discoveredVersion' => $n->getDiscoveredVersion(),
-            'productModel' => $n->getProductModel(),
             'policy' => $n->getPolicy(),
             'tags' => array_values(array_map(
                 fn(NodeTag $t) => $this->ref('nodeTag', $t->getId()),

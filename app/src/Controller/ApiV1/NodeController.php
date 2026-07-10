@@ -57,7 +57,7 @@ class NodeController extends AbstractController
             'policy' => $n->getPolicy(),
             'discoveredModel' => $n->getDiscoveredModel(),
             'discoveredVersion' => $n->getDiscoveredVersion(),
-            'productModel' => $n->getProductModel(),
+            'productRange' => $n->getProductRange()?->getName(),
             'complianceEvaluating' => $n->getComplianceEvaluating(),
             'isReachable' => $n->getIsReachable(),
             'lastPingAt' => $n->getLastPingAt()?->format('c'),

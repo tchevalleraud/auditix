@@ -45,6 +45,15 @@ class ProductRange
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $endOfLifeDate = null;
 
+    /**
+     * Regex patterns used to match a discovered model string against this range,
+     * in priority over the name-prefix heuristic. Fed by plugins
+     * (LifecycleData::$modelPatterns) or entered manually. e.g. ["^ERS4900", "ERS 4900"].
+     * @var string[]|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $modelPatterns = null;
+
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $pluginSource = null;
 
@@ -80,6 +89,8 @@ class ProductRange
     public function setEndOfSupportDate(?\DateTimeImmutable $v): static { $this->endOfSupportDate = $v; return $this; }
     public function getEndOfLifeDate(): ?\DateTimeImmutable { return $this->endOfLifeDate; }
     public function setEndOfLifeDate(?\DateTimeImmutable $v): static { $this->endOfLifeDate = $v; return $this; }
+    public function getModelPatterns(): ?array { return $this->modelPatterns; }
+    public function setModelPatterns(?array $v): static { $this->modelPatterns = $v ? array_values($v) : null; return $this; }
     public function getPluginSource(): ?string { return $this->pluginSource; }
     public function setPluginSource(?string $v): static { $this->pluginSource = $v; return $this; }
     public function getLastSyncedAt(): ?\DateTimeImmutable { return $this->lastSyncedAt; }
