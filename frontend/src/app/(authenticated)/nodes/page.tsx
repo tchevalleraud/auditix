@@ -106,6 +106,9 @@ export default function NodesPage() {
   // Action dropdown, bulk delete, bulk add
   const [actionMenuOpen, setActionMenuOpen] = useState<false | "actions" | "add" | "edit">(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  // Bulk-delete progress: `deleting` gates the confirm modal into a progress view.
+  const [deleting, setDeleting] = useState(false);
+  const [deleteProgress, setDeleteProgress] = useState({ done: 0, total: 0, failed: 0 });
   const [bulkAddModal, setBulkAddModal] = useState(false);
   const [bulkAddInput, setBulkAddInput] = useState("");
   const [bulkAdding, setBulkAdding] = useState(false);
@@ -731,9 +734,30 @@ export default function NodesPage() {
 
   const handleBulkDelete = async () => {
     if (selected.size === 0) return;
-    for (const id of selected) {
-      await fetch(`/api/nodes/${id}`, { method: "DELETE" });
-    }
+    const ids = Array.from(selected);
+    setDeleting(true);
+    setDeleteProgress({ done: 0, total: ids.length, failed: 0 });
+
+    // Delete with a small concurrency pool so many nodes go fast without
+    // flooding the server; progress advances as each request settles.
+    const CONCURRENCY = 5;
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < ids.length) {
+        const id = ids[cursor++];
+        let ok = false;
+        try {
+          const res = await fetch(`/api/nodes/${id}`, { method: "DELETE" });
+          ok = res.ok;
+        } catch {
+          ok = false;
+        }
+        setDeleteProgress((p) => ({ ...p, done: p.done + 1, failed: p.failed + (ok ? 0 : 1) }));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker));
+
+    setDeleting(false);
     setSelected(new Set());
     setDeleteConfirm(false);
     loadNodes();
@@ -1275,17 +1299,44 @@ export default function NodesPage() {
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-sm p-6 space-y-4">
-            <p className="text-sm text-slate-700 dark:text-slate-300">
-              {t("nodes.confirmBulkDelete", { count: String(selected.size) })}
-            </p>
-            <div className="flex items-center justify-end gap-2">
-              <button onClick={() => setDeleteConfirm(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-                {t("common.cancel")}
-              </button>
-              <button onClick={handleBulkDelete} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors">
-                {t("common.delete")}
-              </button>
-            </div>
+            {deleting ? (
+              <>
+                <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                  <Loader2 className="h-4 w-4 animate-spin text-red-500" />
+                  {t("nodes.deletingProgress", {
+                    done: String(deleteProgress.done),
+                    total: String(deleteProgress.total),
+                  })}
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+                  <div
+                    className="h-full rounded-full bg-red-500 transition-all duration-200 ease-out"
+                    style={{
+                      width: `${deleteProgress.total ? (deleteProgress.done / deleteProgress.total) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                {deleteProgress.failed > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {t("nodes.deleteFailedCount", { count: String(deleteProgress.failed) })}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-slate-700 dark:text-slate-300">
+                  {t("nodes.confirmBulkDelete", { count: String(selected.size) })}
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setDeleteConfirm(false)} className="rounded-lg px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                    {t("common.cancel")}
+                  </button>
+                  <button onClick={handleBulkDelete} className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors">
+                    {t("common.delete")}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
