@@ -559,6 +559,8 @@
     "actions": "Actions",
     "deleteSelected": "Supprimer ({count})",
     "confirmBulkDelete": "Supprimer {count} noeud(s) selectionne(s) ? Cette action est irreversible.",
+    "deletingProgress": "Suppression… {done} / {total}",
+    "deleteFailedCount": "{count} noeud(s) n'ont pas pu être supprimés.",
     "bulkAdd": "Ajout en masse",
     "bulkAddTitle": "Ajouter des noeuds en masse",
     "bulkAddLabel": "Adresses IP",
@@ -708,7 +710,8 @@
     "confirmDeleteCollections": "Supprimer {count} collecte(s) et tous leurs fichiers ?",
     "downloadCollection": "Télécharger les fichiers",
     "collectionError": "Erreur",
-    "tabAcl": "ACL"
+    "tabAcl": "ACL",
+    "tabStack": "Stack"
   },
   "admin_health": {
     "title": "Sante",
@@ -1265,7 +1268,10 @@
     "aiModelCount": "{shown} affichés sur {total}",
     "tabAcl": "ACL",
     "aclLabel": "Gestion des ACL",
-    "aclHelp": "Activer la visualisation des ACL (Access Control List) pour les nœuds de ce contexte."
+    "aclHelp": "Activer la visualisation des ACL (Access Control List) pour les nœuds de ce contexte.",
+    "tabStack": "Stack",
+    "stackLabel": "Gestion des stacks",
+    "stackHelp": "Activer la prise en charge des équipements en stack : traiter un nœud comme plusieurs unités physiques, chacune avec son propre numéro de série, modèle et cycle de vie."
   },
   "nodeColumns": {
     "title": "Colonnes nœuds",
@@ -3146,6 +3152,8 @@
     "invListFilterValue": "Valeur",
     "invSingleCountTitle": "Mode comptage",
     "invSingleCountHint": "Pour chaque colonne ajoutee, compte les occurrences de la valeur indiquee dans la categorie selectionnee.",
+    "invStackExpandTitle": "Éclater les unités de stack",
+    "invStackExpandHint": "Affiche une ligne par unité physique d'un équipement en stack. Les colonnes équipement et hors-stack sont fusionnées sur les lignes d'unités ; les colonnes de la catégorie stack montrent la valeur propre de chaque unité (ex. un numéro de série par ligne).",
     "invSingleCountEmpty": "Aucune colonne de comptage. Ajoutez-en une ci-dessous.",
     "ruleTitle": "Regles de style conditionnelles",
     "ruleAdd": "Ajouter une regle",
@@ -3358,6 +3366,7 @@
     "chartDimProductRange": "Gamme produit",
     "chartDimTag": "Tag",
     "chartDimInventory": "Champ d'inventaire",
+    "chartExpandStackUnits": "Compter chaque unité de stack",
     "chartDimCategoryPick": "Choisir une categorie...",
     "chartDimColumnPick": "Choisir une colonne...",
     "chartDimAllKeys": "Toutes les cles",
@@ -4184,6 +4193,31 @@
     "lastSync": "Dernière synchro",
     "syncNow": "Synchroniser",
     "syncing": "Synchronisation…"
+  },
+  "stack": {
+    "settings": {
+      "title": "Mappage des unités de stack",
+      "description": "Choisissez la catégorie d'inventaire qui liste les unités physiques d'un équipement en stack, puis indiquez quelles colonnes portent le numéro de série, le modèle et la version de chaque unité.",
+      "category": "Catégorie des unités",
+      "categoryHelp": "La catégorie d'inventaire dont les lignes sont les membres du stack.",
+      "selectCategory": "Sélectionner une catégorie",
+      "selectColumn": "Sélectionner une colonne",
+      "none": "Aucune",
+      "serialColumn": "Colonne numéro de série",
+      "modelColumn": "Colonne modèle",
+      "versionColumn": "Colonne version (optionnelle)",
+      "versionColumnHelp": "Utilisée pour affiner la correspondance du cycle de vie par unité."
+    },
+    "tab": {
+      "notStacked": "Ce nœud n'est pas un stack (unité unique).",
+      "unit": "Unité",
+      "serial": "Numéro de série",
+      "model": "Modèle",
+      "version": "Version",
+      "productRange": "Gamme de produit",
+      "endOfLife": "Fin de vie",
+      "lifecycle": "Cycle de vie"
+    }
   },
   "acl": {
     "tab": "ACL",

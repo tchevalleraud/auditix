@@ -18,9 +18,11 @@ use App\Entity\NodeTag;
 use App\Entity\Profile;
 use App\Entity\Cve;
 use App\Entity\CveDeviceModel;
+use App\Entity\ProductRange;
 use App\Service\InventoryNodeRuleEvaluator;
 use App\Security\Voter\ContextAccessVoter;
 use App\Service\PolicyAutoAssigner;
+use App\Service\StackResolver;
 use App\Service\SystemUpdateScoreCalculator;
 use App\Service\VulnerabilityScoreCalculator;
 use App\Message\EvaluateComplianceMessage;
@@ -301,6 +303,51 @@ class NodeController extends AbstractController
         $acls = $aclExtractor->extractForNode($node, $node->getContext()?->getAclConfig());
 
         return $this->json(['acls' => $acls]);
+    }
+
+    #[Route('/{id}/stack', methods: ['GET'])]
+    public function stack(Node $node, StackResolver $stackResolver, SystemUpdateScoreCalculator $calculator): JsonResponse
+    {
+        $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
+
+        $context = $node->getContext();
+        $units = [];
+        foreach ($stackResolver->resolveUnits($node, $context?->getStackConfig()) as $u) {
+            $range = $calculator->findProductRangeForModel($u->model, $u->version, $context);
+            $calc = $calculator->calculateForModel($u->version, $range);
+            $units[] = [
+                'key' => $u->key,
+                'serial' => $u->serial,
+                'model' => $u->model,
+                'version' => $u->version,
+                'implicit' => $u->implicit,
+                'columns' => $u->columns,
+                'grade' => $calc['grade'],
+                'score' => $calc['score'],
+                'productRange' => $this->serializeProductRange($range),
+            ];
+        }
+
+        return $this->json(['units' => $units]);
+    }
+
+    private function serializeProductRange(?ProductRange $pr): ?array
+    {
+        if (!$pr) {
+            return null;
+        }
+        return [
+            'id' => $pr->getId(),
+            'name' => $pr->getName(),
+            'recommendedVersion' => $pr->getRecommendedVersion(),
+            'currentVersion' => $pr->getCurrentVersion(),
+            'releaseDate' => $pr->getReleaseDate()?->format('c'),
+            'endOfSaleDate' => $pr->getEndOfSaleDate()?->format('c'),
+            'endOfSupportDate' => $pr->getEndOfSupportDate()?->format('c'),
+            'endOfLifeDate' => $pr->getEndOfLifeDate()?->format('c'),
+            'pluginSource' => $pr->getPluginSource(),
+            'lastSyncedAt' => $pr->getLastSyncedAt()?->format('c'),
+        ];
     }
 
     #[Route('/{id}/inventory/tags', methods: ['GET'])]
@@ -921,7 +968,8 @@ class NodeController extends AbstractController
     public function systemUpdates(Node $node, SystemUpdateScoreCalculator $calculator): JsonResponse
     {
         $this->denyAccessUnlessGranted(ContextAccessVoter::ACCESS, $node);
-        $result = $calculator->calculateForNode($node);
+        $unitsResult = $calculator->calculateForUnits($node);
+        $result = $unitsResult['composite'];
         $productRange = $calculator->findProductRange($node);
 
         return $this->json([
@@ -929,20 +977,11 @@ class NodeController extends AbstractController
             'calculatedScore' => $result['score'],
             'calculatedGrade' => $result['grade'],
             'details' => $result['details'],
-            'productRange' => $productRange ? [
-                'id' => $productRange->getId(),
-                'name' => $productRange->getName(),
-                'recommendedVersion' => $productRange->getRecommendedVersion(),
-                'currentVersion' => $productRange->getCurrentVersion(),
-                'releaseDate' => $productRange->getReleaseDate()?->format('c'),
-                'endOfSaleDate' => $productRange->getEndOfSaleDate()?->format('c'),
-                'endOfSupportDate' => $productRange->getEndOfSupportDate()?->format('c'),
-                'endOfLifeDate' => $productRange->getEndOfLifeDate()?->format('c'),
-                'pluginSource' => $productRange->getPluginSource(),
-                'lastSyncedAt' => $productRange->getLastSyncedAt()?->format('c'),
-            ] : null,
+            'productRange' => $this->serializeProductRange($productRange),
             'productModel' => $node->getProductModel(),
             'discoveredVersion' => $node->getDiscoveredVersion(),
+            // Per-unit lifecycle breakdown (a plain node has a single implicit unit).
+            'units' => $unitsResult['units'],
         ]);
     }
 

@@ -42,6 +42,8 @@ class ContextController extends AbstractController
             'lastVulnerabilitySyncStatus' => $c->getLastVulnerabilitySyncStatus(),
             'aclEnabled' => $c->isAclEnabled(),
             'aclConfig' => $c->getAclConfig(),
+            'stackEnabled' => $c->isStackEnabled(),
+            'stackConfig' => $c->getStackConfig(),
             'userCount' => $c->getUsers()->count(),
             'createdAt' => $c->getCreatedAt()->format('c'),
         ];
@@ -148,6 +150,12 @@ class ContextController extends AbstractController
         }
         if (array_key_exists('aclConfig', $data)) {
             $context->setAclConfig($data['aclConfig']);
+        }
+        if (array_key_exists('stackEnabled', $data)) {
+            $context->setStackEnabled((bool) $data['stackEnabled']);
+        }
+        if (array_key_exists('stackConfig', $data)) {
+            $context->setStackConfig($data['stackConfig']);
         }
         if (isset($data['regenerateToken']) && $data['regenerateToken']) {
             $context->generatePublicToken();

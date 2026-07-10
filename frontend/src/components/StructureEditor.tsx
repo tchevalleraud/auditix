@@ -277,6 +277,13 @@ export interface InventoryTableBlock {
   singleCategory?: string | null;
   countMode?: boolean;
   countColumns?: InventoryCountColumn[];
+  /**
+   * multi_node_columns: expand each stacked node into one row per physical unit.
+   * Node-level cells (hostname/IP) are merged (rowspan) across the unit rows, and
+   * columns referencing the stack category resolve to each unit's own value —
+   * e.g. one line per serial number. Requires the stack feature.
+   */
+  stackExpand?: boolean;
   showHeader: boolean;
   hostnameHeaderLabel?: string;
   hostnameAlign?: "left" | "center" | "right";
@@ -605,6 +612,11 @@ export interface ChartDimension {
   category?: string;
   entryKey?: string;
   colLabel?: string;
+  /**
+   * For model/productModel/productRange dimensions: count each physical unit of
+   * a stacked device instead of one per node. Requires the stack feature.
+   */
+  expandStackUnits?: boolean;
 }
 
 export type ChartDeviceSelectionMode = "all" | "tag" | "device";
@@ -4464,6 +4476,21 @@ function InventoryTableProperties({
       {/* Columns tab */}
       {tab === "columns" && (
         <div className="space-y-3">
+          {/* Stack expansion toggle (multi_node): one row per physical unit */}
+          {current?.stackEnabled && (
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-3 space-y-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!block.stackExpand}
+                  onChange={(e) => updateBlock(block.id, { stackExpand: e.target.checked })}
+                  className="rounded border-slate-300 dark:border-slate-600 text-violet-500 focus:ring-violet-400"
+                />
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{t("structure.invStackExpandTitle")}</span>
+              </label>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 pl-6">{t("structure.invStackExpandHint")}</p>
+            </div>
+          )}
           {/* Hostname column (always first, not removable) */}
           <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2 space-y-1.5">
             <div className="flex items-center gap-2">
@@ -9948,6 +9975,17 @@ function ChartInventoryProperties({
             </>
           )}
         </div>
+        {current?.stackEnabled && kind && ["model", "productModel", "productRange"].includes(kind) && (
+          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
+            <input
+              type="checkbox"
+              checked={!!cur?.expandStackUnits}
+              onChange={(e) => setDimension(key, { ...(cur ?? { kind }), expandStackUnits: e.target.checked })}
+              className="h-3.5 w-3.5 rounded border-slate-300 dark:border-slate-600"
+            />
+            {t("structure.chartExpandStackUnits")}
+          </label>
+        )}
       </div>
     );
   };

@@ -62,6 +62,19 @@ export interface AclConfig {
   aceSource?: AceSourceConfig;
 }
 
+/**
+ * Mapping describing which InventoryCategory holds the physical units of a
+ * stacked device and which column labels carry each unit's serial / model /
+ * version. The unit list itself is derived on the fly from the inventory.
+ */
+export interface StackConfig {
+  categoryId: number | null;
+  categoryName?: string | null;
+  serialColumn?: string | null;
+  modelColumn?: string | null;
+  versionColumn?: string | null;
+}
+
 export interface AppContext {
   id: number;
   name: string;
@@ -87,6 +100,8 @@ export interface AppContext {
   lastVulnerabilitySyncStatus: string | null;
   aclEnabled: boolean;
   aclConfig: AclConfig | null;
+  stackEnabled: boolean;
+  stackConfig: StackConfig | null;
 }
 
 export interface UserInfo {

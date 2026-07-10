@@ -91,6 +91,18 @@ class Context
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $aclConfig = null;
 
+    #[ORM\Column(options: ['default' => false])]
+    private bool $stackEnabled = false;
+
+    /**
+     * Mapping describing which InventoryCategory holds the physical units of a
+     * stacked device and which column labels carry each unit's serial number,
+     * model and (optionally) version. Like ACL, the unit list itself is never
+     * stored: it is derived on the fly from the inventory by StackResolver.
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $stackConfig = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -249,4 +261,8 @@ class Context
     public function setAclEnabled(bool $v): static { $this->aclEnabled = $v; return $this; }
     public function getAclConfig(): ?array { return $this->aclConfig; }
     public function setAclConfig(?array $v): static { $this->aclConfig = $v; return $this; }
+    public function isStackEnabled(): bool { return $this->stackEnabled; }
+    public function setStackEnabled(bool $v): static { $this->stackEnabled = $v; return $this; }
+    public function getStackConfig(): ?array { return $this->stackConfig; }
+    public function setStackConfig(?array $v): static { $this->stackConfig = $v; return $this; }
 }

@@ -589,6 +589,8 @@
     "actions": "Actions",
     "deleteSelected": "Delete ({count})",
     "confirmBulkDelete": "Delete {count} selected node(s)? This action cannot be undone.",
+    "deletingProgress": "Deleting… {done} / {total}",
+    "deleteFailedCount": "{count} node(s) could not be deleted.",
     "bulkAdd": "Bulk add",
     "bulkAddTitle": "Add nodes in bulk",
     "bulkAddLabel": "IP Addresses",
@@ -738,7 +740,8 @@
     "confirmDeleteCollections": "Delete {count} collection(s) and all their files?",
     "downloadCollection": "Download files",
     "collectionError": "Error",
-    "tabAcl": "ACL"
+    "tabAcl": "ACL",
+    "tabStack": "Stack"
   },
   "admin_health": {
     "title": "Health",
@@ -1294,7 +1297,10 @@
     "aiModelCount": "{shown} shown out of {total}",
     "tabAcl": "ACL",
     "aclLabel": "ACL management",
-    "aclHelp": "Enable Access Control List visualization for nodes in this context."
+    "aclHelp": "Enable Access Control List visualization for nodes in this context.",
+    "tabStack": "Stack",
+    "stackLabel": "Stack management",
+    "stackHelp": "Enable stacked-device support: treat a node as several physical units, each with its own serial, model and lifecycle."
   },
   "nodeColumns": {
     "title": "Node columns",
@@ -3179,6 +3185,8 @@
     "invListFilterValue": "Value",
     "invSingleCountTitle": "Count mode",
     "invSingleCountHint": "For each added column, counts the occurrences of the given value within the selected category.",
+    "invStackExpandTitle": "Expand stack units",
+    "invStackExpandHint": "Render one row per physical unit of a stacked device. Equipment and non-stack columns are merged across the unit rows; stack-category columns show each unit's own value (e.g. one serial per line).",
     "invSingleCountEmpty": "No count column. Add one below.",
     "ruleTitle": "Conditional style rules",
     "ruleAdd": "Add a rule",
@@ -3396,6 +3404,7 @@
     "chartDimProductRange": "Product range",
     "chartDimTag": "Tag",
     "chartDimInventory": "Inventory field",
+    "chartExpandStackUnits": "Count each stack unit",
     "chartDimCategoryPick": "Pick a category...",
     "chartDimColumnPick": "Pick a column...",
     "chartDimAllKeys": "All keys",
@@ -4222,6 +4231,31 @@
     "lastSync": "Last sync",
     "syncNow": "Sync now",
     "syncing": "Syncing…"
+  },
+  "stack": {
+    "settings": {
+      "title": "Stack unit mapping",
+      "description": "Choose the inventory category that lists the physical units of a stacked device, then map which columns carry each unit's serial number, model and version.",
+      "category": "Units category",
+      "categoryHelp": "The inventory category whose rows are the stack members.",
+      "selectCategory": "Select a category",
+      "selectColumn": "Select a column",
+      "none": "None",
+      "serialColumn": "Serial number column",
+      "modelColumn": "Model column",
+      "versionColumn": "Version column (optional)",
+      "versionColumnHelp": "Used to refine lifecycle matching per unit."
+    },
+    "tab": {
+      "notStacked": "This node is not a stack (single unit).",
+      "unit": "Unit",
+      "serial": "Serial number",
+      "model": "Model",
+      "version": "Version",
+      "productRange": "Product range",
+      "endOfLife": "End of life",
+      "lifecycle": "Lifecycle"
+    }
   },
   "acl": {
     "tab": "ACL",

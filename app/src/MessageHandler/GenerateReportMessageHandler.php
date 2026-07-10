@@ -38,6 +38,7 @@ class GenerateReportMessageHandler
         private readonly \App\Service\SvgRasterizer $svgRasterizer,
         private readonly NodeTagResolver $tagResolver,
         private readonly \App\Service\AclExtractor $aclExtractor,
+        private readonly \App\Service\StackResolver $stackResolver,
     ) {}
 
     public function __invoke(GenerateReportMessage $message): void
@@ -1678,6 +1679,16 @@ class GenerateReportMessageHandler
                 // --- multi_node_columns mode (default): existing behavior ---
                 $columns = $block['columns'] ?? [];
 
+                // Stack expansion: when enabled, a stacked node is rendered as one
+                // row per physical unit. Node-level cells (hostname + columns that
+                // don't reference the stack category) are merged (rowspan) across the
+                // unit rows; columns that reference the stack category resolve to each
+                // unit's own value (e.g. one line per serial number).
+                $stackCtx = $report->getContext();
+                $stackCfg = $stackCtx?->getStackConfig();
+                $stackExpand = !empty($block['stackExpand']) && (bool) $stackCtx?->isStackEnabled();
+                $stackCategoryName = (string) ($stackCfg['categoryName'] ?? '');
+
                 // Resolve node ids: forNode wins for TYPE_NODE; otherwise manual + auto-rules
                 if ($forNode) {
                     $nodeIds = [$forNode->getId()];
@@ -2008,6 +2019,98 @@ class GenerateReportMessageHandler
                     $pdf->SetXY($mLeft, $startY + $maxH);
                 }
 
+                // Cumulative X position of each cell (0 = hostname, 1..N = columns).
+                $cellX = [];
+                $accX = $mLeft;
+                for ($ci = 0; $ci < $colCount; $ci++) {
+                    $cellX[$ci] = $accX;
+                    $accX += $colWidthsInv[$ci];
+                }
+
+                // First style rule matching a given cell value, or null.
+                $matchCellRule = function (int $cellIdx, string $val) use ($styleRules, $colIdMap): ?array {
+                    foreach ($styleRules as $rule) {
+                        $ruleColId = $rule['columnId'] ?? '';
+                        $targetIdx = $ruleColId === '__hostname__'
+                            ? 0
+                            : (isset($colIdMap[$ruleColId]) ? $colIdMap[$ruleColId] + 1 : null);
+                        if ($targetIdx === null || $targetIdx !== $cellIdx) continue;
+                        if ($this->evaluateInventoryOperator($val, (string) ($rule['operator'] ?? 'eq'), (string) ($rule['value'] ?? ''))) {
+                            return $rule;
+                        }
+                    }
+                    return null;
+                };
+
+                // Rendered height a cell value needs at its column width.
+                $cellHeight = function (int $cellIdx, string $val, ?array $ruleStyle) use ($pdf, $colWidthsInv, $bodyFont, $invFontSize, $minLineH): float {
+                    $bold = $ruleStyle && !empty($ruleStyle['bold']);
+                    $pdf->SetFont($bodyFont, $bold ? 'B' : '', $invFontSize);
+                    $h = $pdf->getStringHeight($colWidthsInv[$cellIdx], $val) + 2;
+                    $pdf->SetFont($bodyFont, '', $invFontSize);
+                    return max($minLineH, $h);
+                };
+
+                // Draw a single cell (fill + border + styled text) at an explicit box.
+                $drawCell = function (int $cellIdx, string $cellVal, float $cx, float $cy, float $ch, ?array $ruleStyle, bool $baseFill, array $baseFillColor)
+                    use ($pdf, $colWidthsInv, $hostnameAlign, $colAligns, $hostnameVAlign, $colVAligns, $bodyFont, $invFontSize, $bodyRgb): void {
+                    $colW = $colWidthsInv[$cellIdx];
+                    $hAlign = $cellIdx === 0 ? $hostnameAlign : $colAligns[$cellIdx - 1];
+                    $vAlign = $cellIdx === 0 ? $hostnameVAlign : $colVAligns[$cellIdx - 1];
+
+                    $cellFill = $baseFill;
+                    $cellFillColor = $baseFillColor;
+                    if ($ruleStyle && !empty($ruleStyle['bgColor'])) {
+                        $cellFillColor = $this->hexToRgb($ruleStyle['bgColor']);
+                        $cellFill = true;
+                    }
+                    $pdf->SetFillColor($cellFillColor[0], $cellFillColor[1], $cellFillColor[2]);
+
+                    if ($ruleStyle && !empty($ruleStyle['textColor'])) {
+                        $tc = $this->hexToRgb($ruleStyle['textColor']);
+                        $pdf->SetTextColor($tc[0], $tc[1], $tc[2]);
+                    } else {
+                        $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                    }
+
+                    $fontStyle = '';
+                    $isBold = $ruleStyle && !empty($ruleStyle['bold']);
+                    $isItalic = $ruleStyle && !empty($ruleStyle['italic']);
+                    if ($isBold) $fontStyle .= 'B';
+                    if ($isItalic) $fontStyle .= 'I';
+                    $pdf->SetFont($bodyFont, $fontStyle, $invFontSize);
+
+                    if ($ruleStyle && !empty($ruleStyle['highlightColor'])) {
+                        $hlColor = $ruleStyle['highlightColor'];
+                        $escapedVal = htmlspecialchars($cellVal, ENT_QUOTES, 'UTF-8');
+                        $htmlStyle = "background-color:{$hlColor};";
+                        if (!empty($ruleStyle['textColor'])) $htmlStyle .= "color:{$ruleStyle['textColor']};";
+                        if ($isBold) $escapedVal = '<b>' . $escapedVal . '</b>';
+                        if ($isItalic) $escapedVal = '<i>' . $escapedVal . '</i>';
+                        $htmlContent = '<span style="' . $htmlStyle . '">' . $escapedVal . '</span>';
+                        $contentH = $pdf->getStringHeight($colW, $cellVal);
+                        $yOff = 0;
+                        if ($vAlign === 'M') $yOff = max(0, ($ch - $contentH) / 2);
+                        elseif ($vAlign === 'B') $yOff = max(0, $ch - $contentH);
+                        $pdf->Rect($cx, $cy, $colW, $ch, $cellFill ? 'DF' : 'D');
+                        $pdf->writeHTMLCell($colW, 0, $cx, $cy + $yOff, $htmlContent, 0, 0, false, true, $hAlign, true);
+                    } else {
+                        $pdf->MultiCell($colW, $ch, $cellVal, 1, $hAlign, $cellFill, 0, $cx, $cy, true, 0, false, true, $ch, $vAlign);
+                    }
+                    $pdf->SetFont($bodyFont, '', $invFontSize);
+                    $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                };
+
+                // Which cell indices carry per-unit (stack category) values.
+                $stackCellIdx = [];
+                if ($stackExpand && $stackCategoryName !== '') {
+                    foreach ($columns as $ci => $colDef) {
+                        if ((string) ($colDef['category'] ?? '') === $stackCategoryName) {
+                            $stackCellIdx[$ci + 1] = $colDef; // +1: index 0 is hostname
+                        }
+                    }
+                }
+
                 // --- Data rows ---
                 foreach ($nodeIds as $ri => $nid) {
                     $node = $nodeMap[$nid] ?? null;
@@ -2023,6 +2126,70 @@ class GenerateReportMessageHandler
                     }
 
                     $hostname = $node->getHostname() ?? $node->getName() ?? $node->getIpAddress();
+
+                    // Stack expansion: render one row per physical unit, merging the
+                    // node-level cells (hostname + non-stack columns) via rowspan.
+                    if ($stackExpand && !empty($stackCellIdx)) {
+                        $units = $this->stackResolver->resolveUnits($node, $stackCfg);
+                        if (count($units) > 1) {
+                            // Node-level value for each non-stack cell (0 = hostname).
+                            $nodeVals = [0 => (string) $hostname];
+                            foreach ($columns as $ci => $colDef) {
+                                if (isset($stackCellIdx[$ci + 1])) continue;
+                                $nodeVals[$ci + 1] = (string) ($invData[$nid][$colDef['id'] ?? ''] ?? '');
+                            }
+
+                            // Per-unit value + height for each stack cell / sub-row.
+                            $subHeights = [];
+                            $unitCellVals = [];
+                            foreach ($units as $ui => $unit) {
+                                $h = $minLineH;
+                                foreach ($stackCellIdx as $cellIdx => $colDef) {
+                                    $val = (string) ($unit->columns[$colDef['colLabel'] ?? ''] ?? '');
+                                    $unitCellVals[$ui][$cellIdx] = $val;
+                                    $h = max($h, $cellHeight($cellIdx, $val, $matchCellRule($cellIdx, $val)));
+                                }
+                                $subHeights[$ui] = $h;
+                            }
+                            $groupH = array_sum($subHeights);
+                            // Grow the group so merged node cells fit too.
+                            foreach ($nodeVals as $cellIdx => $val) {
+                                $groupH = max($groupH, $cellHeight($cellIdx, $val, $matchCellRule($cellIdx, $val)));
+                            }
+                            // Redistribute any slack onto the last sub-row so the
+                            // stack cells tile the full merged height.
+                            $slack = $groupH - array_sum($subHeights);
+                            if ($slack > 0 && !empty($subHeights)) {
+                                $subHeights[array_key_last($subHeights)] += $slack;
+                            }
+
+                            $groupStartY = $pdf->GetY();
+                            if ($groupStartY + $groupH > $pdf->getPageHeight() - $mBottom) {
+                                $pdf->AddPage();
+                                $groupStartY = $pdf->GetY();
+                            }
+
+                            // Merged node-level cells (drawn once, full group height).
+                            foreach ($nodeVals as $cellIdx => $val) {
+                                $drawCell($cellIdx, $val, $cellX[$cellIdx], $groupStartY, $groupH, $matchCellRule($cellIdx, $val), $defaultFill, $defaultFillColor);
+                            }
+                            // Per-unit stack cells.
+                            $rowY = $groupStartY;
+                            foreach ($units as $ui => $unit) {
+                                $h = $subHeights[$ui];
+                                foreach ($stackCellIdx as $cellIdx => $colDef) {
+                                    $val = $unitCellVals[$ui][$cellIdx] ?? '';
+                                    $drawCell($cellIdx, $val, $cellX[$cellIdx], $rowY, $h, $matchCellRule($cellIdx, $val), $defaultFill, $defaultFillColor);
+                                }
+                                $rowY += $h;
+                            }
+
+                            $pdf->SetXY($mLeft, $groupStartY + $groupH);
+                            $pdf->SetFont($bodyFont, '', $invFontSize);
+                            $pdf->SetTextColor($bodyRgb[0], $bodyRgb[1], $bodyRgb[2]);
+                            continue;
+                        }
+                    }
 
                     // Build all cell values for this row: index 0 = hostname, 1..N = columns
                     $allValues = [$hostname];
@@ -6679,18 +6846,39 @@ class GenerateReportMessageHandler
 
         $resolveDim = function (Node $n, array $dim) use ($invRepo): array {
             $kindD = (string) ($dim['kind'] ?? '');
+            // When a model-family dimension opts into stack expansion, resolve one
+            // value PER physical unit (each stack member's model), so a stacked
+            // node contributes as many data points as it has units instead of one.
+            // A non-stacked node still yields a single unit, i.e. unchanged output.
+            $expandUnits = !empty($dim['expandStackUnits'])
+                && in_array($kindD, ['model', 'productModel', 'productRange'], true);
+            $stackUnits = $expandUnits
+                ? $this->stackResolver->resolveUnits($n, $n->getContext()?->getStackConfig())
+                : null;
             switch ($kindD) {
                 case 'device':
                     return [(string) ($n->getHostname() ?? $n->getName() ?? $n->getIpAddress() ?? '—')];
                 case 'discoveredVersion':
                     return [(string) ($n->getDiscoveredVersion() ?? '—')];
                 case 'productModel':
+                    if ($stackUnits !== null) {
+                        return array_map(fn($u) => (string) ($u->model ?? '—'), $stackUnits);
+                    }
                     return [(string) ($n->getProductModel() ?? '—')];
                 case 'manufacturer':
                     return [(string) ($n->getManufacturer()?->getName() ?? '—')];
                 case 'model':
+                    if ($stackUnits !== null) {
+                        return array_map(fn($u) => (string) ($u->model ?? '—'), $stackUnits);
+                    }
                     return [(string) ($n->getModel()?->getName() ?? '—')];
                 case 'productRange': {
+                    if ($stackUnits !== null) {
+                        return array_map(function ($u) use ($n) {
+                            $pr = $this->lifecycleCalculator->findProductRangeForModel($u->model, $u->version, $n->getContext());
+                            return $pr ? (string) $pr->getName() : '—';
+                        }, $stackUnits);
+                    }
                     $pr = $this->lifecycleCalculator->findProductRange($n);
                     return [$pr ? (string) $pr->getName() : '—'];
                 }

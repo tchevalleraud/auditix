@@ -1076,6 +1076,18 @@ trait RendersBusinessBlocks
         foreach ($columns as $col) {
             $headers[] = (string) ($col['headerLabel'] ?? $col['label'] ?? $col['colLabel'] ?? '');
         }
+
+        // Stack expansion: one row per physical unit, node-level cells merged
+        // (vMerge) across the unit rows. Mirrors the PDF renderer.
+        $stackCtx = $ctx->report->getContext();
+        $stackCfg = $stackCtx?->getStackConfig();
+        $stackCategoryName = (string) ($stackCfg['categoryName'] ?? '');
+        if (!empty($block['stackExpand']) && (bool) $stackCtx?->isStackEnabled() && $stackCategoryName !== '') {
+            $this->addStackExpandedTable($section, $headers, $columns, $nodes, $stackCategoryName, $stackCfg, $ctx);
+
+            return;
+        }
+
         $rows = [];
         foreach ($nodes as $node) {
             $row = [(string) ($node->getHostname() ?: $node->getName() ?: $node->getIpAddress())];
@@ -1085,6 +1097,101 @@ trait RendersBusinessBlocks
             $rows[] = $row;
         }
         $this->addStripedTable($section, $headers, $rows, $ctx);
+    }
+
+    /**
+     * Inventory table with per-unit rows: each stacked node yields one row per
+     * physical unit; the equipment cell and any non-stack columns are vertically
+     * merged across the node's unit rows, while stack-category columns carry each
+     * unit's own value (e.g. one serial per line).
+     *
+     * @param list<string>         $headers
+     * @param array<int,array>     $columns
+     * @param list<\App\Entity\Node> $nodes
+     */
+    private function addStackExpandedTable(Section $section, array $headers, array $columns, array $nodes, string $stackCategoryName, ?array $stackCfg, WordRenderContext $ctx): void
+    {
+        $ts = $ctx->styles['table'] ?? [];
+        $borderColor = \App\Service\Report\WordStyleHelper::color($ts['borderColor'] ?? '#e2e8f0') ?? 'E2E8F0';
+        $headerBg = \App\Service\Report\WordStyleHelper::color($ts['headerBg'] ?? '#1e293b') ?? '1E293B';
+        $headerColor = \App\Service\Report\WordStyleHelper::color($ts['headerColor'] ?? '#ffffff') ?? 'FFFFFF';
+        $altBg = \App\Service\Report\WordStyleHelper::color($ts['alternateBg'] ?? '#f8fafc');
+        $alternate = (bool) ($ts['alternateRows'] ?? true);
+        $fontSize = ((int) ($ts['fontSize'] ?? 0)) > 0 ? (int) $ts['fontSize'] : $ctx->bodySize();
+        $bodyColor = $ctx->bodyColor() ?? '1E293B';
+        $bodyFont = $ctx->bodyFont();
+
+        $colCount = count($headers);
+        $contentMm = 210 - (float) ($ctx->styles['margins']['left'] ?? 20) - (float) ($ctx->styles['margins']['right'] ?? 20);
+
+        $table = $section->addTable([
+            'borderSize' => 4,
+            'borderColor' => $borderColor,
+            'cellMarginTop' => \App\Service\Report\WordStyleHelper::mmToTwip(0.3),
+            'cellMarginBottom' => \App\Service\Report\WordStyleHelper::mmToTwip(0.3),
+            'cellMarginLeft' => \App\Service\Report\WordStyleHelper::mmToTwip(1),
+            'cellMarginRight' => \App\Service\Report\WordStyleHelper::mmToTwip(1),
+            'unit' => 'dxa',
+            'width' => \App\Service\Report\WordStyleHelper::mmToTwip($contentMm),
+            'layout' => 'fixed',
+        ]);
+        $colWidths = $this->columnTwips($colCount, null, $contentMm);
+
+        // Header row.
+        $hrow = $table->addRow(null, ['tblHeader' => true]);
+        foreach ($headers as $i => $h) {
+            $cell = $hrow->addCell($colWidths[$i] ?? null, ['bgColor' => $headerBg, 'valign' => 'center']);
+            $cell->addText(\App\Service\Report\WordStyleHelper::xmlSafe($h), ['name' => $bodyFont, 'size' => $fontSize, 'bold' => true, 'color' => $headerColor], ['spaceBefore' => 0, 'spaceAfter' => 0]);
+        }
+
+        // Which columns carry per-unit (stack) values (1-based, 0 = equipment).
+        $stackColIdx = [];
+        foreach ($columns as $ci => $col) {
+            if ((string) ($col['category'] ?? '') === $stackCategoryName) {
+                $stackColIdx[$ci + 1] = $col;
+            }
+        }
+
+        $rowParity = 0;
+        foreach ($nodes as $node) {
+            $bg = ($alternate && $rowParity % 2 === 1 && $altBg) ? $altBg : null;
+            $rowParity++;
+            $hostname = (string) ($node->getHostname() ?: $node->getName() ?: $node->getIpAddress());
+
+            $units = $this->stackResolver->resolveUnits($node, $stackCfg);
+            // Node-level values for non-stack cells (index 0 = equipment).
+            $nodeVals = [0 => $hostname];
+            foreach ($columns as $ci => $col) {
+                if (isset($stackColIdx[$ci + 1])) continue;
+                $nodeVals[$ci + 1] = $this->inventoryCellValue($node, $col);
+            }
+
+            $unitCount = max(1, count($units));
+            foreach (array_values($units) as $ui => $unit) {
+                $row = $table->addRow();
+                for ($ci = 0; $ci < $colCount; $ci++) {
+                    $isStack = isset($stackColIdx[$ci]);
+                    $cellStyle = ['valign' => 'center'];
+                    if ($bg) $cellStyle['bgColor'] = $bg;
+
+                    if (!$isStack) {
+                        // Merge node-level cells across the unit rows.
+                        if ($unitCount > 1) {
+                            $cellStyle['vMerge'] = $ui === 0 ? 'restart' : 'continue';
+                        }
+                        $cell = $row->addCell($colWidths[$ci] ?? null, $cellStyle);
+                        if ($ui === 0) {
+                            $cell->addText(\App\Service\Report\WordStyleHelper::xmlSafe((string) ($nodeVals[$ci] ?? '')), ['name' => $bodyFont, 'size' => $fontSize, 'color' => $bodyColor], ['spaceBefore' => 0, 'spaceAfter' => 0]);
+                        }
+                    } else {
+                        $col = $stackColIdx[$ci];
+                        $val = (string) ($unit->columns[$col['colLabel'] ?? ''] ?? '');
+                        $cell = $row->addCell($colWidths[$ci] ?? null, $cellStyle);
+                        $cell->addText(\App\Service\Report\WordStyleHelper::xmlSafe($val), ['name' => $bodyFont, 'size' => $fontSize, 'color' => $bodyColor], ['spaceBefore' => 0, 'spaceAfter' => 0]);
+                    }
+                }
+            }
+        }
     }
 
     /**

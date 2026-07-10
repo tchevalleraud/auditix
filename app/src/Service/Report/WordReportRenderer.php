@@ -52,6 +52,7 @@ class WordReportRenderer
         private readonly SvgRasterizer $svgRasterizer,
         private readonly NodeTagResolver $tagResolver,
         private readonly AclExtractor $aclExtractor,
+        private readonly \App\Service\StackResolver $stackResolver,
         private readonly LoggerInterface $logger,
     ) {}
 

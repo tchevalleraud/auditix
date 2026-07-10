@@ -2,6 +2,7 @@
 
 namespace App\Service;
 
+use App\Entity\Context;
 use App\Entity\Node;
 use App\Entity\ProductRange;
 use Doctrine\ORM\EntityManagerInterface;
@@ -10,18 +11,75 @@ class SystemUpdateScoreCalculator
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
+        private readonly StackResolver $stackResolver,
     ) {}
 
     /**
-     * Calculate the system-update sub-score for a node based on its
-     * product range lifecycle data (version currency + lifecycle dates).
+     * Calculate the system-update sub-score for a node. When the context has the
+     * stack feature enabled, the node is made of several physical units and its
+     * score is the WORST of its units — a stack is only as healthy as its most
+     * at-risk member. A plain node resolves to a single (implicit) unit, so the
+     * result is identical to the pre-stack behaviour.
      *
      * @return array{grade: string, score: float, details: array}
      */
     public function calculateForNode(Node $node): array
     {
-        $productRange = $this->findProductRange($node);
+        return $this->calculateForUnits($node)['composite'];
+    }
 
+    /**
+     * Per-unit lifecycle analysis for a (possibly stacked) node.
+     *
+     * @return array{units: array<int, array>, composite: array{grade: string, score: float, details: array}}
+     */
+    public function calculateForUnits(Node $node): array
+    {
+        $context = $node->getContext();
+        $units = $this->stackResolver->resolveUnits($node, $context?->getStackConfig());
+
+        $unitResults = [];
+        foreach ($units as $unit) {
+            $range = $this->findProductRangeForModel($unit->model, $unit->version, $context);
+            $calc = $this->calculateForModel($unit->version, $range);
+            $unitResults[] = [
+                'key' => $unit->key,
+                'serial' => $unit->serial,
+                'model' => $unit->model,
+                'version' => $unit->version,
+                'implicit' => $unit->implicit,
+                'productRange' => $range?->getName(),
+                'grade' => $calc['grade'],
+                'score' => $calc['score'],
+                'details' => $calc['details'],
+            ];
+        }
+
+        // Composite = worst (lowest-scoring) unit.
+        $composite = null;
+        foreach ($unitResults as $r) {
+            if ($composite === null || $r['score'] < $composite['score']) {
+                $composite = ['grade' => $r['grade'], 'score' => $r['score'], 'details' => $r['details']];
+            }
+        }
+        if ($composite === null) {
+            $composite = ['grade' => 'A', 'score' => 100.0, 'details' => ['reason' => 'no_units']];
+        }
+        if (count($unitResults) > 1) {
+            $composite['details']['stackUnitCount'] = count($unitResults);
+        }
+
+        return ['units' => $unitResults, 'composite' => $composite];
+    }
+
+    /**
+     * Score a single model/version against its product range lifecycle data
+     * (version currency + lifecycle dates).
+     *
+     * @return array{grade: string, score: float, details: array}
+     */
+    public function calculateForModel(?string $version, ?ProductRange $productRange): array
+    {
         if (!$productRange) {
             return [
                 'grade' => 'A',
@@ -51,7 +109,7 @@ class SystemUpdateScoreCalculator
 
         // 1. Version currency (0-40 points)
         $versionPoints = $this->scoreVersion(
-            $node->getDiscoveredVersion(),
+            $version,
             $productRange->getRecommendedVersion(),
         );
         $details['version'] = $versionPoints;
@@ -81,7 +139,7 @@ class SystemUpdateScoreCalculator
 
         $details['productRange'] = $productRange->getName();
         $details['recommendedVersion'] = $productRange->getRecommendedVersion();
-        $details['discoveredVersion'] = $node->getDiscoveredVersion();
+        $details['discoveredVersion'] = $version;
 
         return [
             'grade' => $grade,
@@ -178,10 +236,22 @@ class SystemUpdateScoreCalculator
      */
     public function findProductRange(Node $node): ?ProductRange
     {
-        $productModel = $node->getProductModel();
+        return $this->findProductRangeForModel(
+            $node->getProductModel(),
+            $node->getDiscoveredVersion(),
+            $node->getContext(),
+        );
+    }
+
+    /**
+     * Find the matching ProductRange for an arbitrary model string (a stack unit
+     * model, or a node's productModel). Matches against ProductRange name prefix
+     * or disambiguates by version. Public so callers can resolve per-unit ranges.
+     */
+    public function findProductRangeForModel(?string $productModel, ?string $version, ?Context $context): ?ProductRange
+    {
         if (!$productModel) return null;
 
-        $context = $node->getContext();
         $ranges = $this->em->getRepository(ProductRange::class)->findBy(['context' => $context]);
 
         // First try: exact name match (e.g., productModel = "5520 (Fabric Engine)")
@@ -211,8 +281,7 @@ class SystemUpdateScoreCalculator
 
         // Multiple candidates (e.g., "5520 (Fabric Engine)" and "5520 (Switch Engine)")
         // Try to disambiguate using the discovered version
-        if (count($candidates) > 1 && $node->getDiscoveredVersion()) {
-            $version = $node->getDiscoveredVersion();
+        if (count($candidates) > 1 && $version) {
             foreach ($candidates as $range) {
                 $recommended = $range->getRecommendedVersion();
                 if (!$recommended) continue;

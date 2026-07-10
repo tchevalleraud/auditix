@@ -15,6 +15,7 @@ import {
   HeartPulse,
   History,
   KeyRound,
+  Layers,
   ListTodo,
   Mail,
   Package,
@@ -69,6 +70,10 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     if (current?.aclEnabled) {
       // Surface the ACL mapping config right after General when the feature is on.
       contextItems.splice(1, 0, { label: t("settings.tabAcl"), tab: "acl", icon: ShieldCheck });
+    }
+    if (current?.stackEnabled) {
+      // Surface the stack mapping config alongside ACL when the feature is on.
+      contextItems.splice(current?.aclEnabled ? 2 : 1, 0, { label: t("settings.tabStack"), tab: "stack", icon: Layers });
     }
     if (current && !current.isDefault) {
       contextItems.push({ label: t("settings.tabMembers"), tab: "members", icon: Users });
