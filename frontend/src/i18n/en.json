@@ -739,6 +739,7 @@
     "confirmDeleteCollection": "Delete this collection and all its files?",
     "confirmDeleteCollections": "Delete {count} collection(s) and all their files?",
     "downloadCollection": "Download files",
+    "exportCsv": "Export to CSV",
     "collectionError": "Error",
     "tabAcl": "ACL",
     "tabStack": "Stack"

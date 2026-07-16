@@ -520,6 +520,7 @@
     "confirmDeleteCollection": "Eliminare questa raccolta e tutti i suoi file?",
     "confirmDeleteCollections": "Eliminare {count} raccolta/e e tutti i loro file?",
     "downloadCollection": "Scarica file",
+    "exportCsv": "Esporta in CSV",
     "deleteSelected": "Elimina ({count})",
     "collectionError": "Errore",
     "tabAcl": "ACL"

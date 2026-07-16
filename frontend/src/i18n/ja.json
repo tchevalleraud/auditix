@@ -520,6 +520,7 @@
     "confirmDeleteCollection": "この収集とすべてのファイルを削除しますか？",
     "confirmDeleteCollections": "{count}件の収集とすべてのファイルを削除しますか？",
     "downloadCollection": "ファイルをダウンロード",
+    "exportCsv": "CSVでエクスポート",
     "deleteSelected": "削除 ({count})",
     "collectionError": "エラー",
     "tabAcl": "ACL"

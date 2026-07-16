@@ -121,6 +121,32 @@ interface InventoryCatData {
   rows: { key: string; values: Record<string, string> }[];
 }
 
+function csvCell(value: string): string {
+  const v = value ?? "";
+  return /[",\r\n;]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+function downloadInventoryCsv(cat: InventoryCatData, keyHeader: string, fileBase: string) {
+  const visibleColumns = cat.columns.filter((c) => c.visible !== false);
+  const header = [keyHeader, ...visibleColumns.map((c) => c.label)];
+  const lines = [header.map(csvCell).join(",")];
+  cat.rows.forEach((row) => {
+    const cells = [row.key, ...visibleColumns.map((c) => row.values[c.colKey] ?? "")];
+    lines.push(cells.map(csvCell).join(","));
+  });
+  // Prepend a UTF-8 BOM so Excel opens accented characters correctly.
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${safe(fileBase)}-${safe(cat.categoryName)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 interface InventoryTagItem {
   id: number;
   name: string;
@@ -1386,6 +1412,20 @@ export default function NodeDetailPage() {
                   <span className="text-xs text-slate-500 dark:text-slate-400">
                     #{current.collection.id} — {new Date(date).toLocaleString(locale)}
                   </span>
+                );
+              })()}
+              {(() => {
+                const cat = inventoryData[selectedInventoryCat] ?? inventoryData[0];
+                if (!cat || cat.rows.length === 0) return null;
+                return (
+                  <button
+                    onClick={() => downloadInventoryCsv(cat, cat.keyLabel || t("nodes.inventoryKey"), node?.name || node?.ipAddress || `node-${nodeId}`)}
+                    className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    title={t("nodes.exportCsv")}
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {t("nodes.exportCsv")}
+                  </button>
                 );
               })()}
             </div>
